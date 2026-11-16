@@ -1,6 +1,6 @@
 {
   "name": "lumio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Lumio \u2013 a lightweight, open-source photo browser and digital asset manager",
   "type": "module",
   "scripts": {

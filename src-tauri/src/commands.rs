@@ -41,22 +41,32 @@ pub fn add_root(state: S, path: String) -> R<i64> {
     let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.clone());
     let id = {
         let conn = state.conn.lock();
-        // Refuse folders already covered by (or covering) an existing root.
+        // A folder inside an existing library folder is already covered.
+        let mut children = vec![];
         for r in db::list_roots(&conn).map_err(e)? {
             let rp = PathBuf::from(&r.path);
             if p.starts_with(&rp) {
                 return Err(format!("This folder is already in your library (inside \"{}\").", r.name));
             }
             if rp.starts_with(&p) {
-                return Err(format!("\"{}\" is already in your library. Remove it first to add its parent folder.", r.name));
+                children.push(r.id);
             }
         }
-        conn.execute(
+        // Adding a parent of existing library folders absorbs them: their photos (with
+        // thumbnails, ratings and everything else) move under the new folder.
+        let tx = conn.unchecked_transaction().map_err(e)?;
+        tx.execute(
             "INSERT INTO roots (path, name, added_at) VALUES (?1, ?2, ?3)",
             params![path, name, chrono::Utc::now().timestamp_millis()],
         )
         .map_err(e)?;
-        conn.last_insert_rowid()
+        let id = tx.last_insert_rowid();
+        for c in &children {
+            tx.execute("UPDATE photos SET root_id = ?1 WHERE root_id = ?2", params![id, c]).map_err(e)?;
+            tx.execute("DELETE FROM roots WHERE id = ?1", [c]).map_err(e)?;
+        }
+        tx.commit().map_err(e)?;
+        id
     };
     state.queue(Job::ScanRoot(id));
     watcher::restart(&state);
