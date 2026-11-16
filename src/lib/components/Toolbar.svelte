@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { Search, LayoutGrid, Map as MapIcon, Info, Sparkles, Settings, ArrowDownWideNarrow, ArrowUpNarrowWide, FolderTree, X } from "@lucide/svelte";
+  import { Search, LayoutGrid, List, GalleryHorizontal, Map as MapIcon, Info, Sparkles, Settings, ArrowDownWideNarrow, ArrowUpNarrowWide, FolderTree, X } from "@lucide/svelte";
   import Stars from "./Stars.svelte";
-  import { app, loadPhotos, saveSetting } from "../store.svelte";
+  import { app, loadPhotos, saveSetting, setView, scopeTitle } from "../store.svelte";
   import { LABELS } from "../api";
 
   let searchTimer: ReturnType<typeof setTimeout>;
@@ -10,19 +10,14 @@
     searchTimer = setTimeout(loadPhotos, 250);
   }
 
-  const title = $derived.by(() => {
-    const s = app.scope;
-    switch (s.kind) {
-      case "all": return "All photos";
-      case "recent": return "Recently added";
-      case "rated": return "Rated";
-      case "geotagged": return "On the map";
-      case "nogps": return "Without location";
-      case "folder": return s.name;
-      case "ai": return s.title;
-    }
-  });
+  const title = $derived(scopeTitle(app.scope));
 </script>
+
+<svelte:window onkeydown={(e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || app.dialog || app.viewerIndex >= 0 || app.showSettings || (e.target as HTMLElement)?.closest("input, textarea, select")) return;
+  const v = ({ g: "grid", l: "list", f: "filmstrip", m: "map" } as const)[e.key.toLowerCase() as "g"];
+  if (v) setView(v);
+}} />
 
 <header class="toolbar" data-tauri-drag-region>
   <div class="title" data-tauri-drag-region>
@@ -64,8 +59,10 @@
   <div class="right">
     <input class="size" type="range" min="100" max="360" step="10" bind:value={app.thumbSize} onchange={() => saveSetting("thumb_size", String(app.thumbSize))} title="Thumbnail size" />
     <div class="seg">
-      <button class:active={app.view === "grid"} onclick={() => (app.view = "grid")} title="Grid"><LayoutGrid size={15} /></button>
-      <button class:active={app.view === "map"} onclick={() => (app.view = "map")} title="Map"><MapIcon size={15} /></button>
+      <button class:active={app.view === "grid"} onclick={() => setView("grid")} title="Grid (G)"><LayoutGrid size={15} /></button>
+      <button class:active={app.view === "list"} onclick={() => setView("list")} title="List (L)"><List size={15} /></button>
+      <button class:active={app.view === "filmstrip"} onclick={() => setView("filmstrip")} title="Large photo with filmstrip (F)"><GalleryHorizontal size={15} /></button>
+      <button class:active={app.view === "map"} onclick={() => setView("map")} title="Map (M)"><MapIcon size={15} /></button>
     </div>
     <div class="seg">
       <button class:active={app.panel === "info"} onclick={() => (app.panel = app.panel === "info" ? null : "info")} title="Info & metadata"><Info size={15} /></button>

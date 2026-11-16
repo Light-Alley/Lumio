@@ -52,7 +52,7 @@
   }
   function show(ids: number[], title: string) {
     setScope({ kind: "ai", ids, title: title || "AI results" });
-    app.view = "grid";
+    if (app.view === "map") app.view = "grid";
   }
   async function scroll() {
     await tick();

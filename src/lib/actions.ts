@@ -4,7 +4,7 @@ import { api, errText, fileManagerName, isMac, LABELS, type PhotoLite, type Fold
 import type { MenuItem } from "./menu.svelte";
 import {
   app, selection, selectedIds, rate, setLabel, moveOrCopy, trashPhotos, renamePhoto, openViewer,
-  errorToast, toast, newFolder, renameFolder, trashFolder, removeRoot, rootOnline,
+  errorToast, toast, newFolder, renameFolder, trashFolder, removeRoot, rootOnline, newTab,
 } from "./store.svelte";
 
 export function photoMenu(p: PhotoLite): MenuItem[] {
@@ -88,6 +88,8 @@ async function chooseApp(ids: number[]) {
 
 export function folderMenu(n: FolderNode, root?: Root): MenuItem[] {
   const items: MenuItem[] = [
+    { label: "Open in new tab", action: () => newTab({ kind: "folder", path: n.path, name: n.name, rootId: root?.id }) },
+    { separator: true },
     { label: "New folder…", disabled: !n.online, action: () => newFolder(n.path) },
     { label: "Rename…", disabled: !n.online || !!root, action: () => renameFolder(n.path, n.name) },
     { label: `Show in ${fileManagerName}`, disabled: !n.online, action: () => api.reveal(undefined, n.path).catch(errorToast) },

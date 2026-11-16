@@ -14,6 +14,21 @@ export type Scope =
   | { kind: "ai"; ids: number[]; title: string };
 
 export type Bg = "black" | "grey" | "lightgrey" | "white";
+export type View = "grid" | "list" | "filmstrip" | "map";
+
+/** What each tab remembers: where it's looking and how. */
+export interface Tab {
+  id: number;
+  scope: Scope;
+  recursive: boolean;
+  text: string;
+  minRating: number;
+  label: string;
+  sort: string;
+  desc: boolean;
+  view: View;
+  focusId: number | null;
+}
 
 interface Toast { id: number; text: string; kind: "info" | "error" | "success"; action?: { label: string; run: () => void } }
 interface DialogState {
@@ -39,7 +54,7 @@ export const app = $state({
   sort: "date",
   desc: true,
   thumbSize: 180,
-  view: "grid" as "grid" | "map",
+  view: "grid" as View,
   panel: "info" as "info" | "ai" | null,
   viewerIndex: -1,
   viewerBg: "black" as Bg,
@@ -55,6 +70,10 @@ export const app = $state({
   settings: {} as Record<string, string>,
   exiftool: true,
   dragIds: [] as number[],
+  /** Photos being dragged. Their rows stay mounted (hidden) if a tab switches mid-drag, because removing a drag's source element cancels the drag. */
+  dragPhotos: [] as PhotoLite[],
+  tabs: [] as Tab[],
+  activeTab: 0,
 });
 
 export const selection = new SvelteSet<number>();
@@ -128,6 +147,7 @@ export async function loadPhotos() {
     });
     if (seq !== loadSeq) return;
     app.photos = photos;
+    saveTabs();
     const ids = new Set(photos.map((p) => p.id));
     for (const id of [...selection]) if (!ids.has(id)) selection.delete(id);
     if (app.viewerIndex >= photos.length) app.viewerIndex = photos.length - 1;
@@ -146,6 +166,7 @@ export function setScope(s: Scope) {
   if (s.kind === "ai") app.sort = "relevance";
   else if (app.sort === "relevance") app.sort = "date";
   loadPhotos();
+  saveTabs();
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -167,6 +188,7 @@ export async function init() {
     if (st.theme) app.theme = st.theme as "dark" | "light";
     if (st.thumb_size) app.thumbSize = Number(st.thumb_size) || 180;
     if (st.recursive) app.recursive = st.recursive === "1";
+    restoreTabs(st);
     const status = await api.appStatus();
     app.exiftool = status.exiftool;
     await loadRoots();
@@ -435,4 +457,161 @@ export function clickSelect(id: number, e: MouseEvent | KeyboardEvent) {
 export function openViewer(id: number) {
   const i = app.photos.findIndex((p) => p.id === id);
   if (i >= 0) app.viewerIndex = i;
+}
+
+export function scopeTitle(s: Scope): string {
+  switch (s.kind) {
+    case "all": return "All photos";
+    case "recent": return "Recently added";
+    case "rated": return "Rated";
+    case "geotagged": return "On the map";
+    case "nogps": return "Without location";
+    case "folder": return s.name;
+    case "ai": return s.title;
+  }
+}
+
+export function setView(v: View) {
+  app.view = v;
+  saveTabs();
+}
+
+// ------------------------------------------------------------------ tabs
+
+let tabSeq = 1;
+
+function snapshot(id: number): Tab {
+  return {
+    id,
+    scope: $state.snapshot(app.scope) as Scope,
+    recursive: app.recursive,
+    text: app.text,
+    minRating: app.minRating,
+    label: app.label,
+    sort: app.sort,
+    desc: app.desc,
+    view: app.view,
+    focusId: app.focusId,
+  };
+}
+
+function applyTab(t: Tab) {
+  app.scope = t.scope;
+  app.recursive = t.recursive;
+  app.text = t.text;
+  app.minRating = t.minRating;
+  app.label = t.label;
+  app.sort = t.sort;
+  app.desc = t.desc;
+  app.view = t.view;
+  selection.clear();
+  app.focusId = t.focusId;
+  app.anchorId = t.focusId;
+  if (t.focusId !== null) selection.add(t.focusId);
+}
+
+function restoreTabs(st: Record<string, string>) {
+  try {
+    const tabs = JSON.parse(st.tabs || "[]") as Tab[];
+    if (Array.isArray(tabs) && tabs.length) {
+      tabs.forEach((t) => (t.id = tabSeq++));
+      app.tabs = tabs;
+      app.activeTab = Math.min(Math.max(0, Number(st.active_tab) || 0), tabs.length - 1);
+      applyTab(tabs[app.activeTab]);
+      return;
+    }
+  } catch {
+    /* fall through to a fresh tab */
+  }
+  app.tabs = [snapshot(tabSeq++)];
+  app.activeTab = 0;
+}
+
+let saveTabsTimer: ReturnType<typeof setTimeout> | undefined;
+/** Remember the current tab's state and persist all tabs (debounced). */
+export function saveTabs() {
+  const cur = app.tabs[app.activeTab];
+  if (cur) app.tabs[app.activeTab] = snapshot(cur.id);
+  clearTimeout(saveTabsTimer);
+  saveTabsTimer = setTimeout(() => {
+    // AI result tabs can hold thousands of ids; store them, they're only numbers.
+    saveSetting("tabs", JSON.stringify($state.snapshot(app.tabs)));
+    saveSetting("active_tab", String(app.activeTab));
+  }, 400);
+}
+
+export function switchTab(i: number) {
+  if (i === app.activeTab || i < 0 || i >= app.tabs.length) return;
+  saveTabs();
+  app.activeTab = i;
+  applyTab(app.tabs[i]);
+  app.viewerIndex = -1;
+  loadPhotos();
+  saveTabs();
+}
+
+/** Open a new tab. Without a scope it starts as a copy of the current tab. */
+export function newTab(scope?: Scope) {
+  saveTabs();
+  const t = snapshot(tabSeq++);
+  if (scope) {
+    t.scope = scope;
+    t.text = "";
+    t.minRating = 0;
+    t.label = "";
+    t.focusId = null;
+    if (t.view === "map") t.view = "grid";
+  }
+  app.tabs.splice(app.activeTab + 1, 0, t);
+  app.activeTab += 1;
+  applyTab(t);
+  loadPhotos();
+  saveTabs();
+}
+
+export function closeTab(i: number) {
+  if (app.tabs.length <= 1) return;
+  saveTabs();
+  const wasActive = i === app.activeTab;
+  app.tabs.splice(i, 1);
+  if (i < app.activeTab) app.activeTab--;
+  else if (wasActive) {
+    app.activeTab = Math.min(i, app.tabs.length - 1);
+    applyTab(app.tabs[app.activeTab]);
+    app.viewerIndex = -1;
+    loadPhotos();
+  }
+  saveTabs();
+}
+
+export function moveTab(from: number, to: number) {
+  if (from === to) return;
+  saveTabs();
+  const activeId = app.tabs[app.activeTab].id;
+  const [t] = app.tabs.splice(from, 1);
+  app.tabs.splice(to, 0, t);
+  app.activeTab = app.tabs.findIndex((x) => x.id === activeId);
+  saveTabs();
+}
+
+/** Photos dropped onto a tab go into that tab's folder. */
+export async function dropOnTab(i: number, e: DragEvent) {
+  const t = app.tabs[i];
+  if (!t || t.scope.kind !== "folder") {
+    toast("Open a folder in that tab to drop photos into it.", "info");
+    return;
+  }
+  await dropOnFolder(t.scope.path, e);
+}
+
+/** Photos dropped onto the photo area go into the folder this tab is showing. */
+export async function dropOnView(e: DragEvent) {
+  if (app.scope.kind !== "folder") return;
+  const data = e.dataTransfer?.getData("application/x-lumio-photos");
+  if (!data) return;
+  const ids = JSON.parse(data) as number[];
+  const dest = app.scope.path;
+  // Dropping photos back where they already are does nothing.
+  if (ids.every((id) => app.photos.some((p) => p.id === id && p.folder === dest))) return;
+  await moveOrCopy(ids, e.altKey, dest);
 }
