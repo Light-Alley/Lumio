@@ -6,7 +6,7 @@
 //
 // macOS / Linux get the portable Perl version (Perl ships with both).
 // Windows gets the stand-alone exiftool.exe build.
-import { mkdirSync, existsSync, rmSync, writeFileSync, readdirSync, renameSync, cpSync, chmodSync } from "node:fs";
+import { mkdirSync, existsSync, rmSync, writeFileSync, readdirSync, cpSync, chmodSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -53,7 +53,7 @@ if (windows) {
   if (!dir) throw new Error("Unexpected ExifTool zip layout");
   const exe = readdirSync(dir).find((f) => f.toLowerCase().endsWith(".exe"));
   cpSync(join(dir, "exiftool_files"), join(dest, "exiftool_files"), { recursive: true });
-  renameSync(join(dir, exe), join(dest, "exiftool.exe"));
+  cpSync(join(dir, exe), join(dest, "exiftool.exe"));
 } else {
   const name = `Image-ExifTool-${version}.tar.gz`;
   const tgz = await get([`https://exiftool.org/${name}`, `https://sourceforge.net/projects/exiftool/files/${name}/download`]);
