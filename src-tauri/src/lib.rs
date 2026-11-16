@@ -7,6 +7,7 @@ mod exiftool;
 mod fileops;
 mod indexer;
 mod metadata;
+mod notify;
 mod openwith;
 mod state;
 mod thumbs;

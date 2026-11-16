@@ -2617,6 +2617,8 @@ dependencies = [
  "log",
  "notify",
  "notify-debouncer-full",
+ "objc2",
+ "objc2-foundation",
  "parking_lot",
  "rayon",
  "reqwest 0.12.28",

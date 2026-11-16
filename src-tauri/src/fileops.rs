@@ -99,6 +99,7 @@ pub fn move_photos(state: &AppState, ids: &[i64], dest: &Path, copy: bool) -> Re
     let mut rep = OpReport { outside_library: dest_root.is_none(), ..Default::default() };
     let total = photos.len();
     let mut new_files = vec![];
+    let mut touched: Vec<PathBuf> = vec![dest.to_path_buf()];
     for (i, p) in photos.iter().enumerate() {
         let _ = state.app.emit(
             "op-progress",
@@ -130,6 +131,9 @@ pub fn move_photos(state: &AppState, ids: &[i64], dest: &Path, copy: bool) -> Re
         match res {
             Ok(dst) => {
                 rep.done += 1;
+                if let Some(par) = src.parent() {
+                    touched.push(par.to_path_buf());
+                }
                 let conn = state.conn.lock();
                 if copy {
                     new_files.push(dst);
@@ -149,6 +153,7 @@ pub fn move_photos(state: &AppState, ids: &[i64], dest: &Path, copy: bool) -> Re
     if !new_files.is_empty() && dest_root.is_some() {
         state.queue(Job::Files(new_files));
     }
+    crate::notify::changed(&touched);
     let _ = state.app.emit("op-progress", serde_json::json!({ "done": total, "total": total, "message": "" }));
     Ok(rep)
 }
@@ -191,6 +196,7 @@ pub fn move_folder(state: &AppState, src: &Path, dest_parent: &Path, copy: bool)
             }
         }
     }
+    crate::notify::changed([src.parent().unwrap_or(src), dest_parent, dst.as_path()]);
     if dest_root.is_some() {
         state.queue(Job::ScanFolder(dst));
     }
@@ -213,6 +219,7 @@ pub fn create_folder(parent: &Path, name: &str) -> Result<PathBuf> {
         bail!("A folder named \"{}\" already exists here.", name.trim());
     }
     std::fs::create_dir(&p)?;
+    crate::notify::changed([parent, p.as_path()]);
     Ok(p)
 }
 
@@ -223,6 +230,7 @@ pub fn rename_folder(state: &AppState, path: &Path, new_name: &str) -> Result<Pa
         bail!("A folder named \"{}\" already exists.", new_name.trim());
     }
     std::fs::rename(path, &dst)?;
+    crate::notify::changed([dst.as_path()]);
     let conn = state.conn.lock();
     db::rewrite_prefix(&conn, &path.to_string_lossy(), &dst.to_string_lossy(), None)?;
     // If it was a library root, update that too.
@@ -252,6 +260,7 @@ pub fn rename_photo(state: &AppState, id: i64, new_name: &str) -> Result<()> {
     if let Some(s) = side {
         let _ = std::fs::rename(&s, sidecar_target(&dst, &s));
     }
+    crate::notify::changed([dst.as_path()]);
     conn.execute(
         "UPDATE photos SET path = ?1, filename = ?2, ext = ?3 WHERE id = ?4",
         params![dst.to_string_lossy(), name, indexer::ext_of(&dst), id],
@@ -279,6 +288,7 @@ pub fn delete_photos(state: &AppState, ids: &[i64], permanent: bool) -> Result<O
         match r {
             Ok(()) => {
                 rep.done += 1;
+                crate::notify::changed([src.as_path()]);
                 indexer::delete_ids(state, &state.conn.lock(), &[p.id])?;
             }
             Err(e) => rep.failed.push((p.filename.clone(), e.to_string())),
@@ -295,6 +305,9 @@ pub fn delete_folder(state: &AppState, path: &Path, permanent: bool) -> Result<(
         std::fs::remove_dir_all(path)?;
     } else {
         trash::delete(path).map_err(|e| anyhow!("could not move to Trash: {e}"))?;
+    }
+    if let Some(parent) = path.parent() {
+        crate::notify::changed([parent]);
     }
     state.queue(Job::Removed(vec![path.to_path_buf()]));
     Ok(())
