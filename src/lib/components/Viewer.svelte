@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { X, ChevronLeft, ChevronRight, Info, CloudOff, ZoomIn, Maximize } from "@lucide/svelte";
+  import { X, ChevronLeft, ChevronRight, Info, CloudOff, ZoomIn, Maximize, RotateCcw, RotateCw, FlipHorizontal2 } from "@lucide/svelte";
   import Stars from "./Stars.svelte";
-  import { app, rate, setLabel, saveSetting, rootOnline, selectOnly, trashPhotos, type Bg } from "../store.svelte";
+  import { app, rate, setLabel, saveSetting, rootOnline, selectOnly, trashPhotos, rotatePhotos, type Bg } from "../store.svelte";
   import { photoUrl, thumbUrl, formatDate, labelColor, LABELS } from "../api";
   import { showMenu } from "../menu.svelte";
   import { photoMenu } from "../actions";
@@ -62,6 +62,9 @@
         setBg(BGS[(i + 1) % BGS.length].id);
         break;
       }
+      case "[": case "]":
+        if (meta && p) { e.preventDefault(); rotatePhotos([p.id], e.key === "]" ? "right" : "left"); }
+        break;
       case "Delete": case "Backspace":
         if (e.key === "Delete" || meta) { e.preventDefault(); if (p) trashPhotos([p.id]); }
         break;
@@ -118,6 +121,9 @@
         {/each}
       </div>
       <div class="tools">
+        <button class="ghost icon" onclick={() => rotatePhotos([p.id], "left")} disabled={offline} title="Rotate left (⌘[ / Ctrl+[)" aria-label="Rotate left"><RotateCcw size={17} /></button>
+        <button class="ghost icon" onclick={() => rotatePhotos([p.id], "right")} disabled={offline} title="Rotate right (⌘] / Ctrl+])" aria-label="Rotate right"><RotateCw size={17} /></button>
+        <button class="ghost icon" onclick={() => rotatePhotos([p.id], "flip_h")} disabled={offline} title="Flip horizontal" aria-label="Flip horizontal"><FlipHorizontal2 size={17} /></button>
         <button class="ghost icon" onclick={() => toggleZoom()} title="Zoom (Z)">{#if zoom === 1}<ZoomIn size={17} />{:else}<Maximize size={17} />{/if}</button>
         <button class="ghost icon" class:active={showInfo} onclick={() => (showInfo = !showInfo)} title="Info (I)"><Info size={17} /></button>
         <button class="ghost icon" onclick={close} title="Close (Esc)"><X size={18} /></button>

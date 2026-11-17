@@ -326,6 +326,130 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
     .await
 }
 
+/// Turn or flip photos without re-encoding them: only the orientation tag changes.
+/// RAW files keep it in their XMP sidecar (unless RAW files are set to be written directly).
+#[tauri::command]
+pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpReport> {
+    let st = state.inner().clone();
+    blocking(move || {
+        let photos = db::get_photos(&st.conn.lock(), &ids)?;
+        let raw_mode = db::get_setting(&st.conn.lock(), "raw_write_mode").unwrap_or_else(|| "sidecar".into());
+        let mut rep = OpReport::default();
+        for p in photos {
+            let path = PathBuf::from(&p.path);
+            let Some(new_o) = metadata::transform_orientation(p.orientation, &op) else {
+                anyhow::bail!("unknown rotation {op}");
+            };
+            let res: anyhow::Result<()> = (|| {
+                if !path.exists() {
+                    anyhow::bail!("the file is not available (is its drive connected?)");
+                }
+                if matches!(p.ext.as_str(), "gif" | "bmp") {
+                    anyhow::bail!("{} files can't store a rotation", p.ext.to_uppercase());
+                }
+                if metadata::is_raw(&p.ext) && raw_mode != "embed" {
+                    let side = indexer::find_sidecar(&path).unwrap_or_else(|| path.with_extension("xmp"));
+                    if !side.exists() {
+                        st.et.create_sidecar(&path, &side)?;
+                    }
+                    st.et.write(&side, &[format!("-XMP-tiff:Orientation#={new_o}")])?;
+                } else {
+                    st.et.write(&path, &[format!("-Orientation#={new_o}")])?;
+                }
+                Ok(())
+            })();
+            match res {
+                Ok(()) => {
+                    rep.done += 1;
+                    let (size, mtime) = std::fs::metadata(&path)
+                        .map(|m| {
+                            let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
+                            (m.len() as i64, t)
+                        })
+                        .unwrap_or((p.size, p.mtime));
+                    let swap = metadata::is_quarter_turn(p.orientation) != metadata::is_quarter_turn(Some(new_o));
+                    {
+                        let conn = st.conn.lock();
+                        conn.execute(
+                            "UPDATE photos SET orientation = ?2, size = ?3, mtime = ?4,
+                                width = CASE WHEN ?5 THEN height ELSE width END,
+                                height = CASE WHEN ?5 THEN width ELSE height END WHERE id = ?1",
+                            params![p.id, new_o, size, mtime, swap],
+                        )?;
+                    }
+                    let dest = crate::thumbs::thumb_path(&st.thumbs_dir, p.id);
+                    match crate::thumbs::make_thumb(&path, &p.ext, Some(new_o), &dest, &st.et, &st.tmp_dir) {
+                        Ok(_) => {
+                            st.conn.lock().execute("UPDATE photos SET thumb = 1 WHERE id = ?1", [p.id])?;
+                        }
+                        Err(err) => log::warn!("thumbnail after rotate failed for {}: {err:#}", path.display()),
+                    }
+                }
+                Err(err) => {
+                    log::warn!("rotate failed for {}: {err:#}", path.display());
+                    rep.failed.push((p.filename.clone(), err.to_string()))
+                }
+            }
+        }
+        Ok(rep)
+    })
+    .await
+}
+
+// ------------------------------------------------------------ stacks (groups of shots)
+
+/// Group photos into one stack. Stacks the photos already belong to are merged in.
+/// `top` is the cover photo shown when the stack is closed.
+#[tauri::command]
+pub fn stack_photos(state: S, ids: Vec<i64>, top: Option<i64>) -> R<i64> {
+    if ids.len() < 2 {
+        return Err("Select at least two photos to group".into());
+    }
+    let conn = state.conn.lock();
+    let tx = conn.unchecked_transaction().map_err(e)?;
+    let list = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+    let sid: i64 = tx
+        .query_row("SELECT coalesce(MAX(stack_id), 0) + 1 FROM photos", [], |r| r.get(0))
+        .map_err(e)?;
+    let top = top.filter(|t| ids.contains(t)).unwrap_or(ids[0]);
+    tx.execute(
+        &format!(
+            "UPDATE photos SET stack_id = ?1, stack_top = (id = ?2) WHERE id IN ({list})
+             OR stack_id IN (SELECT stack_id FROM photos WHERE id IN ({list}) AND stack_id IS NOT NULL)"
+        ),
+        params![sid, top],
+    )
+    .map_err(e)?;
+    tx.commit().map_err(e)?;
+    Ok(sid)
+}
+
+/// Take photos out of their stacks. With `whole`, every stack they belong to is dissolved.
+#[tauri::command]
+pub fn unstack_photos(state: S, ids: Vec<i64>, whole: bool) -> R<()> {
+    let conn = state.conn.lock();
+    let list = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+    let sql = if whole {
+        format!("UPDATE photos SET stack_id = NULL, stack_top = 0 WHERE stack_id IN (SELECT stack_id FROM photos WHERE id IN ({list}) AND stack_id IS NOT NULL)")
+    } else {
+        format!("UPDATE photos SET stack_id = NULL, stack_top = 0 WHERE id IN ({list})")
+    };
+    conn.execute(&sql, []).map_err(e)?;
+    db::tidy_stacks(&conn).map_err(e)
+}
+
+/// Make this photo the cover of its stack.
+#[tauri::command]
+pub fn set_stack_top(state: S, id: i64) -> R<()> {
+    let conn = state.conn.lock();
+    conn.execute(
+        "UPDATE photos SET stack_top = (id = ?1) WHERE stack_id = (SELECT stack_id FROM photos WHERE id = ?1)",
+        [id],
+    )
+    .map_err(e)?;
+    Ok(())
+}
+
 fn nz(s: &str) -> Option<String> {
     let t = s.trim();
     if t.is_empty() { None } else { Some(t.to_string()) }

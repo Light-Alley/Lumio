@@ -193,6 +193,13 @@ pub fn merge_sidecar(base: &mut Meta, side: &Meta) {
         ($($f:ident),*) => { $( if side.$f.is_some() { base.$f = side.$f.clone(); } )* };
     }
     take!(label, title, caption, creator, copyright, lat, lon, alt, place);
+    // A sidecar orientation (e.g. a RAW rotated in Lumio or Lightroom) wins.
+    if let Some(o) = side.orientation.filter(|o| (1..=8).contains(o)) {
+        if is_quarter_turn(base.orientation) != is_quarter_turn(Some(o)) {
+            std::mem::swap(&mut base.width, &mut base.height);
+        }
+        base.orientation = Some(o);
+    }
     if !side.keywords.is_empty() {
         base.keywords = side.keywords.clone();
     }
@@ -317,4 +324,81 @@ fn truncate(s: &str, max_bytes: usize) -> String {
         end -= 1;
     }
     s[..end].to_string()
+}
+
+/// Orientations 5–8 show the stored image turned by a quarter, so width and height swap.
+pub fn is_quarter_turn(o: Option<i64>) -> bool {
+    matches!(o, Some(5..=8))
+}
+
+/// EXIF orientation as "mirror horizontally first (f), then turn clockwise r quarters".
+fn orientation_parts(o: i64) -> (u8, u8) {
+    match o {
+        2 => (1, 0),
+        3 => (0, 2),
+        4 => (1, 2),
+        5 => (1, 3),
+        6 => (0, 1),
+        7 => (1, 1),
+        8 => (0, 3),
+        _ => (0, 0),
+    }
+}
+
+fn orientation_from_parts(f: u8, r: u8) -> i64 {
+    match (f % 2, r % 4) {
+        (0, 0) => 1,
+        (1, 0) => 2,
+        (0, 2) => 3,
+        (1, 2) => 4,
+        (1, 3) => 5,
+        (0, 1) => 6,
+        (1, 1) => 7,
+        (0, 3) => 8,
+        _ => 1,
+    }
+}
+
+/// Apply a turn or flip, as seen on screen, to an EXIF orientation.
+/// `op` is "right" (90° clockwise), "left", "flip_h" (mirror left–right) or "flip_v".
+pub fn transform_orientation(current: Option<i64>, op: &str) -> Option<i64> {
+    let (f, r) = orientation_parts(current.unwrap_or(1));
+    let (f, r) = match op {
+        "right" => (f, (r + 1) % 4),
+        "left" => (f, (r + 3) % 4),
+        "flip_h" => (1 - f, (4 - r) % 4),
+        "flip_v" => (1 - f, (6 - r) % 4),
+        _ => return None,
+    };
+    Some(orientation_from_parts(f, r))
+}
+
+#[cfg(test)]
+mod orientation_tests {
+    use super::*;
+
+    #[test]
+    fn four_turns_come_back() {
+        for o in 1..=8 {
+            let mut x = Some(o);
+            for _ in 0..4 {
+                x = transform_orientation(x, "right");
+            }
+            assert_eq!(x, Some(o));
+            assert_eq!(transform_orientation(transform_orientation(Some(o), "left"), "right"), Some(o));
+            assert_eq!(transform_orientation(transform_orientation(Some(o), "flip_h"), "flip_h"), Some(o));
+            assert_eq!(transform_orientation(transform_orientation(Some(o), "flip_v"), "flip_v"), Some(o));
+        }
+    }
+
+    #[test]
+    fn known_values() {
+        assert_eq!(transform_orientation(Some(1), "right"), Some(6));
+        assert_eq!(transform_orientation(Some(1), "left"), Some(8));
+        assert_eq!(transform_orientation(Some(6), "right"), Some(3));
+        assert_eq!(transform_orientation(Some(1), "flip_h"), Some(2));
+        assert_eq!(transform_orientation(Some(1), "flip_v"), Some(4));
+        assert_eq!(transform_orientation(Some(6), "flip_h"), Some(5));
+        assert_eq!(transform_orientation(Some(6), "flip_v"), Some(7));
+    }
 }

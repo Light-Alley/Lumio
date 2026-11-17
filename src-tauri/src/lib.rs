@@ -6,6 +6,7 @@ mod db;
 mod exiftool;
 mod fileops;
 mod indexer;
+mod logfile;
 mod metadata;
 mod notify;
 mod openwith;
@@ -63,7 +64,7 @@ fn serve_photo(state: &AppState, id: i64) -> Response<Vec<u8>> {
                 return respond(StatusCode::OK, mime_for(&p.ext), bytes, false);
             }
         }
-        let cached = state.previews_dir.join(format!("{}-{}.jpg", p.id, p.mtime));
+        let cached = state.previews_dir.join(format!("{}-{}-{}.jpg", p.id, p.mtime, p.orientation.unwrap_or(1)));
         if let Ok(bytes) = std::fs::read(&cached) {
             return respond(StatusCode::OK, "image/jpeg", bytes, false);
         }
@@ -120,6 +121,8 @@ pub fn run() {
             for d in [&data, &thumbs_dir, &previews_dir, &tmp_dir] {
                 std::fs::create_dir_all(d)?;
             }
+            logfile::init(data.join("lumio.log"));
+            log::info!("Lumio {} starting", app.package_info().version);
             clean_previews(&previews_dir);
             let db_path = data.join("catalogue.sqlite");
             let conn = db::open(&db_path)?;
@@ -173,6 +176,10 @@ pub fn run() {
             commands::delete_photos,
             commands::rename_photo,
             commands::update_metadata,
+            commands::rotate_photos,
+            commands::stack_photos,
+            commands::unstack_photos,
+            commands::set_stack_top,
             commands::list_open_with,
             commands::open_with,
             commands::get_settings,

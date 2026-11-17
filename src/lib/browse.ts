@@ -1,5 +1,5 @@
 // Keyboard and drag behaviour shared by the grid, list and filmstrip views.
-import { app, selection, clickSelect, openViewer, rate, setLabel, trashPhotos, selectedIds } from "./store.svelte";
+import { app, selection, clickSelect, openViewer, rate, setLabel, trashPhotos, selectedIds, withStacks, groupPhotos, ungroupPhotos, toggleStack, rotatePhotos } from "./store.svelte";
 import { LABELS, type PhotoLite } from "./api";
 
 /**
@@ -19,6 +19,14 @@ export function browseKeys(e: KeyboardEvent, step: Record<string, number>, revea
     return;
   }
   if (e.key === "Escape") { selection.clear(); return; }
+  const k = e.key.toLowerCase();
+  if (meta && k === "g" && ids.length) { e.preventDefault(); if (e.shiftKey) ungroupPhotos(ids); else groupPhotos(ids); return; }
+  if (meta && (e.key === "]" || e.key === "[") && ids.length) { e.preventDefault(); rotatePhotos(ids, e.key === "]" ? "right" : "left"); return; }
+  if (!meta && !e.altKey && k === "s") {
+    const p = app.photos.find((x) => x.id === app.focusId);
+    if (p?.stack_id != null) { e.preventDefault(); toggleStack(p.stack_id); }
+    return;
+  }
   if ((e.key === "Delete" || (e.key === "Backspace" && meta)) && ids.length) { e.preventDefault(); trashPhotos(ids); return; }
   if ((e.key === " " || e.key === "Enter") && app.focusId !== null) { e.preventDefault(); openViewer(app.focusId); return; }
   if (!meta && /^[0-5]$/.test(e.key) && ids.length) { rate(ids, Number(e.key)); return; }
@@ -41,7 +49,7 @@ export function browseKeys(e: KeyboardEvent, step: Record<string, number>, revea
 /** Start dragging the selection (or this photo). Drop targets: folders, tabs, other views. */
 export function photoDragStart(e: DragEvent, p: PhotoLite) {
   if (!selection.has(p.id)) clickSelect(p.id, e as unknown as MouseEvent);
-  const ids = selectedIds();
+  const ids = withStacks(selectedIds());
   app.dragIds = ids;
   app.dragPhotos = app.photos.filter((x) => selection.has(x.id));
   e.dataTransfer?.setData("application/x-lumio-photos", JSON.stringify(ids));

@@ -5,7 +5,10 @@ import type { MenuItem } from "./menu.svelte";
 import {
   app, selection, selectedIds, rate, setLabel, moveOrCopy, trashPhotos, renamePhoto, openViewer,
   errorToast, toast, newFolder, renameFolder, trashFolder, removeRoot, rootOnline, newTab,
+  rotatePhotos, groupPhotos, ungroupPhotos, makeCover, toggleStack, openStacks,
 } from "./store.svelte";
+
+const cmd = isMac ? "⌘" : "Ctrl+";
 
 export function photoMenu(p: PhotoLite): MenuItem[] {
   if (!selection.has(p.id)) {
@@ -62,6 +65,12 @@ export function photoMenu(p: PhotoLite): MenuItem[] {
       ],
     },
     { separator: true },
+    { label: "Rotate left", shortcut: `${cmd}[`, disabled: offlineNote, action: () => rotatePhotos(ids, "left") },
+    { label: "Rotate right", shortcut: `${cmd}]`, disabled: offlineNote, action: () => rotatePhotos(ids, "right") },
+    { label: "Flip horizontal", disabled: offlineNote, action: () => rotatePhotos(ids, "flip_h") },
+    { label: "Flip vertical", disabled: offlineNote, action: () => rotatePhotos(ids, "flip_v") },
+    { separator: true },
+    ...stackItems(p, ids),
     { label: many ? `Copy ${ids.length} photos to…` : "Copy to…", disabled: offlineNote, action: () => moveOrCopy(ids, true) },
     { label: many ? `Move ${ids.length} photos to…` : "Move to…", disabled: offlineNote, action: () => moveOrCopy(ids, false) },
     { label: "Rename…", disabled: many || offlineNote, action: () => renamePhoto(p) },
@@ -73,6 +82,22 @@ export function photoMenu(p: PhotoLite): MenuItem[] {
     { separator: true },
     { label: many ? `Move ${ids.length} photos to Trash` : "Move to Trash", danger: true, shortcut: isMac ? "⌘⌫" : "Del", disabled: offlineNote, action: () => trashPhotos(ids) },
   ];
+}
+
+function stackItems(p: PhotoLite, ids: number[]): MenuItem[] {
+  const items: MenuItem[] = [];
+  const inStack = p.stack_id != null;
+  if (ids.length > 1) items.push({ label: `Group ${ids.length} photos`, shortcut: `${cmd}G`, action: () => groupPhotos(ids) });
+  if (inStack) {
+    const open = openStacks.has(p.stack_id!);
+    items.push({ label: open ? "Close group" : `Open group (${p.stack_count} photos)`, shortcut: "S", action: () => toggleStack(p.stack_id!) });
+    if (open && !p.stack_top && ids.length === 1) items.push({ label: "Make cover of group", action: () => makeCover(p.id) });
+    if (open) items.push({ label: ids.length > 1 ? "Remove these from group" : "Remove from group", action: () => ungroupPhotos(ids, false) });
+    items.push({ label: "Ungroup", shortcut: isMac ? "⇧⌘G" : "Ctrl+Shift+G", action: () => ungroupPhotos(ids, true) });
+  }
+  if (!items.length) items.push({ label: "Group (select two or more)", disabled: true });
+  items.push({ separator: true });
+  return items;
 }
 
 async function chooseApp(ids: number[]) {

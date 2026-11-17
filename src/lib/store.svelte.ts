@@ -2,7 +2,7 @@
 import { SvelteSet } from "svelte/reactivity";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { api, errText, type PhotoLite, type Root, type Edit, type OpReport } from "./api";
+import { api, errText, type PhotoLite, type Root, type Edit, type OpReport, type Turn } from "./api";
 
 export type Scope =
   | { kind: "all" }
@@ -46,7 +46,10 @@ export const app = $state({
   roots: [] as Root[],
   scope: { kind: "all" } as Scope,
   recursive: false,
+  /** What's shown: `allPhotos` with closed stacks reduced to their cover. */
   photos: [] as PhotoLite[],
+  /** Everything the current query returned. */
+  allPhotos: [] as PhotoLite[],
   loading: false,
   text: "",
   minRating: 0,
@@ -77,6 +80,8 @@ export const app = $state({
 });
 
 export const selection = new SvelteSet<number>();
+/** Stacks the user has opened to see every photo in them. */
+export const openStacks = new SvelteSet<number>();
 
 export function selectedIds(): number[] {
   return app.photos.filter((p) => selection.has(p.id)).map((p) => p.id);
@@ -146,15 +151,125 @@ export async function loadPhotos() {
       desc: app.desc,
     });
     if (seq !== loadSeq) return;
-    app.photos = photos;
+    app.allPhotos = photos;
+    app.photos = collapseStacks(photos);
     saveTabs();
-    const ids = new Set(photos.map((p) => p.id));
+    const ids = new Set(app.photos.map((p) => p.id));
     for (const id of [...selection]) if (!ids.has(id)) selection.delete(id);
-    if (app.viewerIndex >= photos.length) app.viewerIndex = photos.length - 1;
+    if (app.viewerIndex >= app.photos.length) app.viewerIndex = app.photos.length - 1;
   } catch (e) {
     errorToast(e);
   } finally {
     if (seq === loadSeq) app.loading = false;
+  }
+}
+
+// ------------------------------------------------------------------ stacks (groups of shots)
+
+/**
+ * Closed stacks show one photo: the cover, or the first match if the cover is filtered out.
+ * Open stacks show every photo, kept together with the cover first.
+ */
+function collapseStacks(list: PhotoLite[]): PhotoLite[] {
+  const rep = new Map<number, number>();
+  const groups = new Map<number, PhotoLite[]>();
+  for (const p of list) {
+    if (p.stack_id == null) continue;
+    if (openStacks.has(p.stack_id)) {
+      const g = groups.get(p.stack_id);
+      if (g) g.push(p); else groups.set(p.stack_id, [p]);
+    } else if (!rep.has(p.stack_id) || p.stack_top) rep.set(p.stack_id, p.id);
+  }
+  const out: PhotoLite[] = [];
+  for (const p of list) {
+    if (p.stack_id == null) out.push(p);
+    else if (openStacks.has(p.stack_id)) {
+      const g = groups.get(p.stack_id);
+      if (!g) continue;
+      groups.delete(p.stack_id);
+      out.push(...g.filter((x) => x.stack_top), ...g.filter((x) => !x.stack_top));
+    } else if (rep.get(p.stack_id) === p.id) out.push(p);
+  }
+  return out;
+}
+
+/** Is this photo standing in for a closed stack? */
+export function isClosedStack(p: PhotoLite) {
+  return p.stack_id != null && !openStacks.has(p.stack_id);
+}
+
+/** The ids plus every hidden photo in closed stacks among them (so groups move together). */
+export function withStacks(ids: number[]): number[] {
+  const stacks = new Set(app.photos.filter((p) => ids.includes(p.id) && isClosedStack(p)).map((p) => p.stack_id));
+  if (!stacks.size) return ids;
+  const out = new Set(ids);
+  for (const p of app.allPhotos) if (p.stack_id != null && stacks.has(p.stack_id)) out.add(p.id);
+  return [...out];
+}
+
+export function toggleStack(stackId: number, open?: boolean) {
+  if (open ?? !openStacks.has(stackId)) openStacks.add(stackId);
+  else {
+    openStacks.delete(stackId);
+    // Keep the selection on the cover rather than on photos that are now hidden.
+    const members = app.allPhotos.filter((p) => p.stack_id === stackId);
+    if (members.some((p) => selection.has(p.id))) {
+      for (const p of members) selection.delete(p.id);
+      const cover = members.find((p) => p.stack_top) ?? members[0];
+      if (cover) { selection.add(cover.id); app.focusId = cover.id; }
+    }
+  }
+  app.photos = collapseStacks(app.allPhotos);
+}
+
+export async function groupPhotos(ids: number[]) {
+  const all = withStacks(ids);
+  if (all.length < 2) { toast("Select two or more photos to group them.", "info"); return; }
+  const top = app.focusId != null && all.includes(app.focusId) ? app.focusId : all[0];
+  try {
+    const sid = await api.stackPhotos(all, top);
+    openStacks.delete(sid);
+    selection.clear();
+    selection.add(top);
+    app.focusId = top;
+    await loadPhotos();
+    toast(`Grouped ${all.length} photos. Click the number on the photo, or press S, to open the group.`, "success");
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
+/** Dissolve the groups these photos are in (`whole`), or just take these photos out. */
+export async function ungroupPhotos(ids: number[], whole = true) {
+  try {
+    await api.unstackPhotos(withStacks(ids), whole);
+    await loadPhotos();
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
+export async function makeCover(id: number) {
+  try {
+    await api.setStackTop(id);
+    await loadPhotos();
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
+// ------------------------------------------------------------------ rotate & flip
+
+const TURN_WORDS: Record<Turn, string> = { left: "rotated", right: "rotated", flip_h: "flipped", flip_v: "flipped" };
+
+export async function rotatePhotos(ids: number[], op: Turn) {
+  if (!ids.length) return;
+  try {
+    const r = await api.rotatePhotos(ids, op);
+    if (r.failed.length) reportResult(r, TURN_WORDS[op]);
+    await loadPhotos();
+  } catch (e) {
+    errorToast(e);
   }
 }
 
@@ -288,7 +403,7 @@ export async function moveOrCopy(ids: number[], copy: boolean, dest?: string) {
   const d = dest ?? ((await openDialog({ directory: true, multiple: false, title: copy ? "Copy photos to…" : "Move photos to…" })) as string | null);
   if (!d) return;
   try {
-    const r = await api.movePhotos(ids, d, copy);
+    const r = await api.movePhotos(withStacks(ids), d, copy);
     reportResult(r, copy ? "copied" : "moved");
     if (r.outside_library && r.done) {
       toast(`That folder isn't in your library${copy ? "" : ", so the moved photos left the catalogue"}.`, "info", {

@@ -2,7 +2,8 @@
   import { ImageOff, CloudOff, ChevronUp, ChevronDown } from "@lucide/svelte";
   import Stars from "./Stars.svelte";
   import EmptyState from "./EmptyState.svelte";
-  import { app, selection, clickSelect, openViewer, rate, rootOnline, selectedIds, dropOnView, loadPhotos } from "../store.svelte";
+  import StackBadge from "./StackBadge.svelte";
+  import { app, selection, clickSelect, openViewer, rate, rootOnline, selectedIds, dropOnView, loadPhotos, isClosedStack } from "../store.svelte";
   import { thumbUrl, labelColor, formatDate, basename, type PhotoLite } from "../api";
   import { showMenu } from "../menu.svelte";
   import { photoMenu } from "../actions";
@@ -116,7 +117,7 @@
           <span class="c-thumb">
             {#if p.thumb}<img src={thumbUrl(p)} alt="" draggable="false" loading="lazy" />{:else}<ImageOff size={16} />{/if}
           </span>
-          <span class="c c0 name" title={p.path}>{p.filename}{#if offline}<CloudOff size={12} />{/if}</span>
+          <span class="c c0 name" class:member={p.stack_id != null && !isClosedStack(p) && !p.stack_top} title={p.path}><span class="fn">{p.filename}</span>{#if p.stack_id != null}<StackBadge {p} small />{/if}{#if offline}<CloudOff size={12} />{/if}</span>
           <span class="c c1">{formatDate(p.taken_at)}</span>
           <span class="c c2"><Stars value={p.rating} size={11} onchange={(r) => rate(selection.has(p.id) ? selectedIds() : [p.id], r)} /></span>
           <span class="c c3">{#if labelColor(p.label)}<span class="dot" style:background={labelColor(p.label)}></span>{p.label}{/if}</span>
@@ -149,6 +150,8 @@
   .item.focus.sel { box-shadow: inset 2px 0 0 var(--accent); }
   .c { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
   .name { color: var(--text); }
+  .fn { overflow: hidden; text-overflow: ellipsis; }
+  .name.member { padding-left: 14px; }
   .name :global(svg) { color: var(--text-3); flex-shrink: 0; }
   .c-thumb { width: 52px; height: 38px; display: flex; align-items: center; justify-content: center; color: var(--text-3); }
   .c-thumb img { max-width: 52px; max-height: 38px; object-fit: contain; border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,.35); }

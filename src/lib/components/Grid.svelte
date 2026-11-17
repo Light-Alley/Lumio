@@ -1,8 +1,9 @@
 <script lang="ts">
   import { CloudOff, ImageOff } from "@lucide/svelte";
+  import StackBadge from "./StackBadge.svelte";
   import Stars from "./Stars.svelte";
   import EmptyState from "./EmptyState.svelte";
-  import { app, selection, clickSelect, openViewer, rate, rootOnline, selectedIds, dropOnView } from "../store.svelte";
+  import { app, selection, clickSelect, openViewer, rate, rootOnline, selectedIds, dropOnView, isClosedStack } from "../store.svelte";
   import { thumbUrl, labelColor, type PhotoLite } from "../api";
   import { browseKeys, photoDragStart, photoDragEnd, canDropHere, dragGhosts } from "../browse";
   import { showMenu } from "../menu.svelte";
@@ -86,6 +87,7 @@
         class:sel
         class:focus={app.focusId === p.id}
         class:ghost={v.ghost}
+        class:member={p.stack_id != null && !isClosedStack(p)}
         style:transform={`translate(${v.x}px, ${v.y}px)`}
         style:width={`${colW}px`}
         role="gridcell"
@@ -109,6 +111,7 @@
           {#if labelColor(p.label)}<span class="label" style:background={labelColor(p.label)}></span>{/if}
           {#if offline}<span class="badge" title="Drive not connected"><CloudOff size={12} /></span>{/if}
           <span class="ext">{p.ext.toUpperCase()}</span>
+          {#if p.stack_id != null}<span class="stackpos"><StackBadge {p} /></span>{/if}
         </div>
         <div class="foot">
           <span class="fname" title={p.path}>{p.filename}</span>
@@ -140,6 +143,8 @@
   .badge { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.6); color: #ddd; border-radius: 4px; padding: 2px 3px; display: flex; }
   .ext { position: absolute; bottom: 5px; right: 6px; font-size: 9px; letter-spacing: .04em; background: rgba(0,0,0,.55); color: #ddd; padding: 1px 4px; border-radius: 3px; opacity: 0; transition: opacity .1s; }
   .cell:hover .ext { opacity: 1; }
+  .stackpos { position: absolute; bottom: 5px; left: 6px; }
+  .cell.member .frame { background: color-mix(in srgb, var(--accent) 9%, var(--bg-2)); }
   .foot { height: 34px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 0 4px; }
   .fname { font-size: 11.5px; color: var(--text-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cell.sel .fname { color: var(--text); }

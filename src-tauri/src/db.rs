@@ -55,6 +55,33 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         "#,
     )?;
+    // Added in 0.3: failed thumbnail attempts, and stacks (groups of shots).
+    add_column(conn, "photos", "thumb_tries", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column(conn, "photos", "stack_id", "INTEGER")?;
+    add_column(conn, "photos", "stack_top", "INTEGER NOT NULL DEFAULT 0")?;
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS photos_stack ON photos(stack_id);")?;
+    Ok(())
+}
+
+/// Keep stacks consistent after photos leave the catalogue: a stack needs two
+/// photos, and exactly one cover.
+pub fn tidy_stacks(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "UPDATE photos SET stack_id = NULL, stack_top = 0 WHERE stack_id IN
+            (SELECT stack_id FROM photos WHERE stack_id IS NOT NULL GROUP BY stack_id HAVING COUNT(*) < 2);
+         UPDATE photos SET stack_top = 1 WHERE id IN
+            (SELECT MIN(id) FROM photos WHERE stack_id IS NOT NULL GROUP BY stack_id HAVING SUM(stack_top) = 0);",
+    )?;
+    Ok(())
+}
+
+fn add_column(conn: &Connection, table: &str, col: &str, decl: &str) -> Result<()> {
+    let exists: bool = conn
+        .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"))?
+        .exists([col])?;
+    if !exists {
+        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {col} {decl};"))?;
+    }
     Ok(())
 }
 
@@ -178,6 +205,11 @@ pub struct PhotoLite {
     pub thumb: bool,
     pub mtime: i64,
     pub root_id: i64,
+    pub orientation: Option<i64>,
+    /// Photos grouped together share a stack id; one of them is the cover (`stack_top`).
+    pub stack_id: Option<i64>,
+    pub stack_top: bool,
+    pub stack_count: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -264,7 +296,9 @@ pub fn query_photos(conn: &Connection, q: &Query) -> Result<Vec<PhotoLite>> {
         _ => format!("coalesce(taken_at, datetime(mtime/1000, 'unixepoch')) {dir}, filename {dir}"),
     };
     let sql = format!(
-        "SELECT id, path, filename, folder, ext, rating, label, taken_at, width, height, lat, lon, thumb, mtime, root_id FROM photos {} ORDER BY {}",
+        "SELECT id, path, filename, folder, ext, rating, label, taken_at, width, height, lat, lon, thumb, mtime, root_id, orientation, stack_id, stack_top,
+                CASE WHEN stack_id IS NULL THEN 0 ELSE (SELECT COUNT(*) FROM photos s WHERE s.stack_id = photos.stack_id) END
+         FROM photos {} ORDER BY {}",
         if wh.is_empty() { String::new() } else { format!("WHERE {}", wh.join(" AND ")) },
         order
     );
@@ -286,6 +320,10 @@ pub fn query_photos(conn: &Connection, q: &Query) -> Result<Vec<PhotoLite>> {
             thumb: r.get::<_, i64>(12)? != 0,
             mtime: r.get(13)?,
             root_id: r.get(14)?,
+            orientation: r.get(15)?,
+            stack_id: r.get(16)?,
+            stack_top: r.get::<_, i64>(17)? != 0,
+            stack_count: r.get(18)?,
         })
     })?;
     let mut out = vec![];

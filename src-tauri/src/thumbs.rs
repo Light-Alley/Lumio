@@ -30,12 +30,33 @@ fn orientation_from_exif(o: Option<i64>) -> Orientation {
 }
 
 /// Load an image for display, decoding it ourselves or via an embedded preview.
-pub fn load_image(path: &Path, ext: &str, orientation: Option<i64>, et: &ExifTool, tmp: &Path) -> Result<DynamicImage> {
+/// `want` is the long side the caller needs; RAW files use their embedded JPEG when
+/// it is at least that big, which is far quicker than a full RAW decode (and on a
+/// network drive reads much less of the file).
+pub fn load_image(path: &Path, ext: &str, orientation: Option<i64>, want: u32, et: &ExifTool, tmp: &Path) -> Result<DynamicImage> {
     let raw = metadata::is_raw(ext);
     let e = ext.to_ascii_lowercase();
     if !raw && !matches!(e.as_str(), "heic" | "heif" | "avif") {
         if let Ok(img) = ImageReader::open(path).map_err(anyhow::Error::from).and_then(decode_with_orientation) {
             return Ok(img);
+        }
+    }
+    let embedded = || -> Result<Option<DynamicImage>> {
+        if !et.available() {
+            return Ok(None);
+        }
+        let Some(bytes) = et.extract_preview(path, tmp)? else { return Ok(None) };
+        let mut img = decode_with_orientation(ImageReader::new(Cursor::new(bytes)))?;
+        // Embedded previews are usually stored unrotated.
+        img.apply_orientation(orientation_from_exif(orientation));
+        Ok(Some(img))
+    };
+    let mut small: Option<DynamicImage> = None;
+    if raw {
+        match embedded() {
+            Ok(Some(img)) if img.width().max(img.height()) >= want => return Ok(img),
+            Ok(img) => small = img,
+            Err(e) => log::info!("no embedded preview in {}: {e:#}", path.display()),
         }
     }
     #[cfg(target_os = "macos")]
@@ -44,12 +65,11 @@ pub fn load_image(path: &Path, ext: &str, orientation: Option<i64>, et: &ExifToo
             return Ok(img);
         }
     }
-    // RAW and anything else: use the largest embedded JPEG.
-    if et.available() {
-        if let Some(bytes) = et.extract_preview(path, tmp)? {
-            let mut img = decode_with_orientation(ImageReader::new(Cursor::new(bytes)))?;
-            // Embedded previews are usually stored unrotated.
-            img.apply_orientation(orientation_from_exif(orientation));
+    if let Some(img) = small {
+        return Ok(img);
+    }
+    if !raw {
+        if let Some(img) = embedded()? {
             return Ok(img);
         }
     }
@@ -93,7 +113,7 @@ pub fn make_thumb(
     et: &ExifTool,
     tmp: &Path,
 ) -> Result<(u32, u32)> {
-    let img = load_image(src, ext, orientation, et, tmp)?;
+    let img = load_image(src, ext, orientation, THUMB_SIZE, et, tmp)?;
     let (w, h) = (img.width(), img.height());
     let t = img.thumbnail(THUMB_SIZE, THUMB_SIZE);
     let bytes = encode_jpeg(&t, 80)?;
@@ -105,7 +125,7 @@ pub fn make_thumb(
 }
 
 pub fn make_preview(src: &Path, ext: &str, orientation: Option<i64>, et: &ExifTool, tmp: &Path) -> Result<Vec<u8>> {
-    let img = load_image(src, ext, orientation, et, tmp)?;
+    let img = load_image(src, ext, orientation, 1600, et, tmp)?;
     let img = if img.width() > PREVIEW_SIZE || img.height() > PREVIEW_SIZE {
         img.resize(PREVIEW_SIZE, PREVIEW_SIZE, image::imageops::FilterType::Triangle)
     } else {

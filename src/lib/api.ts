@@ -6,9 +6,12 @@ export interface PhotoLite {
   id: number; path: string; filename: string; folder: string; ext: string; rating: number;
   label: string | null; taken_at: string | null; width: number | null; height: number | null;
   lat: number | null; lon: number | null; thumb: boolean; mtime: number; root_id: number;
+  orientation: number | null;
+  /** Photos grouped together share a stack id; `stack_top` marks the cover. */
+  stack_id?: number | null; stack_top?: boolean; stack_count?: number;
 }
 export interface Photo extends PhotoLite {
-  size: number; orientation: number | null; title: string | null; caption: string | null;
+  size: number; title: string | null; caption: string | null;
   keywords: string[]; creator: string | null; copyright: string | null; alt: number | null;
   place: string | null; make: string | null; model: string | null; lens: string | null;
   iso: number | null; fnumber: number | null; exposure: number | null; focal: number | null;
@@ -33,6 +36,8 @@ export interface ChatReply { text: string; result_ids: number[] | null; result_t
 export interface AppStatus { version: string; exiftool: boolean; exiftool_path: string; data_dir: string; photo_count: number }
 export interface Place { name: string; lat: number; lon: number }
 
+export type Turn = "left" | "right" | "flip_h" | "flip_v";
+
 export const api = {
   getRoots: () => invoke<Root[]>("get_roots"),
   addRoot: (path: string) => invoke<number>("add_root", { path }),
@@ -51,6 +56,10 @@ export const api = {
   deletePhotos: (ids: number[], permanent: boolean) => invoke<OpReport>("delete_photos", { ids, permanent }),
   renamePhoto: (id: number, name: string) => invoke<void>("rename_photo", { id, name }),
   updateMetadata: (ids: number[], edit: Edit) => invoke<OpReport>("update_metadata", { ids, edit }),
+  rotatePhotos: (ids: number[], op: Turn) => invoke<OpReport>("rotate_photos", { ids, op }),
+  stackPhotos: (ids: number[], top: number | null) => invoke<number>("stack_photos", { ids, top }),
+  unstackPhotos: (ids: number[], whole: boolean) => invoke<void>("unstack_photos", { ids, whole }),
+  setStackTop: (id: number) => invoke<void>("set_stack_top", { id }),
   listOpenWith: (id: number) => invoke<AppInfo[]>("list_open_with", { id }),
   openWith: (ids: number[], app: string) => invoke<void>("open_with", { ids, app }),
   openDefault: (ids: number[]) => invoke<void>("open_default", { ids }),
@@ -72,8 +81,9 @@ export const fileManagerName = isMac ? "Finder" : isWindows ? "File Explorer" : 
 function scheme(name: string) {
   return isWindows ? `http://${name}.localhost` : `${name}://localhost`;
 }
-export const thumbUrl = (p: { id: number; mtime: number }) => `${scheme("thumb")}/${p.id}?m=${p.mtime}`;
-export const photoUrl = (p: { id: number; mtime: number }) => `${scheme("photo")}/${p.id}?m=${p.mtime}`;
+type Versioned = { id: number; mtime: number; orientation?: number | null };
+export const thumbUrl = (p: Versioned) => `${scheme("thumb")}/${p.id}?m=${p.mtime}-${p.orientation ?? 1}`;
+export const photoUrl = (p: Versioned) => `${scheme("photo")}/${p.id}?m=${p.mtime}-${p.orientation ?? 1}`;
 
 export function errText(e: unknown): string {
   if (typeof e === "string") return e;

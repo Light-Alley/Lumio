@@ -1,6 +1,6 @@
 [package]
 name = "lumio"
-version = "0.2.1"
+version = "0.3.0"
 description = "Lumio – a lightweight, open-source photo browser and digital asset manager"
 authors = ["Lumio contributors"]
 license = "MIT"
@@ -32,7 +32,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 base64 = "0.22"
 chrono = "0.4"
 parking_lot = "0.12"
-log = "0.4"
+log = { version = "0.4", features = ["std"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"

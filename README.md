@@ -14,6 +14,8 @@ Lumio is for photographers who want something simple: browse folders of photos o
 | **Offline thumbnails** | Lumio keeps a small catalogue and thumbnail cache on your computer, so folders on unplugged external or network drives can still be browsed. They're shown with a "drive not connected" badge. |
 | **Viewer** | Full-screen viewer with zoom and pan and a **black / grey / light grey / white** background switch (press `B`). |
 | **Ratings & labels** | 0–5 stars (`0`–`5` keys) and colour labels (`6`–`9`), written into the photo as standard XMP so Lightroom, Bridge, digiKam, Capture One and darktable see them too. |
+| **Rotate & flip** | Rotate left or right (`⌘[` / `⌘]`, `Ctrl+[` / `Ctrl+]`) and flip horizontally or vertically, from the right-click menu, the filmstrip or the viewer. Lossless: only the orientation tag changes (in an XMP sidecar for RAW files), so the image itself is never re-saved. |
+| **Groups (stacks)** | Select shots of the same subject and press `⌘G` / `Ctrl+G` to group them. A closed group shows one cover photo with a count; click the count or press `S` to open it. Make any shot the cover, take shots out, or ungroup with `⇧⌘G` / `Ctrl+Shift+G`. Groups move together. They're kept in Lumio's catalogue, not written into the files. |
 | **Metadata editing** | Title, caption, keywords, creator and copyright, for one photo or many at once. Saved into the file (EXIF/IPTC/XMP) or, for RAW files, into an XMP sidecar by default. |
 | **Geotagging** | Map view (OpenStreetMap). Drag photos onto the map, or select photos and click a spot. Place search, clustering, and GPS written into the files. |
 | **File management** | Drag photos or folders onto a folder to move them (hold `Alt`/`⌥` to copy), or use Move to… / Copy to… for any destination, including other drives and network shares. Cross-drive moves are copied and verified before the original is removed. New folder, rename, and Move to Trash (sidecars travel with their photos). |
@@ -52,6 +54,8 @@ Your photos are never moved or changed unless you ask. Lumio's own catalogue (`c
 - macOS: `~/Library/Application Support/app.lumio.photos/`
 - Windows: `%APPDATA%\app.lumio.photos\`
 - Linux: `~/.local/share/app.lumio.photos/`
+
+If a network or cloud drive (SMB, pCloud, Dropbox…) stops answering while Lumio is indexing it, for example because the computer went to sleep, Lumio pauses and carries on when the drive is back, instead of cataloguing empty entries. Problems are written to `lumio.log` in the same folder.
 
 Deleting that folder resets Lumio. Your photos and the metadata written into them stay.
 

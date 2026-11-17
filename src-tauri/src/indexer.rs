@@ -38,6 +38,67 @@ pub struct Progress {
     pub message: String,
 }
 
+/// Files that fail this many times in a row are left alone until they change
+/// (or the user asks to rebuild their thumbnails).
+const MAX_THUMB_TRIES: i64 = 3;
+
+/// A library drive stopped answering part-way through. Indexing pauses and tries again later.
+#[derive(Debug)]
+pub struct Offline {
+    pub root_id: i64,
+    pub root: PathBuf,
+}
+
+impl std::fmt::Display for Offline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} is not reachable", self.root.display())
+    }
+}
+
+impl std::error::Error for Offline {}
+
+/// Can the folder still be listed? Network drives and sync clients (pCloud, Dropbox, SMB)
+/// stop answering when the computer sleeps or the connection drops.
+fn reachable(dir: &Path) -> bool {
+    std::fs::read_dir(dir).map(|mut rd| { let _ = rd.next(); true }).unwrap_or(false)
+}
+
+/// Can we actually read the start of the file?
+fn readable(p: &Path) -> bool {
+    use std::io::Read;
+    let mut buf = [0u8; 4096];
+    std::fs::File::open(p).and_then(|mut f| f.read(&mut buf)).map(|n| n > 0).unwrap_or(false)
+}
+
+/// Stop the computer from idle-sleeping while indexing (macOS). Closing the lid still sleeps.
+struct KeepAwake(Option<std::process::Child>);
+
+impl KeepAwake {
+    fn new() -> Self {
+        #[cfg(target_os = "macos")]
+        {
+            let child = std::process::Command::new("/usr/bin/caffeinate")
+                .args(["-i", "-w", &std::process::id().to_string()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .ok();
+            return KeepAwake(child);
+        }
+        #[allow(unreachable_code)]
+        KeepAwake(None)
+    }
+}
+
+impl Drop for KeepAwake {
+    fn drop(&mut self) {
+        if let Some(mut c) = self.0.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
 pub fn is_hidden(p: &Path) -> bool {
     p.file_name()
         .and_then(|n| n.to_str())
@@ -93,6 +154,38 @@ pub fn run_worker(state: Arc<AppState>, rx: Receiver<Job>) {
             return;
         }
     };
+    // Failed attempts per root whose drive stopped answering, and roots with a retry queued.
+    let attempts: parking_lot::Mutex<HashMap<i64, usize>> = Default::default();
+    let pending: Arc<parking_lot::Mutex<HashSet<i64>>> = Default::default();
+    let notice: parking_lot::Mutex<String> = Default::default();
+    let on_err = |e: anyhow::Error, what: &str| {
+        let Some(off) = e.downcast_ref::<Offline>() else {
+            log::warn!("{what} failed: {e:#}");
+            return false;
+        };
+        let n = {
+            let mut a = attempts.lock();
+            let n = a.entry(off.root_id).or_insert(0);
+            *n += 1;
+            *n
+        };
+        let mins = [1u64, 2, 5, 10, 15][(n - 1).min(4)];
+        log::warn!("{off}; indexing paused, retrying in {mins} min");
+        let msg = format!("{} isn't reachable. Lumio will carry on when it's back (next try in {mins} min).", off.root.display());
+        emit_progress(&state, false, 0, 0, &msg);
+        *notice.lock() = msg;
+        if pending.lock().insert(off.root_id) {
+            let st = state.clone();
+            let pend = pending.clone();
+            let id = off.root_id;
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(mins * 60));
+                pend.lock().remove(&id);
+                st.queue(Job::ScanRoot(id));
+            });
+        }
+        true
+    };
     while let Ok(first) = rx.recv() {
         // Coalesce whatever else is queued.
         let mut jobs = vec![first];
@@ -117,23 +210,42 @@ pub fn run_worker(state: Arc<AppState>, rx: Receiver<Job>) {
                 log::warn!("remove: {e}");
             }
         }
+        let _awake = KeepAwake::new();
+        let mut paused = false;
         for s in scans {
-            let r = match s {
-                Job::ScanRoot(id) => scan_root(&state, &conn, id),
-                Job::ScanFolder(p) => scan_folder(&state, &conn, &p),
-                _ => Ok(()),
+            let (r, root) = match s {
+                Job::ScanRoot(id) => (scan_root(&state, &conn, id), Some(id)),
+                Job::ScanFolder(p) => (scan_folder(&state, &conn, &p), None),
+                _ => (Ok(()), None),
             };
-            if let Err(e) = r {
-                log::warn!("scan failed: {e}");
+            match r {
+                Ok(()) => {
+                    if let Some(id) = root {
+                        attempts.lock().remove(&id);
+                    }
+                }
+                Err(e) => paused |= on_err(e, "scan"),
             }
         }
         if !files.is_empty() {
-            let _ = index_paths(&state, &conn, dedup(files), false);
+            if let Err(e) = index_paths(&state, &conn, dedup(files), false) {
+                paused |= on_err(e, "indexing");
+            }
         }
         if !refresh.is_empty() {
-            let _ = index_paths(&state, &conn, dedup(refresh), true);
+            if let Err(e) = index_paths(&state, &conn, dedup(refresh), true) {
+                paused |= on_err(e, "refresh");
+            }
         }
-        emit_progress(&state, false, 0, 0, "");
+        // Keep the "not reachable" notice up while a retry is waiting.
+        if pending.lock().is_empty() {
+            if !paused {
+                notice.lock().clear();
+                emit_progress(&state, false, 0, 0, "");
+            }
+        } else {
+            emit_progress(&state, false, 0, 0, &notice.lock());
+        }
         let _ = state.app.emit("library-changed", ());
     }
 }
@@ -154,6 +266,14 @@ fn handle_removed(state: &AppState, conn: &Connection, paths: &[PathBuf]) -> Res
     for p in paths {
         if p.exists() {
             continue;
+        }
+        // If the whole drive or library folder has gone, it's offline, not deleted.
+        match db::root_for_path(conn, p)? {
+            Some((_, root)) if !reachable(&root) => {
+                log::info!("{} went away with its library folder; keeping it in the catalogue", p.display());
+                continue;
+            }
+            _ => {}
         }
         let ps = p.to_string_lossy().to_string();
         let mut args = vec![];
@@ -176,6 +296,7 @@ pub fn delete_ids(state: &AppState, conn: &Connection, ids: &[i64]) -> Result<()
         tx.execute("DELETE FROM photos WHERE id = ?1", [id])?;
         let _ = std::fs::remove_file(thumbs::thumb_path(&state.thumbs_dir, *id));
     }
+    db::tidy_stacks(&tx)?;
     tx.commit()?;
     Ok(())
 }
@@ -211,10 +332,23 @@ fn scan_dir(state: &AppState, conn: &Connection, dir: &Path, _root_id: i64) -> R
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| e.depth() == 0 || !is_hidden(e.path()));
-    for e in walker.flatten() {
-        if e.file_type().is_file() && metadata::is_supported(&ext_of(e.path())) {
-            found.push(e.into_path());
+    let mut walk_errors = 0usize;
+    for e in walker {
+        match e {
+            Ok(e) => {
+                if e.file_type().is_file() && metadata::is_supported(&ext_of(e.path())) {
+                    found.push(e.into_path());
+                }
+            }
+            Err(err) => {
+                walk_errors += 1;
+                log::warn!("cannot read {}: {err}", err.path().map(|p| p.display().to_string()).unwrap_or_default());
+            }
         }
+    }
+    if walk_errors > 0 && !reachable(dir) {
+        // The drive went away while we were listing it; don't forget photos we could not see.
+        return Err(Offline { root_id: _root_id, root: dir.to_path_buf() }.into());
     }
     // Forget files that no longer exist below this folder.
     let present: HashSet<String> = found.iter().map(|p| p.to_string_lossy().to_string()).collect();
@@ -229,7 +363,11 @@ fn scan_dir(state: &AppState, conn: &Connection, dir: &Path, _root_id: i64) -> R
         rows.filter_map(|r| r.ok()).filter(|(_, p)| !present.contains(p)).map(|(id, _)| id).collect()
     };
     if !gone.is_empty() {
-        delete_ids(state, conn, &gone)?;
+        if walk_errors > 0 {
+            log::warn!("{} photos below {} not found, but some folders could not be read; keeping them", gone.len(), dir.display());
+        } else {
+            delete_ids(state, conn, &gone)?;
+        }
     }
     index_paths(state, conn, found, false)
 }
@@ -273,11 +411,10 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
                     .and_then(|sc| stat(&sc))
                     .map(|(_, sm)| sm > m)
                     .unwrap_or(false);
-                let has_thumb: bool = conn
-                    .query_row("SELECT thumb FROM photos WHERE path = ?1", [&ps], |r| r.get::<_, i64>(0))
-                    .map(|t| t != 0)
-                    .unwrap_or(true);
-                if !side_newer && has_thumb {
+                let (thumb, tries): (i64, i64) = conn
+                    .query_row("SELECT thumb, thumb_tries FROM photos WHERE path = ?1", [&ps], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .unwrap_or((1, 0));
+                if !side_newer && (thumb != 0 || tries >= MAX_THUMB_TRIES) {
                     continue;
                 }
             }
@@ -289,7 +426,16 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
         return Ok(());
     }
     let mut done = 0;
+    let mut failed = 0usize;
+    let root_path = |id: i64| roots.iter().find(|(r, _)| *r == id).map(|(_, p)| p.clone()).unwrap_or_default();
     for chunk in todo.chunks(24) {
+        // Before each batch, make sure the drive is still there.
+        for c in chunk {
+            let rp = root_path(c.root_id);
+            if !reachable(&rp) {
+                return Err(Offline { root_id: c.root_id, root: rp }.into());
+            }
+        }
         emit_progress(state, true, done, total, &format!("Indexing {} of {}", done + 1, total));
         // 1. Metadata (image files plus any XMP sidecars), in one ExifTool call.
         let mut files: Vec<PathBuf> = chunk.iter().map(|c| c.path.clone()).collect();
@@ -300,6 +446,10 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
             match state.et.read_json(&files) {
                 Ok(vals) => {
                     for v in vals {
+                        if let Some(err) = v.get("Error").and_then(|s| s.as_str()) {
+                            log::warn!("exiftool: {}: {err}", v.get("SourceFile").and_then(|s| s.as_str()).unwrap_or("?"));
+                            continue;
+                        }
                         if let Some(src) = v.get("SourceFile").and_then(|s| s.as_str()) {
                             by_path.insert(normalize_src(src), metadata::parse(&v));
                         }
@@ -308,14 +458,45 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
                 Err(e) => log::warn!("exiftool read failed: {e}"),
             }
         }
+        // Files ExifTool could not read: if we can't read them either, the drive is
+        // dropping out. Skip them rather than cataloguing empty entries.
+        let mut skip: HashSet<usize> = HashSet::new();
+        for (i, c) in chunk.iter().enumerate() {
+            let ps = c.path.to_string_lossy().to_string();
+            if !by_path.contains_key(&normalize_src(&ps)) && !readable(&c.path) {
+                skip.insert(i);
+            }
+        }
+        if !skip.is_empty() {
+            let c = &chunk[*skip.iter().next().unwrap()];
+            let rp = root_path(c.root_id);
+            if !reachable(&rp) || skip.len() == chunk.len() {
+                return Err(Offline { root_id: c.root_id, root: rp }.into());
+            }
+            for i in &skip {
+                log::warn!("cannot read {}; skipped", chunk[*i].path.display());
+            }
+        }
         // 2. Upsert rows.
         let now = chrono::Utc::now().timestamp_millis();
         let mut ids: Vec<(i64, PathBuf, String, Option<i64>)> = vec![];
         {
             let tx = conn.unchecked_transaction()?;
-            for (c, sc) in chunk.iter().zip(sidecars.iter()) {
+            for (i, (c, sc)) in chunk.iter().zip(sidecars.iter()).enumerate() {
+                if skip.contains(&i) {
+                    continue;
+                }
                 let ps = c.path.to_string_lossy().to_string();
-                let mut m = by_path.get(&normalize_src(&ps)).cloned().unwrap_or_default();
+                let got = by_path.get(&normalize_src(&ps)).cloned();
+                if got.is_none() {
+                    if let Some(id) = c.existing {
+                        // Keep what we already know; just try the thumbnail again.
+                        let o: Option<i64> = tx.query_row("SELECT orientation FROM photos WHERE id = ?1", [id], |r| r.get(0)).unwrap_or(None);
+                        ids.push((id, c.path.clone(), c.ext.clone(), o));
+                        continue;
+                    }
+                }
+                let mut m = got.unwrap_or_default();
                 if let Some(sc) = sc {
                     if let Some(side) = by_path.get(&normalize_src(&sc.to_string_lossy())) {
                         metadata::merge_sidecar(&mut m, side);
@@ -343,33 +524,54 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
             tx.commit()?;
         }
         // 3. Thumbnails, in parallel.
-        let results: Vec<(i64, Option<(u32, u32)>)> = ids
+        // A failure only counts against the file if the file itself is still readable.
+        let results: Vec<(i64, Result<(u32, u32), bool>)> = ids
             .par_iter()
             .map(|(id, path, ext, orient)| {
                 let dest = thumbs::thumb_path(&state.thumbs_dir, *id);
-                let r = thumbs::make_thumb(path, ext, *orient, &dest, &state.et, &state.tmp_dir);
-                if let Err(e) = &r {
-                    log::warn!("thumbnail failed for {}: {e}", path.display());
+                match thumbs::make_thumb(path, ext, *orient, &dest, &state.et, &state.tmp_dir) {
+                    Ok(wh) => (*id, Ok(wh)),
+                    Err(e) => {
+                        let ok = readable(path);
+                        log::warn!("thumbnail failed for {}: {e:#}{}", path.display(), if ok { "" } else { " (file not readable)" });
+                        (*id, Err(ok))
+                    }
                 }
-                (*id, r.ok())
             })
             .collect();
+        let mut unreadable = 0;
         {
             let tx = conn.unchecked_transaction()?;
-            for (id, wh) in results {
-                match wh {
-                    Some((w, h)) => tx.execute(
-                        "UPDATE photos SET thumb = 1, width = coalesce(width, ?2), height = coalesce(height, ?3) WHERE id = ?1",
+            for (id, r) in &results {
+                match r {
+                    Ok((w, h)) => tx.execute(
+                        "UPDATE photos SET thumb = 1, thumb_tries = 0, width = coalesce(width, ?2), height = coalesce(height, ?3) WHERE id = ?1",
                         params![id, w, h],
                     )?,
-                    None => tx.execute("UPDATE photos SET thumb = 0 WHERE id = ?1", [id])?,
+                    Err(true) => {
+                        failed += 1;
+                        tx.execute("UPDATE photos SET thumb = 0, thumb_tries = thumb_tries + 1 WHERE id = ?1", [id])?
+                    }
+                    Err(false) => {
+                        unreadable += 1;
+                        tx.execute("UPDATE photos SET thumb = 0 WHERE id = ?1", [id])?
+                    }
                 };
             }
             tx.commit()?;
         }
+        if unreadable > 0 {
+            let c = &chunk[0];
+            let rp = root_path(c.root_id);
+            if !reachable(&rp) || unreadable == results.len() {
+                let _ = state.app.emit("library-changed", ());
+                return Err(Offline { root_id: c.root_id, root: rp }.into());
+            }
+        }
         done += chunk.len();
         let _ = state.app.emit("library-changed", ());
     }
+    log::info!("indexed {total} files, {failed} without a thumbnail");
     emit_progress(state, true, total, total, "Done");
     Ok(())
 }
