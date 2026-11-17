@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { X, ChevronLeft, ChevronRight, Info, CloudOff, ZoomIn, Maximize, RotateCcw, RotateCw, FlipHorizontal2 } from "@lucide/svelte";
   import Stars from "./Stars.svelte";
   import { app, rate, setLabel, saveSetting, rootOnline, selectOnly, trashPhotos, rotatePhotos, type Bg } from "../store.svelte";
@@ -26,19 +27,30 @@
   const bgColor = $derived(BGS.find((b) => b.id === app.viewerBg)?.color ?? "#000");
   const lightBg = $derived(app.viewerBg === "white" || app.viewerBg === "lightgrey");
 
+  // Lumio refreshes the photo list while it indexes, which hands us a new object for the
+  // same photo. Only start over when the photo or its file version really changes;
+  // otherwise the sharp image would be hidden again and never come back.
+  const pid = $derived(p?.id ?? null);
+  const src = $derived(p ? photoUrl(p) : "");
+
   $effect(() => {
-    if (p) {
-      selectOnly(p.id);
+    if (pid === null) return;
+    untrack(() => {
+      selectOnly(pid);
       zoom = 1;
       pan = { x: 0, y: 0 };
-      loaded = false;
-      failed = false;
       // Preload neighbours.
       for (const d of [1, -1]) {
         const n = app.photos[app.viewerIndex + d];
         if (n && rootOnline(n.root_id)) new Image().src = photoUrl(n);
       }
-    }
+    });
+  });
+
+  $effect(() => {
+    src;
+    loaded = false;
+    failed = false;
   });
 
   function close() { app.viewerIndex = -1; }
@@ -149,7 +161,7 @@
           <img
             class="main"
             class:hidden={!loaded}
-            src={photoUrl(p)}
+            src={src}
             alt={p.filename}
             draggable="false"
             style:transform={`translate(${pan.x}px, ${pan.y}px) scale(${zoom})`}

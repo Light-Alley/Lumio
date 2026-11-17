@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { ImageOff, CloudOff, RotateCcw, RotateCw, FlipHorizontal2, FlipVertical2 } from "@lucide/svelte";
   import StackBadge from "./StackBadge.svelte";
   import Stars from "./Stars.svelte";
@@ -32,18 +33,28 @@
     if (!current && app.photos.length && !app.loading) selectOnly(app.photos[0].id);
   });
 
+  // The list is refreshed while Lumio indexes, giving a new object for the same photo.
+  // Only reset when the photo or its file version really changes (see Viewer).
+  const curId = $derived(current?.id ?? null);
+  const bigSrc = $derived(current ? photoUrl(current) : "");
+
   $effect(() => {
-    const p = current;
+    bigSrc;
     loaded = false;
+  });
+
+  $effect(() => {
+    const id = curId;
     detail = null;
-    if (!p) return;
-    const id = p.id;
+    if (id === null) return;
     api.getPhoto(id).then((d) => { if (app.focusId === id) detail = d; }).catch(() => {});
-    const i = app.photos.indexOf(p);
-    for (const d of [1, -1]) {
-      const n = app.photos[i + d];
-      if (n && rootOnline(n.root_id)) new Image().src = photoUrl(n);
-    }
+    untrack(() => {
+      const i = app.photos.findIndex((x) => x.id === id);
+      for (const d of [1, -1]) {
+        const n = app.photos[i + d];
+        if (n && rootOnline(n.root_id)) new Image().src = photoUrl(n);
+      }
+    });
   });
 
   let lastScope = "";
@@ -118,7 +129,7 @@
       {#key current.id}
         {#if current.thumb}<img class="ph" src={thumbUrl(current)} alt="" draggable="false" class:hide={loaded} />{/if}
         {#if rootOnline(current.root_id)}
-          <img class="big" src={photoUrl(current)} alt={current.filename} draggable="false" onload={() => (loaded = true)} class:show={loaded} />
+          <img class="big" src={bigSrc} alt={current.filename} draggable="false" onload={() => (loaded = true)} class:show={loaded} />
         {:else}
           <span class="off"><CloudOff size={14} /> Drive not connected, showing the thumbnail</span>
         {/if}
