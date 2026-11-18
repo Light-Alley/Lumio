@@ -151,10 +151,25 @@ export async function loadPhotos() {
       desc: app.desc,
     });
     if (seq !== loadSeq) return;
+    const before = app.photos;
     app.allPhotos = photos;
     app.photos = collapseStacks(photos);
     saveTabs();
     const ids = new Set(app.photos.map((p) => p.id));
+    // The focused photo left the list (moved or deleted): keep the place by moving to
+    // the next photo that is still here, or the one before it.
+    if (app.focusId !== null && !ids.has(app.focusId)) {
+      const at = before.findIndex((p) => p.id === app.focusId);
+      if (at >= 0) {
+        const next = before.slice(at + 1).find((p) => ids.has(p.id)) ?? before.slice(0, at).reverse().find((p) => ids.has(p.id));
+        if (next) {
+          selection.clear();
+          selection.add(next.id);
+          app.focusId = next.id;
+          app.anchorId = next.id;
+        }
+      }
+    }
     for (const id of [...selection]) if (!ids.has(id)) selection.delete(id);
     if (app.viewerIndex >= app.photos.length) app.viewerIndex = app.photos.length - 1;
   } catch (e) {
