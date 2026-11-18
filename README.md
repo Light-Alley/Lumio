@@ -1,8 +1,17 @@
-# Lumio
+# Lumio by Light and Alley
 
 **A lightweight, open-source photo browser and digital asset manager for macOS, Windows and Linux.**
 
-Lumio is for photographers who want something simple: browse folders of photos on your computer, external drives and network drives, rate and tag them, put them on a map, and find them again, without importing them into a heavy catalogue or editing suite. Lumio doesn't edit pixels. It hands photos to the editor you already use and picks up the result when you save.
+Lumio is for photographers who want something simple: After trying the over bloated Abode and other open source alternative like Digikam. I wanted to build something light weight and does not easily crash.
+Adobe bridge is available for free. However, you are forced to install creative cloud software, create an adobe account and sign in along with it even if you done have subscription and your data is not secure.
+Digikam is an excellent program. However, the experience is often frustrating for two reasons, it crashes too often and indexing a large library like mine (>55,000 photos) can take days, especially if this is on a network drive. 
+So I created something simple: browse folders of photos on your computer, external drives and network drives, rate and tag them, put them on a map, and find them again, without importing them into a heavy catalogue or editing suite. 
+Lumio doesn't edit pixels. It hands photos to the editor you already use and picks up the result when you save.
+What it tries to do well is organise your library. You can connect your external drives, SD cards etc and import photos. Organise your large library, create groups of photos etc. 
+Please feel free to use the software, let me know if there are any issues, I will try and fix it in my time. I have a very different day time job. 
+Please also feel free to use and change the software, fix any bugs and share it with us. 
+If you like to work with this project do connect. 
+If you will also try and support this then I can get more help and time. 
 
 ![Lumio](docs/screenshot.png)
 
@@ -11,6 +20,7 @@ Lumio is for photographers who want something simple: browse folders of photos o
 | | |
 |---|---|
 | **Browse** | Fast thumbnail grid for very large folders, a folder tree, smart views (recently added, rated, on the map, without location), search by name, keyword, caption, place, camera or lens, and filters for rating and colour label. |
+| **Browse** | Open folders in tabs within the application and move files between the tabs. |
 | **Offline thumbnails** | Lumio keeps a small catalogue and thumbnail cache on your computer, so folders on unplugged external or network drives can still be browsed. They're shown with a "drive not connected" badge. |
 | **Viewer** | Full-screen viewer with zoom and pan and a **black / grey / light grey / white** background switch (press `B`). |
 | **Ratings & labels** | 0–5 stars (`0`–`5` keys) and colour labels (`6`–`9`), written into the photo as standard XMP so Lightroom, Bridge, digiKam, Capture One and darktable see them too. |
@@ -89,6 +99,6 @@ To build installers for all three systems at once, push the repository to GitHub
 
 Issues and pull requests are welcome. Please keep Lumio light: no pixel editing, no heavy dependencies, and every change that touches files should be safe on external and network drives.
 
-## Credits & licence
+## Credits & licence - © Light and Alley
 
 Lumio is MIT licensed (see `LICENSE`). It bundles [ExifTool](https://exiftool.org) by Phil Harvey (Perl Artistic Licence / GPL). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors. Feature ideas were inspired by digiKam and Adobe Bridge; Lumio shares no code or design with them.
