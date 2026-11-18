@@ -60,6 +60,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     add_column(conn, "photos", "stack_id", "INTEGER")?;
     add_column(conn, "photos", "stack_top", "INTEGER NOT NULL DEFAULT 0")?;
     conn.execute_batch("CREATE INDEX IF NOT EXISTS photos_stack ON photos(stack_id);")?;
+    // 0.3.2: HEIC/AVIF thumbnails made on macOS before this version ignored the photo's
+    // orientation. Rebuild the ones that are not upright, once.
+    if get_setting(conn, "fix_heic_thumbs").is_none() {
+        conn.execute(
+            "UPDATE photos SET thumb = 0, thumb_tries = 0 WHERE ext IN ('heic','heif','avif') AND orientation BETWEEN 2 AND 8",
+            [],
+        )?;
+        set_setting(conn, "fix_heic_thumbs", "1")?;
+    }
     Ok(())
 }
 

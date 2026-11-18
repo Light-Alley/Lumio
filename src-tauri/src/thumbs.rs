@@ -61,7 +61,7 @@ pub fn load_image(path: &Path, ext: &str, orientation: Option<i64>, want: u32, e
     }
     #[cfg(target_os = "macos")]
     if matches!(e.as_str(), "heic" | "heif" | "avif") || raw {
-        if let Ok(img) = sips_decode(path, tmp) {
+        if let Ok(img) = sips_decode(path, tmp, orientation) {
             return Ok(img);
         }
     }
@@ -76,8 +76,12 @@ pub fn load_image(path: &Path, ext: &str, orientation: Option<i64>, want: u32, e
     Err(anyhow!("cannot decode {}", path.display()))
 }
 
+/// Decode with macOS's own image code (HEIC, AVIF and RAW). sips leaves the pixels as
+/// they are stored and only carries the orientation tag over, so we turn the image here:
+/// by the catalogue's orientation when we have one (it includes rotations saved in an
+/// XMP sidecar), otherwise by the tag sips kept.
 #[cfg(target_os = "macos")]
-fn sips_decode(path: &Path, tmp: &Path) -> Result<DynamicImage> {
+fn sips_decode(path: &Path, tmp: &Path, orientation: Option<i64>) -> Result<DynamicImage> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
     let out = tmp.join(format!("sips{}-{}.jpg", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
@@ -92,9 +96,19 @@ fn sips_decode(path: &Path, tmp: &Path) -> Result<DynamicImage> {
     if !status.success() {
         return Err(anyhow!("sips failed"));
     }
-    let img = ImageReader::open(&out)?.with_guessed_format()?.decode();
+    let img = (|| -> Result<DynamicImage> {
+        let mut decoder = ImageReader::open(&out)?.with_guessed_format()?.into_decoder()?;
+        let kept = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+        let mut img = DynamicImage::from_decoder(decoder)?;
+        let turn = match orientation.filter(|o| (1..=8).contains(o)) {
+            Some(o) => orientation_from_exif(Some(o)),
+            None => kept,
+        };
+        img.apply_orientation(turn);
+        Ok(img)
+    })();
     let _ = std::fs::remove_file(&out);
-    Ok(img?)
+    img
 }
 
 pub fn encode_jpeg(img: &DynamicImage, quality: u8) -> Result<Vec<u8>> {

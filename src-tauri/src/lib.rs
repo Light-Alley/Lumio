@@ -64,7 +64,7 @@ fn serve_photo(state: &AppState, id: i64) -> Response<Vec<u8>> {
                 return respond(StatusCode::OK, mime_for(&p.ext), bytes, false);
             }
         }
-        let cached = state.previews_dir.join(format!("{}-{}-{}.jpg", p.id, p.mtime, p.orientation.unwrap_or(1)));
+        let cached = state.previews_dir.join(format!("v2-{}-{}-{}.jpg", p.id, p.mtime, p.orientation.unwrap_or(1)));
         if let Ok(bytes) = std::fs::read(&cached) {
             return respond(StatusCode::OK, "image/jpeg", bytes, false);
         }
