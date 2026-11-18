@@ -2,22 +2,27 @@
 
 **A lightweight, open-source photo browser and digital asset manager for macOS, Windows and Linux.**
 
-Lumio is for photographers who want something simple: After trying the bloated Abode and other open-source alternatives like Digikam, I wanted to build something lightweight that does not easily crash.
-Adobe Bridge is available for free. However, you are forced to install Creative Cloud software, create an Adobe account, and sign in with it, even if you do not have a subscription, and your data is not secure. Digikam is an excellent program. However, the experience is often frustrating for two reasons. It crashes too often, and indexing a large library like mine (>55,000 photos) can take days, especially if it is on a network drive. 
-So I created something simple: browse folders of photos on your computer, external drives, and network drives; rate and tag them; put them on a map; and find them again without importing them into a heavy catalog or editing suite. Lumio doesn't edit pixels. It hands photos to the editor you already use and retrieves the result when you save.
-What it does well is organize your library. You can connect your external drives, SD cards, etc., and import photos. Organize your large library, move photos in bulk, create a structure, rate photos, and create photo groups. 
-This software is open source and can be used and modified as you wish. It does not collect your data, displays no advertisements, and poses no security risks. Let me know if you encounter any issues. I will try to fix them in my free time. I have a full-time, very different day job. Please also feel free to use and change the software, fix any bugs, and share it so everyone benefits. Please also share feedback and any suggestions for improvement. Please be patient with me; I am just a hobbyist.  
-If you would like to work on this project, please connect. If you can also support this, I can get more help and time.
-
+Lumio is for photographers who want something simple: browse folders of photos on your computer, external drives and network drives, rate and tag them, group them, put them on a map, and find them again, without importing them into a heavy catalogue or editing suite. Lumio doesn't edit pixels. It hands photos to the editor you already use and picks up the result when you save.
 
 ![Lumio](docs/screenshot.png)
+
+## Why I built Lumio
+
+I wanted a simple way to organise a large photo library, and the tools I tried didn't suit me.
+
+Adobe Bridge is free, but I didn't want to install Creative Cloud, create an Adobe account and sign in just to browse my own photos. digiKam is an excellent program, but it crashed often for me, and indexing my library of more than 55,000 photos on a network drive took days.
+
+So I built something lightweight that does one job well: organising your library. Add folders from your computer, external drives or network drives, move photos in bulk between them, build a folder structure, rate photos and group shots of the same subject.
+
+Lumio is open source. You can use it, change it and share it. It has no account, no advertisements and no tracking. Nothing leaves your computer unless you use the map (which loads OpenStreetMap tiles) or switch on the AI photo finder.
 
 ## Features
 
 | | |
 |---|---|
 | **Browse** | Fast thumbnail grid for very large folders, a folder tree, smart views (recently added, rated, on the map, without location), search by name, keyword, caption, place, camera or lens, and filters for rating and colour label. |
-| **Browse** | Open folders in tabs within the application and move files between the tabs. |
+| **Views** | Thumbnail grid, a sortable list, and a filmstrip view with one large photo above a strip of thumbnails (`G`, `L`, `F` keys). |
+| **Tabs** | Open folders in tabs inside the app (`⌘T` / `Ctrl+T`) and drag photos from one tab to another to move them. |
 | **Offline thumbnails** | Lumio keeps a small catalogue and thumbnail cache on your computer, so folders on unplugged external or network drives can still be browsed. They're shown with a "drive not connected" badge. |
 | **Viewer** | Full-screen viewer with zoom and pan and a **black / grey / light grey / white** background switch (press `B`). |
 | **Ratings & labels** | 0–5 stars (`0`–`5` keys) and colour labels (`6`–`9`), written into the photo as standard XMP so Lightroom, Bridge, digiKam, Capture One and darktable see them too. |
@@ -92,10 +97,13 @@ To build installers for all three systems at once, push the repository to GitHub
   - `ai.rs`: the AI finder (Claude Messages API with tool use, or any OpenAI-compatible server)
 - **Svelte 5 + TypeScript** front end in `src/`, with [Leaflet](https://leafletjs.com) for maps and [Lucide](https://lucide.dev) icons.
 
-## Contributing
+## Contributing and support
 
-Issues and pull requests are welcome. Please keep Lumio light: no pixel editing, no heavy dependencies, and every change that touches files should be safe on external and network drives.
+Lumio is a hobby project. I have a full-time and very different day job, so I fix things in my free time and replies can be slow.
 
-## Credits & licence - © Light and Alley
+- **Found a problem or have an idea?** Open an [issue](https://github.com/alahmedmadina/Lumio/issues). Feedback and suggestions are welcome.
+- **Want to work on Lumio?** Pull requests are welcome, and so are people who would like to help maintain it. Open an issue to say hello. Please keep Lumio light: no pixel editing, no heavy dependencies, and every change that touches files should be safe on external and network drives.
 
-Lumio is MIT licensed (see `LICENSE`). It bundles [ExifTool](https://exiftool.org) by Phil Harvey (Perl Artistic Licence / GPL). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors. Feature ideas were inspired by digiKam and Adobe Bridge; Lumio shares no code or design with them.
+## Credits & licence
+
+Lumio is © Light and Alley and the Lumio contributors, and is MIT licensed (see `LICENSE`). It bundles [ExifTool](https://exiftool.org) by Phil Harvey (Perl Artistic Licence / GPL). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors. Feature ideas were inspired by digiKam and Adobe Bridge; Lumio shares no code or design with them.
