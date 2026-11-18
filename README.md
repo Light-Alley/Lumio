@@ -2,16 +2,13 @@
 
 **A lightweight, open-source photo browser and digital asset manager for macOS, Windows and Linux.**
 
-Lumio is for photographers who want something simple: After trying the over bloated Abode and other open source alternative like Digikam. I wanted to build something light weight and does not easily crash.
-Adobe bridge is available for free. However, you are forced to install creative cloud software, create an adobe account and sign in along with it even if you done have subscription and your data is not secure.
-Digikam is an excellent program. However, the experience is often frustrating for two reasons, it crashes too often and indexing a large library like mine (>55,000 photos) can take days, especially if this is on a network drive. 
-So I created something simple: browse folders of photos on your computer, external drives and network drives, rate and tag them, put them on a map, and find them again, without importing them into a heavy catalogue or editing suite. 
-Lumio doesn't edit pixels. It hands photos to the editor you already use and picks up the result when you save.
-What it tries to do well is organise your library. You can connect your external drives, SD cards etc and import photos. Organise your large library, create groups of photos etc. 
-Please feel free to use the software, let me know if there are any issues, I will try and fix it in my time. I have a very different day time job. 
-Please also feel free to use and change the software, fix any bugs and share it with us. 
-If you like to work with this project do connect. 
-If you will also try and support this then I can get more help and time. 
+Lumio is for photographers who want something simple: After trying the bloated Abode and other open-source alternatives like Digikam, I wanted to build something lightweight that does not easily crash.
+Adobe Bridge is available for free. However, you are forced to install Creative Cloud software, create an Adobe account, and sign in with it, even if you do not have a subscription, and your data is not secure. Digikam is an excellent program. However, the experience is often frustrating for two reasons. It crashes too often, and indexing a large library like mine (>55,000 photos) can take days, especially if it is on a network drive. 
+So I created something simple: browse folders of photos on your computer, external drives, and network drives; rate and tag them; put them on a map; and find them again without importing them into a heavy catalog or editing suite. Lumio doesn't edit pixels. It hands photos to the editor you already use and retrieves the result when you save.
+What it does well is organize your library. You can connect your external drives, SD cards, etc., and import photos. Organize your large library, move photos in bulk, create a structure, rate photos, and create photo groups. 
+This software is open source and can be used and modified as you wish. It does not collect your data, displays no advertisements, and poses no security risks. Let me know if you encounter any issues. I will try to fix them in my free time. I have a full-time, very different day job. Please also feel free to use and change the software, fix any bugs, and share it so everyone benefits. Please also share feedback and any suggestions for improvement. Please be patient with me; I am just a hobbyist.  
+If you would like to work on this project, please connect. If you can also support this, I can get more help and time.
+
 
 ![Lumio](docs/screenshot.png)
 
