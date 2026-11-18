@@ -101,7 +101,7 @@ To build installers for all three systems at once, push the repository to GitHub
 
 Lumio is a hobby project. I have a full-time and very different day job, so I fix things in my free time and replies can be slow.
 
-- **Found a problem or have an idea?** Open an [issue](https://github.com/alahmedmadina/Lumio/issues). Feedback and suggestions are welcome.
+- **Found a problem or have an idea?** Open an [issue](https://github.com/LIght-Alley/Lumio/issues). Feedback and suggestions are welcome.
 - **Want to work on Lumio?** Pull requests are welcome, and so are people who would like to help maintain it. Open an issue to say hello. Please keep Lumio light: no pixel editing, no heavy dependencies, and every change that touches files should be safe on external and network drives.
 
 ## Credits & licence
