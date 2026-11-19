@@ -126,7 +126,7 @@ impl ExifTool {
         if files.is_empty() {
             return Ok(vec![]);
         }
-        let mut args: Vec<String> = ["-j", "-n", "-fast", "-api", "largefilesupport=1"]
+        let mut args: Vec<String> = ["-j", "-n", "-fast", "-api", "largefilesupport=1", "-api", "QuickTimeUTC=1"]
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -233,6 +233,7 @@ pub const READ_TAGS: &[&str] = &[
     "GPSLatitude", "GPSLongitude", "GPSAltitude",
     "City", "State", "Country", "Location", "Sub-location", "Province-State", "Country-PrimaryLocationName",
     "Make", "Model", "LensModel", "Lens", "LensID", "ISO", "FNumber", "ExposureTime", "FocalLength",
+    "Duration", "Rotation",
 ];
 
 fn locate(resource_dir: Option<PathBuf>) -> Option<(PathBuf, Vec<String>)> {

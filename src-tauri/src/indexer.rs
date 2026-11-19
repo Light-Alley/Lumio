@@ -502,20 +502,23 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
                         metadata::merge_sidecar(&mut m, side);
                     }
                 }
+                if metadata::is_video(&c.ext) {
+                    metadata::fix_video_size(&mut m);
+                }
                 let folder = c.path.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
                 let filename = c.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                 let kw = db::encode_keywords(&m.keywords);
                 let id = if let Some(id) = c.existing {
                     tx.execute(
-                        "UPDATE photos SET root_id=?2, folder=?3, filename=?4, ext=?5, size=?6, mtime=?7, width=?8, height=?9, orientation=?10, taken_at=?11, rating=?12, label=?13, title=?14, caption=?15, keywords=?16, creator=?17, copyright=?18, lat=?19, lon=?20, alt=?21, place=?22, make=?23, model=?24, lens=?25, iso=?26, fnumber=?27, exposure=?28, focal=?29 WHERE id=?1",
-                        params![id, c.root_id, folder, filename, c.ext, c.size, c.mtime, m.width, m.height, m.orientation, m.taken_at, m.rating, m.label, m.title, m.caption, kw, m.creator, m.copyright, m.lat, m.lon, m.alt, m.place, m.make, m.model, m.lens, m.iso, m.fnumber, m.exposure, m.focal],
+                        "UPDATE photos SET root_id=?2, folder=?3, filename=?4, ext=?5, size=?6, mtime=?7, width=?8, height=?9, orientation=?10, taken_at=?11, rating=?12, label=?13, title=?14, caption=?15, keywords=?16, creator=?17, copyright=?18, lat=?19, lon=?20, alt=?21, place=?22, make=?23, model=?24, lens=?25, iso=?26, fnumber=?27, exposure=?28, focal=?29, duration=?30 WHERE id=?1",
+                        params![id, c.root_id, folder, filename, c.ext, c.size, c.mtime, m.width, m.height, m.orientation, m.taken_at, m.rating, m.label, m.title, m.caption, kw, m.creator, m.copyright, m.lat, m.lon, m.alt, m.place, m.make, m.model, m.lens, m.iso, m.fnumber, m.exposure, m.focal, m.duration],
                     )?;
                     id
                 } else {
                     tx.execute(
-                        "INSERT INTO photos (root_id, path, folder, filename, ext, size, mtime, width, height, orientation, taken_at, rating, label, title, caption, keywords, creator, copyright, lat, lon, alt, place, make, model, lens, iso, fnumber, exposure, focal, indexed_at)
-                         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30)",
-                        params![c.root_id, ps, folder, filename, c.ext, c.size, c.mtime, m.width, m.height, m.orientation, m.taken_at, m.rating, m.label, m.title, m.caption, kw, m.creator, m.copyright, m.lat, m.lon, m.alt, m.place, m.make, m.model, m.lens, m.iso, m.fnumber, m.exposure, m.focal, now],
+                        "INSERT INTO photos (root_id, path, folder, filename, ext, size, mtime, width, height, orientation, taken_at, rating, label, title, caption, keywords, creator, copyright, lat, lon, alt, place, make, model, lens, iso, fnumber, exposure, focal, indexed_at, duration)
+                         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)",
+                        params![c.root_id, ps, folder, filename, c.ext, c.size, c.mtime, m.width, m.height, m.orientation, m.taken_at, m.rating, m.label, m.title, m.caption, kw, m.creator, m.copyright, m.lat, m.lon, m.alt, m.place, m.make, m.model, m.lens, m.iso, m.fnumber, m.exposure, m.focal, now, m.duration],
                     )?;
                     tx.last_insert_rowid()
                 };

@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { ImageOff, CloudOff, ChevronUp, ChevronDown } from "@lucide/svelte";
+  import { ImageOff, Film, CloudOff, ChevronUp, ChevronDown } from "@lucide/svelte";
   import Stars from "./Stars.svelte";
   import EmptyState from "./EmptyState.svelte";
   import StackBadge from "./StackBadge.svelte";
   import { app, selection, clickSelect, openViewer, rate, rootOnline, selectedIds, dropOnView, loadPhotos, isClosedStack } from "../store.svelte";
-  import { thumbUrl, labelColor, formatDate, basename, type PhotoLite } from "../api";
+  import { thumbUrl, labelColor, formatDate, basename, isVideo, type PhotoLite } from "../api";
   import { showMenu } from "../menu.svelte";
   import { photoMenu } from "../actions";
   import { browseKeys, photoDragStart, photoDragEnd, canDropHere, dragGhosts } from "../browse";
@@ -115,7 +115,7 @@
           onkeydown={() => {}}
         >
           <span class="c-thumb">
-            {#if p.thumb}<img src={thumbUrl(p)} alt="" draggable="false" loading="lazy" />{:else}<ImageOff size={16} />{/if}
+            {#if p.thumb}<img src={thumbUrl(p)} alt="" draggable="false" loading="lazy" />{:else if isVideo(p)}<Film size={16} />{:else}<ImageOff size={16} />{/if}
           </span>
           <span class="c c0 name" class:member={p.stack_id != null && !isClosedStack(p) && !p.stack_top} title={p.path}><span class="fn">{p.filename}</span>{#if p.stack_id != null}<StackBadge {p} small />{/if}{#if offline}<CloudOff size={12} />{/if}</span>
           <span class="c c1">{formatDate(p.taken_at)}</span>
