@@ -286,7 +286,7 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
                 if !path.exists() {
                     anyhow::bail!("the file is not available (is its drive connected?)");
                 }
-                let use_sidecar = metadata::is_raw(&p.ext) && raw_mode != "embed";
+                let use_sidecar = (metadata::is_raw(&p.ext) && raw_mode != "embed") || metadata::video_needs_sidecar(&p.ext);
                 if use_sidecar {
                     let side = indexer::find_sidecar(&path).unwrap_or_else(|| path.with_extension("xmp"));
                     if !side.exists() {
@@ -294,7 +294,9 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
                     }
                     st.et.write(&side, &metadata::write_args(&edit, final_kw.as_deref(), true))?;
                 } else {
-                    st.et.write(&path, &metadata::write_args(&edit, final_kw.as_deref(), false))?;
+                    // MP4 and MOV hold XMP but not EXIF or IPTC.
+                    let xmp_only = metadata::is_video(&p.ext);
+                    st.et.write(&path, &metadata::write_args(&edit, final_kw.as_deref(), xmp_only))?;
                 }
                 Ok(())
             })();
@@ -344,6 +346,9 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
                 if !path.exists() {
                     anyhow::bail!("the file is not available (is its drive connected?)");
                 }
+                if metadata::is_video(&p.ext) {
+                    anyhow::bail!("videos can't be rotated in Lumio");
+                }
                 if matches!(p.ext.as_str(), "gif" | "bmp") {
                     anyhow::bail!("{} files can't store a rotation", p.ext.to_uppercase());
                 }
@@ -392,6 +397,30 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
             }
         }
         Ok(rep)
+    })
+    .await
+}
+
+/// Store a video thumbnail captured by the app's player (a JPEG as base64), for videos
+/// the system could not make a thumbnail for. Also fills in the size and length if the
+/// file's metadata did not have them.
+#[tauri::command]
+pub async fn save_video_thumb(state: S<'_>, id: i64, jpeg: String, width: Option<i64>, height: Option<i64>, duration: Option<f64>) -> R<()> {
+    use base64::Engine;
+    let st = state.inner().clone();
+    blocking(move || {
+        let Some(p) = db::get_photo(&st.conn.lock(), id)? else { anyhow::bail!("not in the catalogue") };
+        if !metadata::is_video(&p.ext) {
+            anyhow::bail!("not a video");
+        }
+        let bytes = base64::engine::general_purpose::STANDARD.decode(jpeg.trim())?;
+        crate::thumbs::save_frame(&bytes, &crate::thumbs::thumb_path(&st.thumbs_dir, id))?;
+        let duration = duration.filter(|d| d.is_finite() && *d > 0.0);
+        st.conn.lock().execute(
+            "UPDATE photos SET thumb = 1, thumb_tries = 0, width = coalesce(width, ?2), height = coalesce(height, ?3), duration = coalesce(duration, ?4) WHERE id = ?1",
+            params![id, width.filter(|w| *w > 0), height.filter(|h| *h > 0), duration],
+        )?;
+        Ok(())
     })
     .await
 }

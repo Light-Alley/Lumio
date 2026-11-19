@@ -1,11 +1,12 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { ImageOff, CloudOff, RotateCcw, RotateCw, FlipHorizontal2, FlipVertical2 } from "@lucide/svelte";
+  import { ImageOff, Film, Play, CloudOff, RotateCcw, RotateCw, FlipHorizontal2, FlipVertical2 } from "@lucide/svelte";
   import StackBadge from "./StackBadge.svelte";
   import Stars from "./Stars.svelte";
   import EmptyState from "./EmptyState.svelte";
   import { app, selection, clickSelect, openViewer, rate, setLabel, rootOnline, selectedIds, selectOnly, dropOnView, saveSetting, rotatePhotos, isClosedStack, type Bg } from "../store.svelte";
-  import { api, thumbUrl, photoUrl, labelColor, LABELS, formatExposure, type Photo, type PhotoLite } from "../api";
+  import { api, thumbUrl, photoUrl, labelColor, LABELS, formatExposure, formatDuration, isVideo, type Photo, type PhotoLite } from "../api";
+  import VideoPlayer from "./VideoPlayer.svelte";
   import { showMenu } from "../menu.svelte";
   import { photoMenu } from "../actions";
   import { browseKeys, photoDragStart, photoDragEnd, canDropHere, dragGhosts } from "../browse";
@@ -27,6 +28,9 @@
   const current = $derived(app.photos.find((p) => p.id === app.focusId) ?? null);
   let detail: Photo | null = $state(null);
   let loaded = $state(false);
+  let stagePlayer: VideoPlayer | undefined = $state();
+  // Don't keep playing underneath the full-screen viewer.
+  $effect(() => { if (app.viewerIndex >= 0) stagePlayer?.pause(); });
 
   // Always show something: focus the first photo when nothing is focused.
   $effect(() => {
@@ -52,7 +56,7 @@
       const i = app.photos.findIndex((x) => x.id === id);
       for (const d of [1, -1]) {
         const n = app.photos[i + d];
-        if (n && rootOnline(n.root_id)) new Image().src = photoUrl(n);
+        if (n && rootOnline(n.root_id) && !isVideo(n)) new Image().src = photoUrl(n);
       }
     });
   });
@@ -126,6 +130,9 @@
 <div class="film">
   <div class="stage" style:background={bg} class:light={lightBg} ondblclick={() => current && openViewer(current.id)} role="img" aria-label={current?.filename ?? ""}>
     {#if current}
+      {#if isVideo(current) && rootOnline(current.root_id)}
+        <VideoPlayer bind:this={stagePlayer} p={current} compact />
+      {:else}
       {#key current.id}
         {#if current.thumb}<img class="ph" src={thumbUrl(current)} alt="" draggable="false" class:hide={loaded} />{/if}
         {#if rootOnline(current.root_id)}
@@ -134,6 +141,7 @@
           <span class="off"><CloudOff size={14} /> Drive not connected, showing the thumbnail</span>
         {/if}
       {/key}
+      {/if}
     {:else}
       <EmptyState />
     {/if}
@@ -149,12 +157,14 @@
     <span class="name">{current?.filename ?? ""}</span>
     <span class="right">
       {#if current}
+        {#if !isVideo(current)}
         <span class="turns">
           <button class="ghost icon" title="Rotate left (⌘[ / Ctrl+[)" aria-label="Rotate left" onclick={() => rotatePhotos(turnIds(), "left")}><RotateCcw size={14} /></button>
           <button class="ghost icon" title="Rotate right (⌘] / Ctrl+])" aria-label="Rotate right" onclick={() => rotatePhotos(turnIds(), "right")}><RotateCw size={14} /></button>
           <button class="ghost icon" title="Flip horizontal" aria-label="Flip horizontal" onclick={() => rotatePhotos(turnIds(), "flip_h")}><FlipHorizontal2 size={14} /></button>
           <button class="ghost icon" title="Flip vertical" aria-label="Flip vertical" onclick={() => rotatePhotos(turnIds(), "flip_v")}><FlipVertical2 size={14} /></button>
         </span>
+        {/if}
         {#each LABELS as l, i}
           <button class="sw" class:on={current.label === l.name} style:--c={l.color} title={`${l.name} (${i + 6})`} aria-label={l.name} onclick={() => setLabel([current.id], current.label === l.name ? "" : l.name)}></button>
         {/each}
@@ -203,7 +213,8 @@
           onkeydown={() => {}}
         >
           <div class="box" style:height={`${tile}px`}>
-            {#if p.thumb}<img src={thumbUrl(p)} alt={p.filename} draggable="false" loading="lazy" />{:else}<ImageOff size={18} />{/if}
+            {#if p.thumb}<img src={thumbUrl(p)} alt={p.filename} draggable="false" loading="lazy" />{:else if isVideo(p)}<Film size={18} />{:else}<ImageOff size={18} />{/if}
+            {#if isVideo(p)}<span class="vid"><Play size={8} fill="currentColor" />{formatDuration(p.duration)}</span>{/if}
             {#if labelColor(p.label)}<span class="lab" style:background={labelColor(p.label)}></span>{/if}
             {#if p.stack_id != null}<span class="stk"><StackBadge {p} small /></span>{/if}
           </div>
@@ -240,6 +251,7 @@
   .turns { display: flex; gap: 1px; margin-right: 10px; }
   .turns .icon { padding: 3px; }
   .stk { position: absolute; bottom: 4px; left: 4px; }
+  .vid { position: absolute; bottom: 4px; right: 4px; display: flex; align-items: center; gap: 2px; font-size: 9px; font-variant-numeric: tabular-nums; background: rgba(0,0,0,.6); color: #eee; padding: 1px 4px; border-radius: 3px; }
   .tile.member .box { background: color-mix(in srgb, var(--accent) 9%, var(--bg-2)); }
   .strip { flex-shrink: 0; overflow-x: auto; overflow-y: hidden; position: relative; outline: none; background: var(--bg); }
   .strip.drop { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-soft); }

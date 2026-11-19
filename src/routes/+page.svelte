@@ -17,8 +17,10 @@
   import StatusBar from "$lib/components/StatusBar.svelte";
   import Settings from "$lib/components/Settings.svelte";
   import { app, init } from "$lib/store.svelte";
+  import { watchVideoThumbs } from "$lib/videoThumbs.svelte";
 
   onMount(() => { init(); });
+  watchVideoThumbs();
   $effect(() => { document.documentElement.dataset.theme = app.theme; });
 </script>
 
