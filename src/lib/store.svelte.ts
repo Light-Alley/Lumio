@@ -94,10 +94,10 @@ export function rootOnline(rootId: number): boolean {
 // ------------------------------------------------------------------ toasts & dialogs
 
 let toastSeq = 1;
-export function toast(text: string, kind: Toast["kind"] = "info", action?: Toast["action"]) {
+export function toast(text: string, kind: Toast["kind"] = "info", action?: Toast["action"], ms?: number) {
   const id = toastSeq++;
   app.toasts.push({ id, text, kind, action });
-  setTimeout(() => dismissToast(id), kind === "error" ? 9000 : action ? 8000 : 3500);
+  setTimeout(() => dismissToast(id), ms ?? (kind === "error" ? 9000 : action ? 8000 : 3500));
 }
 export function dismissToast(id: number) {
   const i = app.toasts.findIndex((t) => t.id === id);

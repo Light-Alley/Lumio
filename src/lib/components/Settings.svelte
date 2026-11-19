@@ -62,6 +62,12 @@
             <button class:active={app.theme === "dark"} onclick={() => setTheme("dark")}>Dark</button>
             <button class:active={app.theme === "light"} onclick={() => setTheme("light")}>Light</button>
           </div>
+          <h3>Sharing</h3>
+          <p class="muted">What to send when you share photos by email, WhatsApp or a website. Your originals are never changed.</p>
+          <label class="radio"><input type="radio" name="share" checked={(app.settings.share_size ?? "original") === "original"} onchange={() => saveSetting("share_size", "original")} />
+            <span><strong>Full size</strong> (recommended). JPEG and PNG photos are sent as they are; RAW and HEIC photos are turned into high-quality JPEG copies first.</span></label>
+          <label class="radio"><input type="radio" name="share" checked={app.settings.share_size === "small"} onchange={() => saveSetting("share_size", "small")} />
+            <span><strong>Smaller copies</strong> (2048 pixels on the long side). Quicker to send, and they leave out the camera details and the location where the photo was taken.</span></label>
           <h3>RAW files</h3>
           <p class="muted">Where should ratings, keywords and other edits go for RAW photos (CR3, NEF, ARW, DNG…)?</p>
           <label class="radio"><input type="radio" name="raw" checked={(app.settings.raw_write_mode ?? "sidecar") === "sidecar"} onchange={() => saveSetting("raw_write_mode", "sidecar")} />

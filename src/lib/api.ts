@@ -143,3 +143,16 @@ export function parentOf(p: string) {
   while (i > 0 && (parts[i] === "" || parts[i] === "/" || parts[i] === "\\")) i--;
   return parts.slice(0, Math.max(i - 1, 1)).join("");
 }
+
+// ------------------------------------------------------------ sharing
+export interface ShareOutcome { message: string }
+export interface ShareOptions { sheet: boolean; sites: { key: string; name: string }[] }
+export const shareApi = {
+  options: () => invoke<ShareOptions>("share_options"),
+  sheet: (ids: number[], x: number, y: number) => invoke<ShareOutcome>("share_sheet", { ids, x, y }),
+  email: (ids: number[]) => invoke<ShareOutcome>("share_email", { ids }),
+  whatsapp: (ids: number[], web: boolean) => invoke<ShareOutcome>("share_whatsapp", { ids, web }),
+  site: (ids: number[], site: string) => invoke<ShareOutcome>("share_site", { ids, site }),
+  copy: (ids: number[]) => invoke<ShareOutcome>("share_copy", { ids }),
+  show: (ids: number[]) => invoke<ShareOutcome>("share_show", { ids }),
+};

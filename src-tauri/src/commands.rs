@@ -6,7 +6,7 @@ use crate::indexer::{self, Job};
 use crate::metadata::{self, Edit};
 use crate::openwith::{self, AppInfo};
 use crate::state::AppState;
-use crate::{ai, watcher};
+use crate::{ai, share, watcher};
 use rusqlite::params;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -625,4 +625,55 @@ pub fn open_default(state: S, ids: Vec<i64>) -> R<()> {
         tauri_plugin_opener::open_path(&p.path, None::<&str>).map_err(e)?;
     }
     Ok(())
+}
+
+// ------------------------------------------------------------ sharing
+
+fn shared(state: &S) -> Arc<AppState> {
+    state.inner().clone()
+}
+
+/// Which sharing options this computer offers.
+#[tauri::command]
+pub fn share_options() -> serde_json::Value {
+    serde_json::json!({
+        "sheet": share::has_sheet(),
+        "sites": share::SITES.iter().map(|(k, n, _)| serde_json::json!({ "key": k, "name": n })).collect::<Vec<_>>(),
+    })
+}
+
+#[tauri::command]
+pub async fn share_sheet(state: S<'_>, ids: Vec<i64>, x: f64, y: f64) -> R<share::Outcome> {
+    let st = shared(&state);
+    blocking(move || share::sheet(&st, &ids, x, y)).await
+}
+
+#[tauri::command]
+pub async fn share_email(state: S<'_>, ids: Vec<i64>) -> R<share::Outcome> {
+    let st = shared(&state);
+    blocking(move || share::email(&st, &ids)).await
+}
+
+#[tauri::command]
+pub async fn share_whatsapp(state: S<'_>, ids: Vec<i64>, web: bool) -> R<share::Outcome> {
+    let st = shared(&state);
+    blocking(move || share::whatsapp(&st, &ids, web)).await
+}
+
+#[tauri::command]
+pub async fn share_site(state: S<'_>, ids: Vec<i64>, site: String) -> R<share::Outcome> {
+    let st = shared(&state);
+    blocking(move || share::site(&st, &ids, &site)).await
+}
+
+#[tauri::command]
+pub async fn share_copy(state: S<'_>, ids: Vec<i64>) -> R<share::Outcome> {
+    let st = shared(&state);
+    blocking(move || share::copy_only(&st, &ids)).await
+}
+
+#[tauri::command]
+pub async fn share_show(state: S<'_>, ids: Vec<i64>) -> R<share::Outcome> {
+    let st = shared(&state);
+    blocking(move || share::show_copies(&st, &ids)).await
 }

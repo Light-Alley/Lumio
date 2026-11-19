@@ -1,7 +1,7 @@
 // Context-menu builders shared by the grid, viewer and map.
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { api, errText, fileManagerName, isMac, LABELS, type PhotoLite, type FolderNode, type Root } from "./api";
-import type { MenuItem } from "./menu.svelte";
+import { api, errText, fileManagerName, isMac, isLinux, LABELS, shareApi, type PhotoLite, type FolderNode, type Root, type ShareOutcome } from "./api";
+import { menu, type MenuItem } from "./menu.svelte";
 import { openSmugMug, openWebExport } from "./publish.svelte";
 import {
   app, selection, selectedIds, rate, setLabel, moveOrCopy, trashPhotos, renamePhoto, openViewer,
@@ -42,6 +42,7 @@ export function photoMenu(p: PhotoLite): MenuItem[] {
       },
     },
     { label: `Show in ${fileManagerName}`, disabled: offlineNote, action: () => api.reveal(p.id).catch(errorToast) },
+    { label: "Share", disabled: offlineNote, submenu: shareMenu(ids) },
     { separator: true },
     {
       label: "Rating",
@@ -130,4 +131,57 @@ export function folderMenu(n: FolderNode, root?: Root): MenuItem[] {
     items.push({ label: "Move folder to Trash", danger: true, disabled: !n.online, action: () => trashFolder(n.path, n.name) });
   }
   return items;
+}
+
+// ------------------------------------------------------------------ sharing
+
+/** Run a share action, showing what to do next (these hints stay up a little longer). */
+function sharing(run: () => Promise<ShareOutcome>, busy = "Preparing…") {
+  const slow = setTimeout(() => toast(busy), 600);
+  run()
+    .then((r) => { if (r.message) toast(r.message, "success", undefined, 9000); })
+    .catch(errorToast)
+    .finally(() => clearTimeout(slow));
+}
+
+/** The Share submenu, for the context menu and the toolbar's Share button. */
+export function shareMenu(ids: number[]): MenuItem[] {
+  const n = ids.length;
+  const items: MenuItem[] = [];
+  if (!isLinux) {
+    items.push(
+      { label: isMac ? "Share… (AirDrop, Messages, Mail and more)" : "Share… (Windows share)", action: () => {
+        // Anchor the macOS share sheet where the menu was opened.
+        const x = menu.x, y = menu.y;
+        sharing(() => shareApi.sheet(ids, x, y));
+      } },
+      { separator: true },
+    );
+  }
+  items.push(
+    { label: "Email", action: () => sharing(() => shareApi.email(ids)) },
+    { label: "WhatsApp", action: () => sharing(() => shareApi.whatsapp(ids, false)) },
+    { label: "WhatsApp Web", action: () => sharing(() => shareApi.whatsapp(ids, true)) },
+    {
+      label: "Post on a website",
+      submenu: async () => {
+        try {
+          const o = await shareApi.options();
+          return o.sites.map((s) => ({ label: s.name, action: () => sharing(() => shareApi.site(ids, s.key)) }));
+        } catch (e) {
+          return [{ label: errText(e), disabled: true }];
+        }
+      },
+    },
+    { label: "SmugMug…", action: () => openSmugMug(ids) },
+    { separator: true },
+    { label: n > 1 ? `Copy ${n} photos` : "Copy photo", shortcut: `${cmd}C`, action: () => copyPhotos(ids) },
+    { label: `Show copies to share in ${fileManagerName}`, action: () => sharing(() => shareApi.show(ids)) },
+  );
+  return items;
+}
+
+/** Copy photos to the clipboard, ready to paste into a chat, an email or a website. */
+export function copyPhotos(ids: number[]) {
+  sharing(() => shareApi.copy(ids));
 }

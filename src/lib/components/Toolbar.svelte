@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { Search, LayoutGrid, List, GalleryHorizontal, Map as MapIcon, Info, Sparkles, Settings, ArrowDownWideNarrow, ArrowUpNarrowWide, FolderTree, X } from "@lucide/svelte";
+  import { Search, LayoutGrid, List, GalleryHorizontal, Map as MapIcon, Info, Sparkles, Settings, ArrowDownWideNarrow, ArrowUpNarrowWide, FolderTree, X, Share2 } from "@lucide/svelte";
   import Stars from "./Stars.svelte";
   import IdentityPlate from "./IdentityPlate.svelte";
-  import { app, loadPhotos, saveSetting, setView, scopeTitle } from "../store.svelte";
+  import { app, loadPhotos, saveSetting, setView, scopeTitle, selection, selectedIds } from "../store.svelte";
+  import { showMenu } from "../menu.svelte";
+  import { shareMenu } from "../actions";
   import { LABELS } from "../api";
 
   let searchTimer: ReturnType<typeof setTimeout>;
@@ -12,6 +14,12 @@
   }
 
   const title = $derived(scopeTitle(app.scope));
+
+  function openShare(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    // Open the menu under the button rather than at the pointer.
+    showMenu({ preventDefault() {}, clientX: r.left, clientY: r.bottom + 4 } as MouseEvent, shareMenu(selectedIds()));
+  }
 </script>
 
 <svelte:window onkeydown={(e) => {
@@ -70,6 +78,7 @@
       <button class:active={app.panel === "info"} onclick={() => (app.panel = app.panel === "info" ? null : "info")} title="Info & metadata"><Info size={15} /></button>
       <button class:active={app.panel === "ai"} onclick={() => (app.panel = app.panel === "ai" ? null : "ai")} title="Ask AI"><Sparkles size={15} /> Ask AI</button>
     </div>
+    <button class="ghost icon" disabled={selection.size === 0} onclick={openShare} title={selection.size ? "Share the selected photos" : "Select photos to share"}><Share2 size={16} /></button>
     <button class="ghost icon" onclick={() => (app.showSettings = true)} title="Settings"><Settings size={16} /></button>
   </div>
 </header>

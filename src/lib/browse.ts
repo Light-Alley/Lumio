@@ -1,6 +1,7 @@
 // Keyboard and drag behaviour shared by the grid, list and filmstrip views.
 import { app, selection, clickSelect, openViewer, rate, setLabel, trashPhotos, selectedIds, withStacks, groupPhotos, ungroupPhotos, toggleStack, rotatePhotos } from "./store.svelte";
 import { LABELS, type PhotoLite } from "./api";
+import { copyPhotos } from "./actions";
 
 /**
  * Handle the browsing shortcuts. `step` maps arrow keys to how far they move the focus
@@ -19,6 +20,11 @@ export function browseKeys(e: KeyboardEvent, step: Record<string, number>, revea
     return;
   }
   if (e.key === "Escape") { selection.clear(); return; }
+  if (meta && !e.shiftKey && e.key.toLowerCase() === "c" && ids.length && !window.getSelection()?.toString()) {
+    e.preventDefault();
+    copyPhotos(ids);
+    return;
+  }
   const k = e.key.toLowerCase();
   if (meta && k === "g" && ids.length) { e.preventDefault(); if (e.shiftKey) ungroupPhotos(ids); else groupPhotos(ids); return; }
   if (meta && (e.key === "]" || e.key === "[") && ids.length) { e.preventDefault(); rotatePhotos(ids, e.key === "]" ? "right" : "left"); return; }
