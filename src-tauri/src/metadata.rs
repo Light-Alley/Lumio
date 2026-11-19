@@ -11,9 +11,43 @@ pub const RAW_EXTS: &[&str] = &[
     "x3f", "3fr", "iiq", "erf", "mef", "mos", "kdc", "dcr", "rwl",
 ];
 
+/// Video files. Lumio catalogues them like photos and plays them in the webview's own
+/// player, so which ones actually play depends on the system (see docs/video.md).
+pub const VIDEO_EXTS: &[&str] = &[
+    "mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv",
+];
+
 pub fn is_supported(ext: &str) -> bool {
     let e = ext.to_ascii_lowercase();
-    IMAGE_EXTS.contains(&e.as_str()) || RAW_EXTS.contains(&e.as_str())
+    IMAGE_EXTS.contains(&e.as_str()) || RAW_EXTS.contains(&e.as_str()) || VIDEO_EXTS.contains(&e.as_str())
+}
+
+pub fn is_video(ext: &str) -> bool {
+    VIDEO_EXTS.contains(&ext.to_ascii_lowercase().as_str())
+}
+
+/// Videos ExifTool can't write to directly; their metadata goes into an XMP sidecar.
+pub fn video_needs_sidecar(ext: &str) -> bool {
+    is_video(ext) && !matches!(ext.to_ascii_lowercase().as_str(), "mp4" | "m4v" | "mov" | "3gp")
+}
+
+/// The MIME type a video is served with. Chromium-based webviews (Windows) don't claim
+/// QuickTime, but play most .mov files when told they are MP4.
+pub fn video_mime(ext: &str) -> &'static str {
+    match ext.to_ascii_lowercase().as_str() {
+        "mp4" | "m4v" => "video/mp4",
+        "mov" if cfg!(target_os = "macos") => "video/quicktime",
+        "mov" => "video/mp4",
+        "webm" => "video/webm",
+        "mkv" => "video/x-matroska",
+        "avi" => "video/x-msvideo",
+        "3gp" => "video/3gpp",
+        "mts" | "m2ts" => "video/mp2t",
+        "mpg" | "mpeg" => "video/mpeg",
+        "wmv" => "video/x-ms-wmv",
+        "ogv" => "video/ogg",
+        _ => "application/octet-stream",
+    }
 }
 
 pub fn is_raw(ext: &str) -> bool {
@@ -54,6 +88,10 @@ pub struct Meta {
     pub fnumber: Option<f64>,
     pub exposure: Option<f64>,
     pub focal: Option<f64>,
+    /// Length of a video in seconds.
+    pub duration: Option<f64>,
+    /// Rotation a video is played with (QuickTime "Rotation": 0, 90, 180 or 270).
+    pub video_rotation: Option<i64>,
 }
 
 fn s(v: &Value, keys: &[&str]) -> Option<String> {
@@ -181,7 +219,24 @@ pub fn parse(v: &Value) -> Meta {
     m.fnumber = f(v, &["FNumber"]);
     m.exposure = f(v, &["ExposureTime"]);
     m.focal = f(v, &["FocalLength"]);
+    m.duration = f(v, &["Duration"])
+        .or_else(|| s(v, &["Duration"]).and_then(|d| parse_clock(&d)))
+        .filter(|d| d.is_finite() && *d > 0.0);
+    m.video_rotation = f(v, &["Rotation"]).map(|x| x as i64);
     m
+}
+
+/// "00:01:30.5" or "1:30" -> seconds (Matroska/WebM durations come as text).
+fn parse_clock(t: &str) -> Option<f64> {
+    t.trim().split(':').try_fold(0.0, |acc, part| part.trim().parse::<f64>().ok().map(|x| acc * 60.0 + x))
+}
+
+/// Videos record their size unrotated plus a rotation to play them with (phones filming
+/// upright store 90). Swap width and height so the catalogue holds the size as seen.
+pub fn fix_video_size(m: &mut Meta) {
+    if matches!(m.video_rotation, Some(90) | Some(270)) {
+        std::mem::swap(&mut m.width, &mut m.height);
+    }
 }
 
 /// Overlay XMP sidecar values (Lightroom / Bridge style) on top of the image's own.
@@ -400,5 +455,30 @@ mod orientation_tests {
         assert_eq!(transform_orientation(Some(1), "flip_v"), Some(4));
         assert_eq!(transform_orientation(Some(6), "flip_h"), Some(5));
         assert_eq!(transform_orientation(Some(6), "flip_v"), Some(7));
+    }
+}
+
+#[cfg(test)]
+mod video_tests {
+    use super::*;
+
+    #[test]
+    fn videos_are_recognised() {
+        assert!(is_supported("MP4") && is_video("mov") && !is_video("jpg"));
+        assert!(video_needs_sidecar("mkv") && !video_needs_sidecar("mp4"));
+    }
+
+    #[test]
+    fn upright_phone_video_swaps_size() {
+        let v = serde_json::json!({"ImageWidth": 1920, "ImageHeight": 1080, "Rotation": 90, "Duration": 12.5});
+        let mut m = parse(&v);
+        fix_video_size(&mut m);
+        assert_eq!((m.width, m.height, m.duration), (Some(1080), Some(1920), Some(12.5)));
+    }
+
+    #[test]
+    fn webm_duration_as_text() {
+        let m = parse(&serde_json::json!({"Duration": "00:01:30.008000000"}));
+        assert!((m.duration.unwrap() - 90.008).abs() < 1e-6);
     }
 }

@@ -25,6 +25,7 @@ Lumio is open source. You can use it, change it and share it. It has no account,
 | **Tabs** | Open folders in tabs inside the app (`⌘T` / `Ctrl+T`) and drag photos from one tab to another to move them. |
 | **Offline thumbnails** | Lumio keeps a small catalogue and thumbnail cache on your computer, so folders on unplugged external or network drives can still be browsed. They're shown with a "drive not connected" badge. |
 | **Viewer** | Full-screen viewer with zoom and pan and a **black / grey / light grey / white** background switch (press `B`). |
+| **Video preview** | Videos show up next to your photos with their length on the thumbnail. Open one to play it with a simple player: play/pause (`Space` or `K`), back and forward 10 seconds (`J` / `L`), a position bar, and volume (`M` mutes). It uses the video support already built into your system, so it adds nothing to the download. See [docs/video.md](docs/video.md) for which formats play where. |
 | **Ratings & labels** | 0–5 stars (`0`–`5` keys) and colour labels (`6`–`9`), written into the photo as standard XMP so Lightroom, Bridge, digiKam, Capture One and darktable see them too. |
 | **Rotate & flip** | Rotate left or right (`⌘[` / `⌘]`, `Ctrl+[` / `Ctrl+]`) and flip horizontally or vertically, from the right-click menu, the filmstrip or the viewer. Lossless: only the orientation tag changes (in an XMP sidecar for RAW files), so the image itself is never re-saved. |
 | **Groups (stacks)** | Select shots of the same subject and press `⌘G` / `Ctrl+G` to group them. A closed group shows one cover photo with a count; click the count or press `S` to open it. Make any shot the cover, take shots out, or ungroup with `⇧⌘G` / `Ctrl+Shift+G`. Groups move together. They're kept in Lumio's catalogue, not written into the files. |
@@ -36,6 +37,7 @@ Lumio is open source. You can use it, change it and share it. It has no account,
 | **AI photo finder** | "Show me sunsets from last summer rated 4 stars or more." Ask in plain language and the assistant searches the catalogue (dates, places, keywords, ratings, cameras) and can look at thumbnails for visual questions. Works with **Claude** (your own Anthropic API key) or a **local model** through Ollama / LM Studio, so nothing leaves your computer. |
 
 Supported formats: JPEG, PNG, WebP, GIF, BMP, TIFF, HEIC/HEIF, AVIF, and RAW (DNG, CR2, CR3, NEF, ARW, RAF, ORF, RW2, PEF, SRW and more).
+Videos: MP4, MOV, M4V and WebM play on every system; MKV, AVI, MTS, MPG, WMV and others are listed and can be opened in your video player, and play inside Lumio where the system supports them ([details](docs/video.md)).
 
 ## Installing
 
@@ -89,7 +91,7 @@ To build installers for all three systems at once, push the repository to GitHub
 - **Rust** back end ([Tauri 2](https://tauri.app)) using the system's own web view, so the app stays small (about 15 MB installed versus hundreds of MB for Qt or Electron apps).
   - `src-tauri/src/db.rs`: SQLite catalogue
   - `indexer.rs`: background scanning, metadata reading and thumbnail building
-  - `thumbs.rs`: thumbnails and previews (the `image` crate, embedded RAW previews, `sips` for HEIC on macOS)
+  - `thumbs.rs`: thumbnails and previews (the `image` crate, embedded RAW previews, `sips` for HEIC on macOS, Quick Look for video thumbnails on macOS)
   - `exiftool.rs` / `metadata.rs`: metadata reading and writing via a persistent ExifTool process
   - `fileops.rs`: move, copy, rename and trash, keeping the catalogue in sync
   - `watcher.rs`: file-system watching for edits made in other apps

@@ -53,11 +53,83 @@ fn mime_for(ext: &str) -> &'static str {
     }
 }
 
+/// How much of a video one request returns. The player asks for more as it plays,
+/// so a long film on a network drive is never read into memory whole.
+const VIDEO_CHUNK: u64 = 4 * 1024 * 1024;
+
+/// Parse a `Range: bytes=start-end` header (single ranges only, which is what players send).
+fn parse_range(h: &str, len: u64) -> Option<(u64, u64)> {
+    let spec = h.trim().strip_prefix("bytes=")?.split(',').next()?.trim();
+    let (a, b) = spec.split_once('-')?;
+    let (start, end) = if a.is_empty() {
+        // "bytes=-500": the last 500 bytes.
+        let n: u64 = b.parse().ok()?;
+        (len.saturating_sub(n), len.checked_sub(1)?)
+    } else {
+        let start: u64 = a.parse().ok()?;
+        let end = if b.is_empty() { len.checked_sub(1)? } else { b.parse::<u64>().ok()?.min(len.checked_sub(1)?) };
+        (start, end)
+    };
+    (start <= end && start < len).then_some((start, end))
+}
+
+/// Serve a video in pieces (HTTP range requests), which is what the webviews' players
+/// need to start quickly and to seek.
+fn serve_video(path: &std::path::Path, ext: &str, range: Option<&str>) -> Response<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else { return not_found() };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let mime = metadata::video_mime(ext);
+    let base = || {
+        Response::builder()
+            .header(header::CONTENT_TYPE, mime)
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+    };
+    let wanted = match range {
+        Some(h) => match parse_range(h, len) {
+            Some(r) => Some(r),
+            None => {
+                return base()
+                    .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                    .header(header::CONTENT_RANGE, format!("bytes */{len}"))
+                    .body(vec![])
+                    .unwrap()
+            }
+        },
+        None => None,
+    };
+    // Small files without a range go back whole.
+    if wanted.is_none() && len <= VIDEO_CHUNK {
+        let mut body = Vec::with_capacity(len as usize);
+        return match f.read_to_end(&mut body) {
+            Ok(_) => base().status(StatusCode::OK).header(header::CONTENT_LENGTH, body.len()).body(body).unwrap(),
+            Err(_) => not_found(),
+        };
+    }
+    let (start, end) = wanted.unwrap_or((0, len.saturating_sub(1)));
+    let end = end.min(start + VIDEO_CHUNK - 1);
+    let mut body = vec![0u8; (end - start + 1) as usize];
+    if f.seek(SeekFrom::Start(start)).and_then(|_| f.read_exact(&mut body)).is_err() {
+        return not_found();
+    }
+    base()
+        .status(StatusCode::PARTIAL_CONTENT)
+        .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"))
+        .header(header::CONTENT_LENGTH, body.len())
+        .body(body)
+        .unwrap()
+}
+
 /// Serves `photo://localhost/<id>`: the original if the webview can show it, otherwise a
 /// generated JPEG preview; when the drive is offline, the cached thumbnail.
-fn serve_photo(state: &AppState, id: i64) -> Response<Vec<u8>> {
+/// Videos are streamed in pieces (see `serve_video`).
+fn serve_photo(state: &AppState, id: i64, range: Option<&str>) -> Response<Vec<u8>> {
     let Ok(Some(p)) = db::get_photo(&state.conn.lock(), id) else { return not_found() };
     let path = PathBuf::from(&p.path);
+    if metadata::is_video(&p.ext) {
+        return serve_video(&path, &p.ext, range);
+    }
     if path.exists() {
         if metadata::browser_native(&p.ext) {
             if let Ok(bytes) = std::fs::read(&path) {
@@ -109,8 +181,9 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("photo", |ctx, request, responder| {
             let state = ctx.app_handle().state::<Arc<AppState>>().inner().clone();
             let id = id_from_uri(request.uri());
+            let range = request.headers().get(header::RANGE).and_then(|v| v.to_str().ok()).map(str::to_owned);
             std::thread::spawn(move || {
-                responder.respond(id.map(|id| serve_photo(&state, id)).unwrap_or_else(not_found));
+                responder.respond(id.map(|id| serve_photo(&state, id, range.as_deref())).unwrap_or_else(not_found));
             });
         })
         .setup(|app| {
@@ -177,6 +250,7 @@ pub fn run() {
             commands::rename_photo,
             commands::update_metadata,
             commands::rotate_photos,
+            commands::save_video_thumb,
             commands::stack_photos,
             commands::unstack_photos,
             commands::set_stack_top,
@@ -195,4 +269,21 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lumio");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_range;
+
+    #[test]
+    fn ranges() {
+        assert_eq!(parse_range("bytes=0-", 1000), Some((0, 999)));
+        assert_eq!(parse_range("bytes=0-1", 1000), Some((0, 1)));
+        assert_eq!(parse_range("bytes=500-2000", 1000), Some((500, 999)));
+        assert_eq!(parse_range("bytes=-100", 1000), Some((900, 999)));
+        assert_eq!(parse_range("bytes=1000-", 1000), None);
+        assert_eq!(parse_range("bytes=5-2", 1000), None);
+        assert_eq!(parse_range("bytes=0-", 0), None);
+        assert_eq!(parse_range("items=0-1", 1000), None);
+    }
 }

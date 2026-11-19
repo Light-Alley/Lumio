@@ -127,7 +127,15 @@ pub fn make_thumb(
     et: &ExifTool,
     tmp: &Path,
 ) -> Result<(u32, u32)> {
-    let img = load_image(src, ext, orientation, THUMB_SIZE, et, tmp)?;
+    let img = if metadata::is_video(ext) {
+        video_frame(src, et, tmp)?
+    } else {
+        load_image(src, ext, orientation, THUMB_SIZE, et, tmp)?
+    };
+    write_thumb(&img, dest)
+}
+
+fn write_thumb(img: &DynamicImage, dest: &Path) -> Result<(u32, u32)> {
     let (w, h) = (img.width(), img.height());
     let t = img.thumbnail(THUMB_SIZE, THUMB_SIZE);
     let bytes = encode_jpeg(&t, 80)?;
@@ -136,6 +144,71 @@ pub fn make_thumb(
     }
     std::fs::write(dest, bytes)?;
     Ok((w, h))
+}
+
+/// Save a video frame the app's own player captured (used where the system has no
+/// video thumbnailer Lumio can call: Windows, Linux, and files macOS can't preview).
+pub fn save_frame(bytes: &[u8], dest: &Path) -> Result<(u32, u32)> {
+    let img = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?.decode()?;
+    write_thumb(&img, dest)
+}
+
+/// A still for a video thumbnail without bundling a video decoder: a preview the camera
+/// embedded in the file, or on macOS the system's Quick Look thumbnail. Elsewhere the
+/// app captures a frame with the webview's player instead (see `save_frame`).
+fn video_frame(src: &Path, et: &ExifTool, tmp: &Path) -> Result<DynamicImage> {
+    if et.available() {
+        if let Ok(Some(bytes)) = et.extract_preview(src, tmp) {
+            if let Ok(img) = decode_with_orientation(ImageReader::new(Cursor::new(bytes))) {
+                return Ok(img);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if let Ok(img) = quicklook_thumb(src, tmp) {
+        return Ok(img);
+    }
+    Err(anyhow!("no video thumbnail available for {}", src.display()))
+}
+
+/// Ask Quick Look for a thumbnail (macOS decodes H.264, HEVC, ProRes and so on).
+#[cfg(target_os = "macos")]
+fn quicklook_thumb(src: &Path, tmp: &Path) -> Result<DynamicImage> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let dir = tmp.join(format!("ql{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&dir)?;
+    let result = (|| -> Result<DynamicImage> {
+        let mut child = std::process::Command::new("/usr/bin/qlmanage")
+            .args(["-t", "-s", &THUMB_SIZE.to_string(), "-o"])
+            .arg(&dir)
+            .arg(src)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        // A file on a network drive that stopped answering must not hold up indexing.
+        let start = Instant::now();
+        loop {
+            if child.try_wait()?.is_some() {
+                break;
+            }
+            if start.elapsed() > Duration::from_secs(30) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(anyhow!("Quick Look timed out"));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let out = std::fs::read_dir(&dir)?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| p.extension().map_or(false, |e| e.eq_ignore_ascii_case("png")))
+            .ok_or_else(|| anyhow!("Quick Look made no thumbnail"))?;
+        Ok(ImageReader::open(out)?.with_guessed_format()?.decode()?)
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    result
 }
 
 pub fn make_preview(src: &Path, ext: &str, orientation: Option<i64>, et: &ExifTool, tmp: &Path) -> Result<Vec<u8>> {

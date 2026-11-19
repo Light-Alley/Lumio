@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { CloudOff, ImageOff } from "@lucide/svelte";
+  import { CloudOff, ImageOff, Film, Play } from "@lucide/svelte";
   import StackBadge from "./StackBadge.svelte";
   import Stars from "./Stars.svelte";
   import EmptyState from "./EmptyState.svelte";
   import { app, selection, clickSelect, openViewer, rate, rootOnline, selectedIds, dropOnView, isClosedStack } from "../store.svelte";
-  import { thumbUrl, labelColor, type PhotoLite } from "../api";
+  import { thumbUrl, labelColor, isVideo, formatDuration, type PhotoLite } from "../api";
   import { browseKeys, photoDragStart, photoDragEnd, canDropHere, dragGhosts } from "../browse";
   import { showMenu } from "../menu.svelte";
   import { photoMenu } from "../actions";
@@ -106,11 +106,15 @@
           {#if p.thumb}
             <img src={thumbUrl(p)} alt={p.filename} draggable="false" loading="lazy" decoding="async" />
           {:else}
-            <div class="nothumb"><ImageOff size={22} /><span>{p.ext.toUpperCase()}</span></div>
+            <div class="nothumb">{#if isVideo(p)}<Film size={22} />{:else}<ImageOff size={22} />{/if}<span>{p.ext.toUpperCase()}</span></div>
           {/if}
           {#if labelColor(p.label)}<span class="label" style:background={labelColor(p.label)}></span>{/if}
           {#if offline}<span class="badge" title="Drive not connected"><CloudOff size={12} /></span>{/if}
-          <span class="ext">{p.ext.toUpperCase()}</span>
+          {#if isVideo(p)}
+            <span class="vid" title="Video"><Play size={9} fill="currentColor" />{formatDuration(p.duration)}</span>
+          {:else}
+            <span class="ext">{p.ext.toUpperCase()}</span>
+          {/if}
           {#if p.stack_id != null}<span class="stackpos"><StackBadge {p} /></span>{/if}
         </div>
         <div class="foot">
@@ -143,6 +147,7 @@
   .badge { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.6); color: #ddd; border-radius: 4px; padding: 2px 3px; display: flex; }
   .ext { position: absolute; bottom: 5px; right: 6px; font-size: 9px; letter-spacing: .04em; background: rgba(0,0,0,.55); color: #ddd; padding: 1px 4px; border-radius: 3px; opacity: 0; transition: opacity .1s; }
   .cell:hover .ext { opacity: 1; }
+  .vid { position: absolute; bottom: 5px; right: 6px; display: flex; align-items: center; gap: 3px; font-size: 10px; font-variant-numeric: tabular-nums; background: rgba(0,0,0,.6); color: #eee; padding: 1px 5px; border-radius: 3px; }
   .stackpos { position: absolute; bottom: 5px; left: 6px; }
   .cell.member .frame { background: color-mix(in srgb, var(--accent) 9%, var(--bg-2)); }
   .foot { height: 34px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 0 4px; }

@@ -3,12 +3,15 @@
   import { X, ChevronLeft, ChevronRight, Info, CloudOff, ZoomIn, Maximize, RotateCcw, RotateCw, FlipHorizontal2 } from "@lucide/svelte";
   import Stars from "./Stars.svelte";
   import { app, rate, setLabel, saveSetting, rootOnline, selectOnly, trashPhotos, rotatePhotos, type Bg } from "../store.svelte";
-  import { photoUrl, thumbUrl, formatDate, labelColor, LABELS } from "../api";
+  import { photoUrl, thumbUrl, formatDate, formatDuration, labelColor, LABELS, isVideo } from "../api";
+  import VideoPlayer from "./VideoPlayer.svelte";
   import { showMenu } from "../menu.svelte";
   import { photoMenu } from "../actions";
 
   const p = $derived(app.photos[app.viewerIndex]);
   const offline = $derived(p ? !rootOnline(p.root_id) : false);
+  const video = $derived(isVideo(p));
+  let player: VideoPlayer | undefined = $state();
   let showInfo = $state(true);
   let zoom = $state(1); // 1 = fit
   let pan = $state({ x: 0, y: 0 });
@@ -42,7 +45,7 @@
       // Preload neighbours.
       for (const d of [1, -1]) {
         const n = app.photos[app.viewerIndex + d];
-        if (n && rootOnline(n.root_id)) new Image().src = photoUrl(n);
+        if (n && rootOnline(n.root_id) && !isVideo(n)) new Image().src = photoUrl(n);
       }
     });
   });
@@ -66,16 +69,23 @@
       case "Escape": close(); break;
       case "ArrowRight": case "ArrowDown": go(1); break;
       case "ArrowLeft": case "ArrowUp": go(-1); break;
-      case " ": e.preventDefault(); go(1); break;
+      case " ":
+        e.preventDefault();
+        if (video && player) player.toggle(); else go(1);
+        break;
+      case "k": if (video) player?.toggle(); break;
+      case "j": if (video) player?.skip(-10); break;
+      case "l": if (video) player?.skip(10); break;
+      case "m": if (video) player?.toggleMute(); break;
       case "i": showInfo = !showInfo; break;
-      case "z": toggleZoom(); break;
+      case "z": if (!video) toggleZoom(); break;
       case "b": {
         const i = BGS.findIndex((b) => b.id === app.viewerBg);
         setBg(BGS[(i + 1) % BGS.length].id);
         break;
       }
       case "[": case "]":
-        if (meta && p) { e.preventDefault(); rotatePhotos([p.id], e.key === "]" ? "right" : "left"); }
+        if (meta && p && !video) { e.preventDefault(); rotatePhotos([p.id], e.key === "]" ? "right" : "left"); }
         break;
       case "Delete": case "Backspace":
         if (e.key === "Delete" || meta) { e.preventDefault(); if (p) trashPhotos([p.id]); }
@@ -93,6 +103,7 @@
   function setBg(b: Bg) { app.viewerBg = b; saveSetting("viewer_bg", b); }
 
   function toggleZoom(e?: MouseEvent) {
+    if (video) return;
     if (zoom === 1) {
       zoom = 2.5;
       if (e && stage) {
@@ -102,6 +113,7 @@
     } else { zoom = 1; pan = { x: 0, y: 0 }; }
   }
   function onWheel(e: WheelEvent) {
+    if (video) return;
     e.preventDefault();
     const nz = Math.min(8, Math.max(1, zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
     if (nz === 1) pan = { x: 0, y: 0 };
@@ -133,10 +145,12 @@
         {/each}
       </div>
       <div class="tools">
+        {#if !video}
         <button class="ghost icon" onclick={() => rotatePhotos([p.id], "left")} disabled={offline} title="Rotate left (⌘[ / Ctrl+[)" aria-label="Rotate left"><RotateCcw size={17} /></button>
         <button class="ghost icon" onclick={() => rotatePhotos([p.id], "right")} disabled={offline} title="Rotate right (⌘] / Ctrl+])" aria-label="Rotate right"><RotateCw size={17} /></button>
         <button class="ghost icon" onclick={() => rotatePhotos([p.id], "flip_h")} disabled={offline} title="Flip horizontal" aria-label="Flip horizontal"><FlipHorizontal2 size={17} /></button>
         <button class="ghost icon" onclick={() => toggleZoom()} title="Zoom (Z)">{#if zoom === 1}<ZoomIn size={17} />{:else}<Maximize size={17} />{/if}</button>
+        {/if}
         <button class="ghost icon" class:active={showInfo} onclick={() => (showInfo = !showInfo)} title="Info (I)"><Info size={17} /></button>
         <button class="ghost icon" onclick={close} title="Close (Esc)"><X size={18} /></button>
       </div>
@@ -153,10 +167,13 @@
       aria-label={p.filename}
       class:grab={zoom > 1}
     >
-      {#if !loaded && p.thumb}
+      {#if video && !offline}
+        <VideoPlayer bind:this={player} {p} autoplay />
+      {/if}
+      {#if !loaded && p.thumb && !(video && !offline)}
         <img class="ph" src={thumbUrl(p)} alt="" draggable="false" />
       {/if}
-      {#if !offline}
+      {#if !offline && !video}
         {#key p.id}
           <img
             class="main"
@@ -187,7 +204,7 @@
             <button class="lab" class:on={p.label === l.name} style:background={l.color} title={l.name} aria-label={l.name} onclick={() => setLabel([p.id], p.label === l.name ? "" : l.name)}></button>
           {/each}
         </div>
-        <span class="meta">{formatDate(p.taken_at)}{#if p.width} · {p.width} × {p.height}{/if}</span>
+        <span class="meta">{formatDate(p.taken_at)}{#if p.width} · {p.width} × {p.height}{/if}{#if video && p.duration} · {formatDuration(p.duration)}{/if}</span>
         <span class="path faint" title={p.path}>{p.folder}</span>
         {#if labelColor(p.label)}{/if}
       </div>

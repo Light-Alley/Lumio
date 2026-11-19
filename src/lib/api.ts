@@ -9,6 +9,8 @@ export interface PhotoLite {
   orientation: number | null;
   /** Photos grouped together share a stack id; `stack_top` marks the cover. */
   stack_id?: number | null; stack_top?: boolean; stack_count?: number;
+  /** Videos only: length in seconds. */
+  duration?: number | null;
 }
 export interface Photo extends PhotoLite {
   size: number; title: string | null; caption: string | null;
@@ -57,6 +59,8 @@ export const api = {
   renamePhoto: (id: number, name: string) => invoke<void>("rename_photo", { id, name }),
   updateMetadata: (ids: number[], edit: Edit) => invoke<OpReport>("update_metadata", { ids, edit }),
   rotatePhotos: (ids: number[], op: Turn) => invoke<OpReport>("rotate_photos", { ids, op }),
+  saveVideoThumb: (id: number, jpeg: string, width: number | null, height: number | null, duration: number | null) =>
+    invoke<void>("save_video_thumb", { id, jpeg, width, height, duration }),
   stackPhotos: (ids: number[], top: number | null) => invoke<number>("stack_photos", { ids, top }),
   unstackPhotos: (ids: number[], whole: boolean) => invoke<void>("unstack_photos", { ids, whole }),
   setStackTop: (id: number) => invoke<void>("set_stack_top", { id }),
@@ -74,7 +78,19 @@ export const api = {
   geocode: (query: string) => invoke<Place[]>("geocode", { query }),
 };
 
+export const VIDEO_EXTS = ["mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv"];
+export const isVideo = (p: { ext: string } | null | undefined) => !!p && VIDEO_EXTS.includes(p.ext.toLowerCase());
+/** 75 -> "1:15", 3725 -> "1:02:05". */
+export function formatDuration(s: number | null | undefined): string {
+  if (s == null || !isFinite(s) || s < 0) return "";
+  const t = Math.floor(s);
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+  const ss = String(sec).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
 const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+export const isLinux = typeof navigator !== "undefined" && /Linux/i.test(navigator.userAgent) && !isWindows;
 export const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 export const fileManagerName = isMac ? "Finder" : isWindows ? "File Explorer" : "file manager";
 
