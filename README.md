@@ -34,6 +34,8 @@ Lumio is open source. You can use it, change it and share it. It has no account,
 | **File management** | Drag photos or folders onto a folder to move them (hold `Alt`/`⌥` to copy), or use Move to… / Copy to… for any destination, including other drives and network shares. Cross-drive moves are copied and verified before the original is removed. New folder, rename, and Move to Trash (sidecars travel with their photos). |
 | **Open with…** | Right-click a photo to see every app the operating system says can open it (Photoshop, Affinity, GIMP, Preview, Photos…). |
 | **Picks up edits** | Lumio watches your library folders. When an editor saves or exports a file there, the thumbnail and metadata refresh and new files appear automatically. |
+| **SmugMug upload** | Right-click photos and choose **Upload to SmugMug…**. Pick one of your galleries or make a new one (public, unlisted or private), choose originals or smaller copies, and watch the progress. Titles, captions and keywords go along. RAW and TIFF files are sent as full-size JPEGs. You sign in once; it needs a free SmugMug API key, which the window walks you through ([details](docs/smugmug.md)). |
+| **Web-ready copies** | **Export web-ready copies…** saves upright, resized JPEGs (2500 px by default, Squarespace's recommended size) into a folder of your choice, with captions and copyright kept and the GPS location removed if you like. Your originals are not changed. |
 | **AI photo finder** | "Show me sunsets from last summer rated 4 stars or more." Ask in plain language and the assistant searches the catalogue (dates, places, keywords, ratings, cameras) and can look at thumbnails for visual questions. Works with **Claude** (your own Anthropic API key) or a **local model** through Ollama / LM Studio, so nothing leaves your computer. |
 
 Supported formats: JPEG, PNG, WebP, GIF, BMP, TIFF, HEIC/HEIF, AVIF, and RAW (DNG, CR2, CR3, NEF, ARW, RAF, ORF, RW2, PEF, SRW and more).
@@ -96,6 +98,7 @@ To build installers for all three systems at once, push the repository to GitHub
   - `fileops.rs`: move, copy, rename and trash, keeping the catalogue in sync
   - `watcher.rs`: file-system watching for edits made in other apps
   - `openwith.rs`: "Open with" on macOS (Launch Services), Windows (Shell association handlers) and Linux (.desktop files)
+  - `smugmug.rs`: SmugMug sign-in (OAuth 1.0a), galleries and uploads; `webexport.rs`: resized JPEG copies
   - `ai.rs`: the AI finder (Claude Messages API with tool use, or any OpenAI-compatible server)
 - **Svelte 5 + TypeScript** front end in `src/`, with [Leaflet](https://leafletjs.com) for maps and [Lucide](https://lucide.dev) icons.
 
