@@ -33,16 +33,24 @@ base64 = "0.22"
 chrono = "0.4"
 parking_lot = "0.12"
 log = { version = "0.4", features = ["std"] }
+# Copying photos to the clipboard for pasting into WhatsApp, email or a website.
+arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSURL", "NSGeometry", "NSObject", "NSEnumerator"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSSharingService", "NSPasteboard", "NSView", "NSResponder", "NSWindow", "NSGraphics", "NSApplication"] }
 keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
-windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_System_Com", "Win32_UI_Shell_Common"] }
+windows = { version = "0.58", features = [
+    "Win32_Foundation", "Win32_UI_Shell", "Win32_System_Com", "Win32_UI_Shell_Common",
+    # Sharing: the Windows share sheet, email attachments (MAPI) and copying files.
+    "ApplicationModel_DataTransfer", "Foundation", "Foundation_Collections", "Storage", "Storage_Streams",
+    "Win32_System_WinRT", "Win32_System_Mapi", "Win32_System_LibraryLoader",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }

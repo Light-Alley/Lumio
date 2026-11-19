@@ -33,6 +33,7 @@ Lumio is open source. You can use it, change it and share it. It has no account,
 | **Geotagging** | Map view (OpenStreetMap). Drag photos onto the map, or select photos and click a spot. Place search, clustering, and GPS written into the files. |
 | **File management** | Drag photos or folders onto a folder to move them (hold `Alt`/`⌥` to copy), or use Move to… / Copy to… for any destination, including other drives and network shares. Cross-drive moves are copied and verified before the original is removed. New folder, rename, and Move to Trash (sidecars travel with their photos). |
 | **Open with…** | Right-click a photo to see every app the operating system says can open it (Photoshop, Affinity, GIMP, Preview, Photos…). |
+| **Share** | Right-click (or use the Share button) to send photos through the system share menu (AirDrop, Messages, Mail on a Mac; Windows share), by email with the photos attached, through WhatsApp or WhatsApp Web, or to Facebook, Instagram, X, Bluesky, Pinterest, Flickr and others in your browser. Lumio never signs in to these services. RAW and HEIC photos are sent as JPEG copies, and you can choose smaller copies that leave out the location. |
 | **Picks up edits** | Lumio watches your library folders. When an editor saves or exports a file there, the thumbnail and metadata refresh and new files appear automatically. |
 | **AI photo finder** | "Show me sunsets from last summer rated 4 stars or more." Ask in plain language and the assistant searches the catalogue (dates, places, keywords, ratings, cameras) and can look at thumbnails for visual questions. Works with **Claude** (your own Anthropic API key) or a **local model** through Ollama / LM Studio, so nothing leaves your computer. |
 
@@ -96,6 +97,7 @@ To build installers for all three systems at once, push the repository to GitHub
   - `fileops.rs`: move, copy, rename and trash, keeping the catalogue in sync
   - `watcher.rs`: file-system watching for edits made in other apps
   - `openwith.rs`: "Open with" on macOS (Launch Services), Windows (Shell association handlers) and Linux (.desktop files)
+  - `share.rs`: sharing on macOS (share sheet and Mail via AppKit), Windows (share sheet, email through Simple MAPI) and Linux (`xdg-email`), plus clipboard copies
   - `ai.rs`: the AI finder (Claude Messages API with tool use, or any OpenAI-compatible server)
 - **Svelte 5 + TypeScript** front end in `src/`, with [Leaflet](https://leafletjs.com) for maps and [Lucide](https://lucide.dev) icons.
 

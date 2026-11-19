@@ -10,6 +10,7 @@ mod logfile;
 mod metadata;
 mod notify;
 mod openwith;
+mod share;
 mod state;
 mod thumbs;
 mod watcher;
@@ -266,6 +267,13 @@ pub fn run() {
             commands::geocode,
             commands::reveal,
             commands::open_default,
+            commands::share_options,
+            commands::share_sheet,
+            commands::share_email,
+            commands::share_whatsapp,
+            commands::share_site,
+            commands::share_copy,
+            commands::share_show,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lumio");
