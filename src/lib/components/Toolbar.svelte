@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Search, LayoutGrid, List, GalleryHorizontal, Map as MapIcon, Info, Sparkles, Settings, ArrowDownWideNarrow, ArrowUpNarrowWide, FolderTree, X } from "@lucide/svelte";
   import Stars from "./Stars.svelte";
+  import IdentityPlate from "./IdentityPlate.svelte";
   import { app, loadPhotos, saveSetting, setView, scopeTitle } from "../store.svelte";
   import { LABELS } from "../api";
 
@@ -20,6 +21,7 @@
 }} />
 
 <header class="toolbar" data-tauri-drag-region>
+  <IdentityPlate />
   <div class="title" data-tauri-drag-region>
     <h1 data-tauri-drag-region>{title}</h1>
     {#if app.scope.kind === "folder"}

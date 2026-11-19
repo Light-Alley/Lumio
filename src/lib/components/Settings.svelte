@@ -27,6 +27,13 @@
       toast(key ? "API key saved in your system keychain." : "API key removed.", "success");
     } catch (e) { errorToast(e); }
   }
+  // Save the name a moment after typing stops; the plate updates as you type.
+  let nameTimer: ReturnType<typeof setTimeout>;
+  function setOwnerName(v: string) {
+    app.settings.owner_name = v;
+    clearTimeout(nameTimer);
+    nameTimer = setTimeout(() => saveSetting("owner_name", v.trim()), 400);
+  }
   function setTheme(t: "dark" | "light") {
     app.theme = t;
     saveSetting("theme", t);
@@ -46,6 +53,10 @@
       <section>
         <button class="ghost icon close" onclick={() => (app.showSettings = false)} aria-label="Close"><X size={16} /></button>
         {#if tab === "general"}
+          <h3>Identity plate</h3>
+          <label class="field"><span>Your name, shown under "Lumio by Light and Alley" at the top left. Leave blank to hide it.</span>
+            <input type="text" placeholder="e.g. Jane Smith Photography" maxlength="60" value={app.settings.owner_name ?? ""} oninput={(e) => setOwnerName((e.target as HTMLInputElement).value)} />
+          </label>
           <h3>Appearance</h3>
           <div class="seg">
             <button class:active={app.theme === "dark"} onclick={() => setTheme("dark")}>Dark</button>
@@ -115,7 +126,7 @@
           {/each}
           <p class="muted">Map tiles and place search need an internet connection. Place search uses OpenStreetMap Nominatim.</p>
         {:else if tab === "about" && status}
-          <h3>Lumio {status.version}</h3>
+          <h3>Lumio {status.version} by Light and Alley</h3>
           <p class="muted">A lightweight, open-source photo browser and digital asset manager. Built with Rust and Tauri. MIT licence.</p>
           <dl>
             <dt>Photos in catalogue</dt><dd>{status.photo_count.toLocaleString()}</dd>
