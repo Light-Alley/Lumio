@@ -286,14 +286,22 @@ fn url_escape(s: &str) -> String {
 
 pub fn whatsapp(state: &AppState, ids: &[i64], web: bool) -> Result<Outcome> {
     let files = prepare(state, ids)?;
+    log::info!("share: WhatsApp{} with {} file(s)", if web { " Web" } else { "" }, files.len());
     if !web {
         // macOS: WhatsApp's own share extension takes the files straight into a chat.
         if imp::whatsapp_direct(state, &files)? {
             return Ok(done("Choose a chat in WhatsApp to send to."));
         }
         if imp::whatsapp_installed() {
+            // The photo also goes on the clipboard, in case the app doesn't take the files.
             let copied = copy(&files)?;
-            imp::open_whatsapp()?;
+            if imp::open_whatsapp_with(&files)? {
+                return Ok(done(format!(
+                    "{} is opening in WhatsApp. Choose a chat and press Send. (If it doesn't appear, open a chat and press {}.)",
+                    count(&files),
+                    paste_key()
+                )));
+            }
             return Ok(done(pasted_hint("WhatsApp", copied, &files)));
         }
     }
@@ -434,9 +442,11 @@ mod imp {
             .unwrap_or(false)
     }
 
-    pub fn open_whatsapp() -> Result<()> {
-        std::process::Command::new("/usr/bin/open").args(["-a", "WhatsApp"]).spawn()?;
-        Ok(())
+    /// WhatsApp for Mac has no share extension, but it opens images and videos handed
+    /// to it (it declares `public.image` and `public.movie`), showing a chat picker.
+    pub fn open_whatsapp_with(files: &[PathBuf]) -> Result<bool> {
+        let status = std::process::Command::new("/usr/bin/open").args(["-a", "WhatsApp"]).args(files).status()?;
+        Ok(status.success())
     }
 }
 
@@ -590,8 +600,10 @@ mod imp {
         }
     }
 
-    pub fn open_whatsapp() -> Result<()> {
-        tauri_plugin_opener::open_url("whatsapp://", None::<&str>).map_err(|e| anyhow!("{e}"))
+    /// Windows: WhatsApp is opened and the photo pasted from the clipboard.
+    pub fn open_whatsapp_with(_files: &[PathBuf]) -> Result<bool> {
+        tauri_plugin_opener::open_url("whatsapp://", None::<&str>).map_err(|e| anyhow!("{e}"))?;
+        Ok(false)
     }
 }
 
@@ -633,8 +645,9 @@ mod imp {
             .unwrap_or(false)
     }
 
-    pub fn open_whatsapp() -> Result<()> {
-        tauri_plugin_opener::open_url("whatsapp://", None::<&str>).map_err(|e| anyhow::anyhow!("{e}"))
+    pub fn open_whatsapp_with(_files: &[PathBuf]) -> Result<bool> {
+        tauri_plugin_opener::open_url("whatsapp://", None::<&str>).map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(false)
     }
 }
 
