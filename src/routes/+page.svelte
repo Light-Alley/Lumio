@@ -18,6 +18,8 @@
   import Settings from "$lib/components/Settings.svelte";
   import { app, init } from "$lib/store.svelte";
   import { watchVideoThumbs } from "$lib/videoThumbs.svelte";
+  import SmugMugDialog from "$lib/components/SmugMugDialog.svelte";
+  import ExportDialog from "$lib/components/ExportDialog.svelte";
 
   onMount(() => { init(); });
   watchVideoThumbs();
@@ -45,6 +47,8 @@
 </div>
 
 {#if app.viewerIndex >= 0}<Viewer />{/if}
+<SmugMugDialog />
+<ExportDialog />
 <ContextMenu />
 <Settings />
 <Dialog />

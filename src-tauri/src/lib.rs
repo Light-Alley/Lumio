@@ -11,9 +11,11 @@ mod metadata;
 mod notify;
 mod openwith;
 mod share;
+mod smugmug;
 mod state;
 mod thumbs;
 mod watcher;
+mod webexport;
 
 use parking_lot::Mutex;
 use state::AppState;
@@ -274,6 +276,18 @@ pub fn run() {
             commands::share_site,
             commands::share_copy,
             commands::share_show,
+            smugmug::cmd::smugmug_status,
+            smugmug::cmd::smugmug_set_app_key,
+            smugmug::cmd::smugmug_begin_sign_in,
+            smugmug::cmd::smugmug_finish_sign_in,
+            smugmug::cmd::smugmug_sign_out,
+            smugmug::cmd::smugmug_albums,
+            smugmug::cmd::smugmug_create_album,
+            smugmug::cmd::smugmug_upload,
+            smugmug::cmd::smugmug_cancel,
+            smugmug::cmd::smugmug_open,
+            webexport::cmd::web_export,
+            webexport::cmd::web_export_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lumio");

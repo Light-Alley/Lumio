@@ -2,6 +2,7 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, errText, fileManagerName, isMac, isLinux, LABELS, shareApi, type PhotoLite, type FolderNode, type Root, type ShareOutcome } from "./api";
 import { menu, type MenuItem } from "./menu.svelte";
+import { openSmugMug, openWebExport } from "./publish.svelte";
 import {
   app, selection, selectedIds, rate, setLabel, moveOrCopy, trashPhotos, renamePhoto, openViewer,
   errorToast, toast, newFolder, renameFolder, trashFolder, removeRoot, rootOnline, newTab,
@@ -74,6 +75,8 @@ export function photoMenu(p: PhotoLite): MenuItem[] {
     ...stackItems(p, ids),
     { label: many ? `Copy ${ids.length} photos to…` : "Copy to…", disabled: offlineNote, action: () => moveOrCopy(ids, true) },
     { label: many ? `Move ${ids.length} photos to…` : "Move to…", disabled: offlineNote, action: () => moveOrCopy(ids, false) },
+    { label: "Upload to SmugMug…", disabled: offlineNote, action: () => openSmugMug(ids) },
+    { label: "Export web-ready copies…", disabled: offlineNote, action: () => openWebExport(ids) },
     { label: "Rename…", disabled: many || offlineNote, action: () => renamePhoto(p) },
     {
       label: "Re-read metadata & thumbnail",
@@ -170,6 +173,7 @@ export function shareMenu(ids: number[]): MenuItem[] {
         }
       },
     },
+    { label: "SmugMug…", action: () => openSmugMug(ids) },
     { separator: true },
     { label: n > 1 ? `Copy ${n} photos` : "Copy photo", shortcut: `${cmd}C`, action: () => copyPhotos(ids) },
     { label: `Show copies to share in ${fileManagerName}`, action: () => sharing(() => shareApi.show(ids)) },

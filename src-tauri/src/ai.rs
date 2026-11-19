@@ -53,7 +53,7 @@ pub fn settings(state: &AppState) -> AiSettings {
     }
 }
 
-fn get_key_inner(conn: &rusqlite::Connection, which: &str) -> Option<String> {
+pub(crate) fn get_key_inner(conn: &rusqlite::Connection, which: &str) -> Option<String> {
     if let Ok(e) = keyring::Entry::new(KEYRING_SERVICE, which) {
         if let Ok(k) = e.get_password() {
             if !k.is_empty() {
