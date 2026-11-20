@@ -36,8 +36,8 @@ function capture(p: PhotoLite): Promise<void> {
     v.muted = true;
     v.preload = "auto";
     v.playsInline = true;
-    // The video comes from Lumio's own photo:// address; without this the frame
-    // could not be read back from the canvas.
+    // The video comes from Lumio's own address (photo://, or the local server on Linux);
+    // without this the frame could not be read back from the canvas.
     v.crossOrigin = "anonymous";
     let done = false;
     const finish = () => {

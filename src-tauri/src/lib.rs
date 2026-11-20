@@ -14,6 +14,7 @@ mod share;
 mod smugmug;
 mod state;
 mod thumbs;
+mod videoserver;
 mod watcher;
 mod webexport;
 
@@ -154,6 +155,14 @@ fn serve_photo(state: &AppState, id: i64, range: Option<&str>) -> Response<Vec<u
     }
 }
 
+/// Where the player should load videos from, when that isn't `photo://` (see `videoserver`).
+struct VideoBase(Option<String>);
+
+#[tauri::command]
+fn video_base(base: tauri::State<'_, VideoBase>) -> Option<String> {
+    base.0.clone()
+}
+
 fn clean_previews(dir: &std::path::Path) {
     let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(14 * 24 * 3600);
     if let Ok(rd) = std::fs::read_dir(dir) {
@@ -221,6 +230,19 @@ pub fn run() {
                 chat: Mutex::new(Default::default()),
             });
             app.manage(state.clone());
+            // WebKitGTK won't play videos from photo://, so Linux streams them over local HTTP.
+            let video_base = if cfg!(target_os = "linux") {
+                match videoserver::start(state.clone()) {
+                    Ok(b) => Some(b),
+                    Err(e) => {
+                        log::warn!("video server could not start: {e}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            app.manage(VideoBase(video_base));
             {
                 let st = state.clone();
                 std::thread::Builder::new().name("indexer".into()).spawn(move || indexer::run_worker(st, rx))?;
@@ -235,6 +257,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            video_base,
             commands::get_roots,
             commands::add_root,
             commands::remove_root,

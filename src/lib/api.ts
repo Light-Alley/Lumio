@@ -99,7 +99,14 @@ function scheme(name: string) {
 }
 type Versioned = { id: number; mtime: number; orientation?: number | null };
 export const thumbUrl = (p: Versioned) => `${scheme("thumb")}/${p.id}?m=${p.mtime}-${p.orientation ?? 1}`;
-export const photoUrl = (p: Versioned) => `${scheme("photo")}/${p.id}?m=${p.mtime}-${p.orientation ?? 1}`;
+/** On Linux videos come from a small local server instead of photo:// (WebKitGTK won't
+ *  play media from custom addresses); set once at start-up by `loadVideoBase`. */
+let videoBase: string | null = null;
+export async function loadVideoBase() {
+  try { videoBase = await invoke<string | null>("video_base"); } catch { videoBase = null; }
+}
+export const photoUrl = (p: Versioned & { ext?: string }) =>
+  `${videoBase && p.ext && isVideo({ ext: p.ext }) ? videoBase : scheme("photo")}/${p.id}?m=${p.mtime}-${p.orientation ?? 1}`;
 
 export function errText(e: unknown): string {
   if (typeof e === "string") return e;
