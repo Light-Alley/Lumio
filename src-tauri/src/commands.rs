@@ -6,7 +6,7 @@ use crate::indexer::{self, Job};
 use crate::metadata::{self, Edit};
 use crate::openwith::{self, AppInfo};
 use crate::state::AppState;
-use crate::{ai, share, watcher};
+use crate::{ai, rename, share, watcher};
 use rusqlite::params;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -250,9 +250,30 @@ pub async fn delete_photos(state: S<'_>, ids: Vec<i64>, permanent: bool) -> R<Op
 }
 
 #[tauri::command]
-pub async fn rename_photo(state: S<'_>, id: i64, name: String) -> R<()> {
+pub async fn rename_photo(state: S<'_>, id: i64, name: String) -> R<rename::RenameReport> {
     let st = state.inner().clone();
-    blocking(move || fileops::rename_photo(&st, id, &name)).await
+    blocking(move || rename::rename_one(&st, id, &name)).await
+}
+
+/// Show what a batch rename would do, without changing anything.
+#[tauri::command]
+pub async fn rename_preview(state: S<'_>, ids: Vec<i64>, opts: rename::BatchOptions) -> R<Vec<rename::PlannedName>> {
+    let st = state.inner().clone();
+    blocking(move || {
+        let mut photos = db::get_photos(&st.conn.lock(), &ids)?;
+        // Keep the order the photos are shown in.
+        let pos: HashMap<i64, usize> = ids.iter().enumerate().map(|(i, id)| (*id, i)).collect();
+        photos.sort_by_key(|p| pos.get(&p.id).copied().unwrap_or(usize::MAX));
+        rename::plan(&photos, &opts)
+    })
+    .await
+}
+
+/// Rename photos to the given names (from a preview, or to undo an earlier rename).
+#[tauri::command]
+pub async fn rename_photos(state: S<'_>, items: Vec<(i64, String)>) -> R<rename::RenameReport> {
+    let st = state.inner().clone();
+    blocking(move || rename::rename_many(&st, &items)).await
 }
 
 /// Write metadata to the files (or their XMP sidecars) and update the catalogue.

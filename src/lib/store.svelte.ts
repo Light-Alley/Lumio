@@ -69,6 +69,8 @@ export const app = $state({
   toasts: [] as Toast[],
   dialog: null as DialogState | null,
   showSettings: false,
+  /** Photos in the batch rename window; `null` when it is closed. */
+  renameIds: null as number[] | null,
   folderVersion: 0,
   settings: {} as Record<string, string>,
   exiftool: true,
@@ -469,14 +471,44 @@ export async function trashPhotos(ids: number[]) {
 }
 
 export async function renamePhoto(p: PhotoLite) {
-  const name = await prompt("Rename photo", p.filename, "Rename");
+  const name = await prompt("Rename photo", p.filename, "Rename", "The extension is kept if you leave it off. Its XMP sidecar is renamed too.");
   if (!name || name === p.filename) return;
   try {
-    await api.renamePhoto(p.id, name);
+    const r = await api.renamePhoto(p.id, name);
     await loadPhotos();
+    if (r.done) offerUndoRename(r.undo, `Renamed to “${app.photos.find((x) => x.id === p.id)?.filename ?? name}”.`);
   } catch (e) {
     errorToast(e);
   }
+}
+
+/** Rename what is selected: one photo by typing a name, several with the batch rename window. */
+export function renameSelected(ids = selectedIds()) {
+  if (!ids.length) return;
+  const offline = app.photos.some((p) => ids.includes(p.id) && !rootOnline(p.root_id));
+  if (offline) { toast("Connect the drive these photos are on to rename them.", "info"); return; }
+  if (ids.length === 1) {
+    const p = app.photos.find((x) => x.id === ids[0]);
+    if (p) renamePhoto(p);
+  } else app.renameIds = [...ids];
+}
+
+/** Show a toast with an Undo button that puts the old names back. */
+export function offerUndoRename(undo: [number, string][], text: string) {
+  if (!undo.length) return;
+  toast(text, "success", {
+    label: "Undo",
+    run: async () => {
+      try {
+        const r = await api.renamePhotos(undo);
+        await loadPhotos();
+        if (r.failed.length) toast(`${r.done} name${r.done === 1 ? "" : "s"} put back, ${r.failed.length} could not be.\n${r.failed[0][0]}: ${r.failed[0][1]}`, "error");
+        else toast(r.done === 1 ? "Old name put back." : `${r.done} old names put back.`, "success");
+      } catch (e) {
+        errorToast(e);
+      }
+    },
+  }, 10000);
 }
 
 export async function newFolder(parent: string) {

@@ -32,6 +32,7 @@ Lumio is open source. You can use it, change it and share it. It has no account,
 | **Metadata editing** | Title, caption, keywords, creator and copyright, for one photo or many at once. Saved into the file (EXIF/IPTC/XMP) or, for RAW files, into an XMP sidecar by default. |
 | **Geotagging** | Map view (OpenStreetMap). Drag photos onto the map, or select photos and click a spot. Place search, clustering, and GPS written into the files. |
 | **File management** | Drag photos or folders onto a folder to move them (hold `Alt`/`⌥` to copy), or use Move to… / Copy to… for any destination, including other drives and network shares. Cross-drive moves are copied and verified before the original is removed. New folder, rename, and Move to Trash (sidecars travel with their photos). |
+| **Renaming** | Press `F2` (or right-click, Rename…) to rename a photo. Select several to rename them in one go, either from a pattern such as `{date} Iceland {n}` (date taken, time, number, folder, camera, title, current name) or by finding and replacing text, with a live preview before anything changes. RAW + JPEG pairs keep matching names, ratings, labels, metadata and groups stay with each photo, XMP sidecars are renamed too, and Undo puts the old names back. |
 | **Open with…** | Right-click a photo to see every app the operating system says can open it (Photoshop, Affinity, GIMP, Preview, Photos…). |
 | **Share** | Right-click (or use the Share button) to send photos through the system share menu (AirDrop, Messages, Mail on a Mac; Windows share), by email with the photos attached, through WhatsApp or WhatsApp Web, or to Facebook, Instagram, X, Bluesky, Pinterest, Flickr and others in your browser. Lumio never signs in to these services. RAW and HEIC photos are sent as JPEG copies, and you can choose smaller copies that leave out the location. |
 | **Picks up edits** | Lumio watches your library folders. When an editor saves or exports a file there, the thumbnail and metadata refresh and new files appear automatically. |
@@ -96,7 +97,8 @@ To build installers for all three systems at once, push the repository to GitHub
   - `indexer.rs`: background scanning, metadata reading and thumbnail building
   - `thumbs.rs`: thumbnails and previews (the `image` crate, embedded RAW previews, `sips` for HEIC on macOS, Quick Look for video thumbnails on macOS)
   - `exiftool.rs` / `metadata.rs`: metadata reading and writing via a persistent ExifTool process
-  - `fileops.rs`: move, copy, rename and trash, keeping the catalogue in sync
+  - `fileops.rs`: move, copy, rename folders and trash, keeping the catalogue in sync
+  - `rename.rs`: renaming photos, one or many (pattern or find-and-replace, preview, undo)
   - `watcher.rs`: file-system watching for edits made in other apps
   - `openwith.rs`: "Open with" on macOS (Launch Services), Windows (Shell association handlers) and Linux (.desktop files)
   - `share.rs`: sharing on macOS (share sheet and Mail via AppKit), Windows (share sheet, email through Simple MAPI) and Linux (`xdg-email`), plus clipboard copies

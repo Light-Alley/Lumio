@@ -4,7 +4,7 @@ import { api, errText, fileManagerName, isMac, isLinux, LABELS, shareApi, type P
 import { menu, type MenuItem } from "./menu.svelte";
 import { openSmugMug, openWebExport } from "./publish.svelte";
 import {
-  app, selection, selectedIds, rate, setLabel, moveOrCopy, trashPhotos, renamePhoto, openViewer,
+  app, selection, selectedIds, rate, setLabel, moveOrCopy, trashPhotos, renameSelected, openViewer,
   errorToast, toast, newFolder, renameFolder, trashFolder, removeRoot, rootOnline, newTab,
   rotatePhotos, groupPhotos, ungroupPhotos, makeCover, toggleStack, openStacks,
 } from "./store.svelte";
@@ -77,7 +77,7 @@ export function photoMenu(p: PhotoLite): MenuItem[] {
     { label: many ? `Move ${ids.length} photos to…` : "Move to…", disabled: offlineNote, action: () => moveOrCopy(ids, false) },
     { label: "Upload to SmugMug…", disabled: offlineNote, action: () => openSmugMug(ids) },
     { label: "Export web-ready copies…", disabled: offlineNote, action: () => openWebExport(ids) },
-    { label: "Rename…", disabled: many || offlineNote, action: () => renamePhoto(p) },
+    { label: many ? `Rename ${ids.length} photos…` : "Rename…", shortcut: "F2", disabled: offlineNote, action: () => renameSelected(ids) },
     {
       label: "Re-read metadata & thumbnail",
       disabled: offlineNote,

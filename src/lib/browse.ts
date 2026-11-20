@@ -1,5 +1,5 @@
 // Keyboard and drag behaviour shared by the grid, list and filmstrip views.
-import { app, selection, clickSelect, openViewer, rate, setLabel, trashPhotos, selectedIds, withStacks, groupPhotos, ungroupPhotos, toggleStack, rotatePhotos } from "./store.svelte";
+import { app, selection, clickSelect, openViewer, rate, setLabel, trashPhotos, renameSelected, selectedIds, withStacks, groupPhotos, ungroupPhotos, toggleStack, rotatePhotos } from "./store.svelte";
 import { LABELS, type PhotoLite } from "./api";
 import { copyPhotos } from "./actions";
 
@@ -8,7 +8,7 @@ import { copyPhotos } from "./actions";
  * (e.g. a whole row in the grid). `reveal` scrolls the focused photo into view.
  */
 export function browseKeys(e: KeyboardEvent, step: Record<string, number>, reveal: (index: number) => void) {
-  if (app.viewerIndex >= 0 || app.dialog || app.showSettings || (e.target as HTMLElement)?.closest("input, textarea, select")) return;
+  if (app.viewerIndex >= 0 || app.dialog || app.renameIds || app.showSettings || (e.target as HTMLElement)?.closest("input, textarea, select")) return;
   const n = app.photos.length;
   if (!n) return;
   const meta = e.metaKey || e.ctrlKey;
@@ -33,6 +33,7 @@ export function browseKeys(e: KeyboardEvent, step: Record<string, number>, revea
     if (p?.stack_id != null) { e.preventDefault(); toggleStack(p.stack_id); }
     return;
   }
+  if (e.key === "F2" && ids.length) { e.preventDefault(); renameSelected(ids); return; }
   if ((e.key === "Delete" || (e.key === "Backspace" && meta)) && ids.length) { e.preventDefault(); trashPhotos(ids); return; }
   if ((e.key === " " || e.key === "Enter") && app.focusId !== null) { e.preventDefault(); openViewer(app.focusId); return; }
   if (!meta && /^[0-5]$/.test(e.key) && ids.length) { rate(ids, Number(e.key)); return; }
