@@ -19,6 +19,13 @@ app already runs in, which uses the operating system's own video support:
 The video file is streamed in small pieces, so starting and seeking are quick even for
 long videos on network drives, and the file is never loaded into memory whole.
 
+On macOS and Windows the player reads videos from Lumio's own `photo://` address. On
+Linux, WebKitGTK refuses to play media from such custom addresses, so there Lumio starts
+a tiny web server that only listens on the computer itself (`127.0.0.1`, a free port)
+and only answers requests carrying a secret that is made fresh each time Lumio starts.
+Other programs and web pages can't read files through it. See
+`src-tauri/src/videoserver.rs`.
+
 ## What plays where
 
 | Format | macOS | Windows | Linux (with the plugins below) |
