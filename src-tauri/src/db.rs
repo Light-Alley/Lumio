@@ -62,6 +62,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     conn.execute_batch("CREATE INDEX IF NOT EXISTS photos_stack ON photos(stack_id);")?;
     // 0.4: videos. Length in seconds.
     add_column(conn, "photos", "duration", "REAL")?;
+    // 0.3.7: sharper previews kept for offline viewing (long side made at, 0 = none,
+    // -1 = could not be made), and moves waiting for a drive to come back.
+    add_column(conn, "photos", "preview", "INTEGER NOT NULL DEFAULT 0")?;
+    crate::pending::migrate(conn)?;
     // 0.3.2: HEIC/AVIF thumbnails made on macOS before this version ignored the photo's
     // orientation. Rebuild the ones that are not upright, once.
     if get_setting(conn, "fix_heic_thumbs").is_none() {
@@ -140,9 +144,12 @@ pub struct Photo {
     pub thumb: bool,
     /// Videos only: length in seconds.
     pub duration: Option<f64>,
+    /// Long side the offline preview was made at (0 = none; see `offline.rs`).
+    #[serde(skip)]
+    pub preview: i64,
 }
 
-pub const PHOTO_COLS: &str = "id, root_id, path, folder, filename, ext, size, mtime, width, height, orientation, taken_at, rating, label, title, caption, keywords, creator, copyright, lat, lon, alt, place, make, model, lens, iso, fnumber, exposure, focal, thumb, duration";
+pub const PHOTO_COLS: &str = "id, root_id, path, folder, filename, ext, size, mtime, width, height, orientation, taken_at, rating, label, title, caption, keywords, creator, copyright, lat, lon, alt, place, make, model, lens, iso, fnumber, exposure, focal, thumb, duration, preview";
 
 pub fn photo_from_row(r: &Row) -> rusqlite::Result<Photo> {
     let kw: Option<String> = r.get(16)?;
@@ -179,6 +186,7 @@ pub fn photo_from_row(r: &Row) -> rusqlite::Result<Photo> {
         focal: r.get(29)?,
         thumb: r.get::<_, i64>(30)? != 0,
         duration: r.get(31)?,
+        preview: r.get(32)?,
     })
 }
 
@@ -226,6 +234,9 @@ pub struct PhotoLite {
     pub stack_count: i64,
     /// Videos only: length in seconds.
     pub duration: Option<f64>,
+    /// Moved while its drive (or the destination's) was away; the file follows when
+    /// both are connected.
+    pub pending: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -314,7 +325,7 @@ pub fn query_photos(conn: &Connection, q: &Query) -> Result<Vec<PhotoLite>> {
     let sql = format!(
         "SELECT id, path, filename, folder, ext, rating, label, taken_at, width, height, lat, lon, thumb, mtime, root_id, orientation, stack_id, stack_top,
                 CASE WHEN stack_id IS NULL THEN 0 ELSE (SELECT COUNT(*) FROM photos s WHERE s.stack_id = photos.stack_id) END,
-                duration
+                duration, EXISTS (SELECT 1 FROM pending_moves m WHERE m.photo_id = photos.id)
          FROM photos {} ORDER BY {}",
         if wh.is_empty() { String::new() } else { format!("WHERE {}", wh.join(" AND ")) },
         order
@@ -342,6 +353,7 @@ pub fn query_photos(conn: &Connection, q: &Query) -> Result<Vec<PhotoLite>> {
             stack_top: r.get::<_, i64>(17)? != 0,
             stack_count: r.get(18)?,
             duration: r.get(19)?,
+            pending: r.get::<_, i64>(20)? != 0,
         })
     })?;
     let mut out = vec![];

@@ -5,7 +5,7 @@
   import { onMount, onDestroy } from "svelte";
   import { X, ChevronLeft, ChevronRight, Play, Pause, Shuffle, Expand, Shrink, CloudOff } from "@lucide/svelte";
   import { app, rootOnline, saveSetting, selectOnly, openViewer } from "../store.svelte";
-  import { photoUrl, thumbUrl, isVideo, formatDate, type PhotoLite } from "../api";
+  import { photoUrl, thumbUrl, previewUrl, isVideo, formatDate, type PhotoLite } from "../api";
   import { setFullscreen, toggleFullscreen } from "../fullscreen";
 
   const SPEEDS = [2, 3, 5, 8, 10, 15, 30];
@@ -152,7 +152,7 @@
     <div class="layer" class:ready={l.ready}>
       {#if l.offline}
         {#if l.p.thumb}
-          <img src={thumbUrl(l.p)} alt={l.p.filename} draggable="false" onload={() => loaded(l)} onerror={() => loaded(l)} />
+          <img src={previewUrl(l.p)} alt={l.p.filename} draggable="false" onload={() => loaded(l)} onerror={() => loaded(l)} />
         {:else}
           <div class="missing"><CloudOff size={28} /> {l.p.filename}</div>
         {/if}
@@ -176,7 +176,7 @@
           onerror={(e) => {
             // Couldn't decode the file: fall back to the thumbnail if there is one.
             const img = e.currentTarget as HTMLImageElement;
-            if (l.p.thumb && !img.src.includes("thumb")) img.src = thumbUrl(l.p);
+            if (l.p.thumb && !img.src.includes("thumb")) img.src = previewUrl(l.p);
             else loaded(l);
           }}
         />

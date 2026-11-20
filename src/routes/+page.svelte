@@ -19,6 +19,7 @@
   import { app, init } from "$lib/store.svelte";
   import { watchVideoThumbs } from "$lib/videoThumbs.svelte";
   import SmugMugDialog from "$lib/components/SmugMugDialog.svelte";
+  import PendingMoves from "$lib/components/PendingMoves.svelte";
   import ExportDialog from "$lib/components/ExportDialog.svelte";
   import RenameDialog from "$lib/components/RenameDialog.svelte";
   import Slideshow from "$lib/components/Slideshow.svelte";
@@ -52,6 +53,7 @@
 {#if app.viewerIndex >= 0}<Viewer />{/if}
 {#if app.slideshow}<Slideshow />{/if}
 <SmugMugDialog />
+<PendingMoves />
 <ExportDialog />
 <RenameDialog />
 <ContextMenu />

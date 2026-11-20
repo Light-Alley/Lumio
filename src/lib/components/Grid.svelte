@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { CloudOff, ImageOff, Film, Play } from "@lucide/svelte";
+  import { CloudOff, ImageOff, Film, Play, Clock } from "@lucide/svelte";
   import StackBadge from "./StackBadge.svelte";
   import Stars from "./Stars.svelte";
   import EmptyState from "./EmptyState.svelte";
   import { app, selection, clickSelect, openViewer, rate, rootOnline, selectedIds, dropOnView, isClosedStack } from "../store.svelte";
-  import { thumbUrl, labelColor, isVideo, formatDuration, type PhotoLite } from "../api";
+  import { thumbUrl, previewUrl, labelColor, isVideo, formatDuration, type PhotoLite } from "../api";
   import { browseKeys, photoDragStart, photoDragEnd, canDropHere, dragGhosts } from "../browse";
   import { showMenu } from "../menu.svelte";
   import { photoMenu } from "../actions";
@@ -20,6 +20,9 @@
   const cols = $derived(Math.max(1, Math.floor((width - GAP) / (cell + GAP))));
   const colW = $derived((width - GAP) / cols - GAP);
   const rowH = $derived(colW + FOOT + GAP);
+  // Big tiles on a sharp (Retina) screen need more pixels than the 480 px thumbnail has:
+  // use the saved offline preview when there is one (it falls back to the thumbnail).
+  const sharp = $derived(colW * (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1) > 560);
   const rows = $derived(Math.ceil(app.photos.length / cols));
   const first = $derived(Math.max(0, Math.floor(scrollTop / rowH) - 2));
   const last = $derived(Math.min(rows, Math.ceil((scrollTop + height) / rowH) + 2));
@@ -93,7 +96,7 @@
         role="gridcell"
         tabindex="-1"
         aria-selected={sel}
-        draggable={!offline}
+        draggable="true"
         ondragstart={(e) => photoDragStart(e, p)}
         ondragend={photoDragEnd}
         onmousedown={(e) => { if (e.button === 0 && !(sel && !e.shiftKey && !e.metaKey && !e.ctrlKey)) clickSelect(p.id, e); }}
@@ -104,12 +107,13 @@
       >
         <div class="frame" style:height={`${colW}px`}>
           {#if p.thumb}
-            <img src={thumbUrl(p)} alt={p.filename} draggable="false" loading="lazy" decoding="async" />
+            <img src={sharp ? previewUrl(p) : thumbUrl(p)} alt={p.filename} draggable="false" loading="lazy" decoding="async" />
           {:else}
             <div class="nothumb">{#if isVideo(p)}<Film size={22} />{:else}<ImageOff size={22} />{/if}<span>{p.ext.toUpperCase()}</span></div>
           {/if}
           {#if labelColor(p.label)}<span class="label" style:background={labelColor(p.label)}></span>{/if}
-          {#if offline}<span class="badge" title="Drive not connected"><CloudOff size={12} /></span>{/if}
+          {#if p.pending}<span class="badge" title="Moved while a drive was away. The file follows when it's connected."><Clock size={12} /></span>
+          {:else if offline}<span class="badge" title="Drive not connected"><CloudOff size={12} /></span>{/if}
           {#if isVideo(p)}
             <span class="vid" title="Video"><Play size={9} fill="currentColor" />{formatDuration(p.duration)}</span>
           {:else}

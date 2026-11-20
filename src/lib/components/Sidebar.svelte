@@ -48,7 +48,7 @@
         role="treeitem"
         aria-selected={active}
         tabindex="-1"
-        title={r.online ? r.path : `${r.path}\nDrive not connected: showing saved thumbnails`}
+        title={r.online ? r.path : `${r.path}\nDrive not connected: showing saved previews`}
         onclick={() => setScope({ kind: "folder", path: r.path, name: r.name, rootId: r.id })}
         ondblclick={() => (expanded[r.id] = !expanded[r.id])}
         oncontextmenu={(e) => showMenu(e, folderMenu(rootNode(r), r))}

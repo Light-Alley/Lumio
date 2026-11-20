@@ -1,11 +1,12 @@
 <script lang="ts">
   import { X, Check, AlertTriangle } from "@lucide/svelte";
   import { app, saveSetting, toast, errorToast } from "../store.svelte";
-  import { api, type AiSettings, type AppStatus } from "../api";
+  import { api, formatBytes, type AiSettings, type AppStatus, type OfflineStats } from "../api";
 
   let tab = $state<"general" | "ai" | "map" | "about">("general");
   let ai = $state<AiSettings | null>(null);
   let status = $state<AppStatus | null>(null);
+  let offline = $state<OfflineStats | null>(null);
   let anthropicKey = $state("");
   let openaiKey = $state("");
 
@@ -13,8 +14,24 @@
     if (app.showSettings) {
       api.aiSettings().then((s) => (ai = s));
       api.appStatus().then((s) => (status = s));
+      loadOffline();
     }
   });
+
+  function loadOffline() {
+    api.offlinePreviewStats().then((s) => (offline = s)).catch(() => (offline = null));
+  }
+  function setOffline(key: string, value: string) {
+    saveSetting(key, value);
+    setTimeout(loadOffline, 300);
+  }
+  async function clearOffline() {
+    try {
+      await api.clearOfflinePreviews();
+      toast("Saved previews deleted.", "success");
+      loadOffline();
+    } catch (e) { errorToast(e); }
+  }
 
   function setAi(key: string, value: string) {
     api.setSetting(key, value).then(() => api.aiSettings().then((s) => (ai = s))).catch(errorToast);
@@ -62,6 +79,30 @@
             <button class:active={app.theme === "dark"} onclick={() => setTheme("dark")}>Dark</button>
             <button class:active={app.theme === "light"} onclick={() => setTheme("light")}>Light</button>
           </div>
+          <h3>Previews for offline viewing</h3>
+          <p class="muted">Lumio keeps a sharp copy of each photo (as well as the small thumbnail), so the large view and filmstrip look crisp straight away, even with the drive unplugged or the network drive away.</p>
+          <label class="radio"><input type="radio" name="offline" checked={(app.settings.offline_previews ?? "removable") === "removable"} onchange={() => setOffline("offline_previews", "removable")} />
+            <span>For external, network and cloud drives <span class="muted">(recommended)</span></span></label>
+          <label class="radio"><input type="radio" name="offline" checked={app.settings.offline_previews === "all"} onchange={() => setOffline("offline_previews", "all")} />
+            <span>For every library folder, including this computer's own disk</span></label>
+          <label class="radio"><input type="radio" name="offline" checked={app.settings.offline_previews === "off"} onchange={() => setOffline("offline_previews", "off")} />
+            <span>Off <span class="muted">(only thumbnails are kept)</span></span></label>
+          {#if (app.settings.offline_previews ?? "removable") !== "off"}
+            <p class="muted">Quality</p>
+            <label class="radio"><input type="radio" name="offq" checked={(app.settings.offline_preview_size ?? "1600") === "1600"} onchange={() => setOffline("offline_preview_size", "1600")} />
+              <span>Normal quality, 1600 px <span class="muted">(about 0.3 MB a photo; sharp in a window, a little soft full screen on a Retina display)</span></span></label>
+            <label class="radio"><input type="radio" name="offq" checked={app.settings.offline_preview_size === "2560"} onchange={() => setOffline("offline_preview_size", "2560")} />
+              <span>High quality, 2560 px <span class="muted">(about 0.9 MB a photo; sharp full screen, uses about three times the space)</span></span></label>
+            <p class="muted">Changing the quality remakes the saved previews in the background while the drive is connected.</p>
+          {/if}
+          {#if offline}
+            <p class="muted">
+              {offline.saved.toLocaleString()} saved, using {formatBytes(offline.bytes)}.
+              {#if offline.waiting}{offline.waiting.toLocaleString()} still to make; Lumio does these in the background while the drive is connected.{/if}
+              {#if offline.drives.length}<br />Kept for: {offline.drives.join(", ")}.{:else if (app.settings.offline_previews ?? "removable") !== "off"}<br />None of your connected library folders need them with this setting.{/if}
+            </p>
+            {#if offline.saved}<button onclick={clearOffline}>Delete saved previews</button>{/if}
+          {/if}
           <h3>Sharing</h3>
           <p class="muted">What to send when you share photos by email, WhatsApp or a website. Your originals are never changed.</p>
           <label class="radio"><input type="radio" name="share" checked={(app.settings.share_size ?? "original") === "original"} onchange={() => saveSetting("share_size", "original")} />

@@ -5,7 +5,7 @@
   import Stars from "./Stars.svelte";
   import { app, rate, setLabel, saveSetting, rootOnline, selectOnly, trashPhotos, rotatePhotos, startSlideshow, scopeTitle, type Bg } from "../store.svelte";
   import { setFullscreen, toggleFullscreen } from "../fullscreen";
-  import { photoUrl, thumbUrl, formatDate, formatDuration, labelColor, LABELS, isVideo } from "../api";
+  import { photoUrl, previewUrl, formatDate, formatDuration, labelColor, LABELS, isVideo } from "../api";
   import VideoPlayer from "./VideoPlayer.svelte";
   import { showMenu } from "../menu.svelte";
   import { photoMenu } from "../actions";
@@ -211,7 +211,7 @@
         <VideoPlayer bind:this={player} {p} autoplay />
       {/if}
       {#if !loaded && p.thumb && !(video && !offline)}
-        <img class="ph" src={thumbUrl(p)} alt="" draggable="false" />
+        <img class="ph" src={previewUrl(p)} alt="" draggable="false" />
       {/if}
       {#if !offline && !video}
         {#key p.id}
@@ -228,7 +228,7 @@
         {/key}
       {/if}
       {#if offline}
-        <div class="banner"><CloudOff size={14} /> Drive not connected. Showing the saved thumbnail.</div>
+        <div class="banner"><CloudOff size={14} /> Drive not connected. Showing the saved preview.</div>
       {:else if failed}
         <div class="banner">This file can't be previewed. Try "Open with" from the right-click menu.</div>
       {/if}

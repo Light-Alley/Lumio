@@ -22,7 +22,8 @@ export function photoMenu(p: PhotoLite): MenuItem[] {
   const ids = selectedIds();
   const many = ids.length > 1;
   const online = rootOnline(p.root_id);
-  const offlineNote = online ? undefined : true;
+  // A photo whose move is waiting for a drive isn't at its new place yet.
+  const offlineNote = online && !p.pending ? undefined : true;
   return [
     { label: "Open in viewer", shortcut: "Space", action: () => openViewer(p.id) },
     { label: "View full screen", action: () => { openViewer(p.id); setFullscreen(true); } },
@@ -78,7 +79,8 @@ export function photoMenu(p: PhotoLite): MenuItem[] {
     { separator: true },
     ...stackItems(p, ids),
     { label: many ? `Copy ${ids.length} photos to…` : "Copy to…", disabled: offlineNote, action: () => moveOrCopy(ids, true) },
-    { label: many ? `Move ${ids.length} photos to…` : "Move to…", disabled: offlineNote, action: () => moveOrCopy(ids, false) },
+    // Moving works with the drive away too: the files follow when it's back.
+    { label: many ? `Move ${ids.length} photos to…` : "Move to…", action: () => moveOrCopy(ids, false) },
     { label: "Upload to SmugMug…", disabled: offlineNote, action: () => openSmugMug(ids) },
     { label: "Export web-ready copies…", disabled: offlineNote, action: () => openWebExport(ids) },
     { label: many ? `Rename ${ids.length} photos…` : "Rename…", shortcut: "F2", disabled: offlineNote, action: () => renameSelected(ids) },

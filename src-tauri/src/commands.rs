@@ -243,6 +243,42 @@ pub async fn move_photos(state: S<'_>, ids: Vec<i64>, dest: String, copy: bool) 
     blocking(move || fileops::move_photos(&st, &ids, Path::new(&dest), copy)).await
 }
 
+/// Moves waiting for a drive to be connected.
+#[tauri::command]
+pub fn pending_moves(state: S) -> R<Vec<crate::pending::PendingMove>> {
+    crate::pending::list(&state.conn.lock()).map_err(e)
+}
+
+/// Cancel waiting moves: the photos go back to where their files really are.
+#[tauri::command]
+pub fn cancel_pending_moves(state: S, ids: Vec<i64>) -> R<usize> {
+    crate::pending::cancel(&state, &ids).map_err(e)
+}
+
+/// Try the waiting moves now (the worker also tries every minute).
+#[tauri::command]
+pub fn retry_pending_moves(state: S) -> R<()> {
+    state.queue(Job::ApplyPending);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn offline_preview_stats(state: S<'_>) -> R<crate::offline::Stats> {
+    let st = state.inner().clone();
+    blocking(move || crate::offline::stats(&st)).await
+}
+
+#[tauri::command]
+pub async fn clear_offline_previews(state: S<'_>) -> R<()> {
+    let st = state.inner().clone();
+    blocking(move || {
+        crate::offline::clear(&st)?;
+        st.queue(Job::Previews);
+        Ok(())
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn delete_photos(state: S<'_>, ids: Vec<i64>, permanent: bool) -> R<OpReport> {
     let st = state.inner().clone();
@@ -404,9 +440,14 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
                         )?;
                     }
                     let dest = crate::thumbs::thumb_path(&st.thumbs_dir, p.id);
-                    match crate::thumbs::make_thumb(&path, &p.ext, Some(new_o), &dest, &st.et, &st.tmp_dir) {
-                        Ok(_) => {
-                            st.conn.lock().execute("UPDATE photos SET thumb = 1 WHERE id = ?1", [p.id])?;
+                    // Turn the offline preview too, if the photo has one.
+                    let size = (p.preview > 0).then_some(p.preview as u32);
+                    let pdest = crate::thumbs::offline_preview_path(&st.offline_dir, p.id);
+                    let preview = size.map(|s| (pdest.as_path(), s));
+                    match crate::thumbs::make_thumb(&path, &p.ext, Some(new_o), &dest, preview, &st.et, &st.tmp_dir) {
+                        Ok(made) => {
+                            let pv = match made.preview { Some(false) => 0, _ => p.preview };
+                            st.conn.lock().execute("UPDATE photos SET thumb = 1, preview = ?2 WHERE id = ?1", params![p.id, pv])?;
                         }
                         Err(err) => log::warn!("thumbnail after rotate failed for {}: {err:#}", path.display()),
                     }
@@ -537,7 +578,11 @@ pub fn set_setting(state: S, key: String, value: String) -> R<()> {
     if key.starts_with("key_") {
         return Err("use ai_set_key".into());
     }
-    db::set_setting(&state.conn.lock(), &key, &value).map_err(e)
+    db::set_setting(&state.conn.lock(), &key, &value).map_err(e)?;
+    if key.starts_with("offline_preview") {
+        state.queue(Job::Previews);
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]

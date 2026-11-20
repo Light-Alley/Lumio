@@ -15,6 +15,8 @@ pub struct AppState {
     pub conn: Mutex<Connection>,
     pub thumbs_dir: PathBuf,
     pub previews_dir: PathBuf,
+    /// Sharper previews kept for offline viewing (see `offline.rs`).
+    pub offline_dir: PathBuf,
     pub tmp_dir: PathBuf,
     pub et: Arc<ExifTool>,
     pub jobs: Mutex<Sender<Job>>,
