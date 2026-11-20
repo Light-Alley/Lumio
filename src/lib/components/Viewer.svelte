@@ -1,8 +1,10 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { X, ChevronLeft, ChevronRight, Info, CloudOff, ZoomIn, Maximize, RotateCcw, RotateCw, FlipHorizontal2 } from "@lucide/svelte";
+  import { X, ChevronLeft, ChevronRight, Info, CloudOff, ZoomIn, Maximize, RotateCcw, RotateCw, FlipHorizontal2, Expand, Shrink, Play } from "@lucide/svelte";
+  import { onDestroy } from "svelte";
   import Stars from "./Stars.svelte";
-  import { app, rate, setLabel, saveSetting, rootOnline, selectOnly, trashPhotos, rotatePhotos, type Bg } from "../store.svelte";
+  import { app, rate, setLabel, saveSetting, rootOnline, selectOnly, trashPhotos, rotatePhotos, startSlideshow, scopeTitle, type Bg } from "../store.svelte";
+  import { setFullscreen, toggleFullscreen } from "../fullscreen";
   import { photoUrl, previewUrl, formatDate, formatDuration, labelColor, LABELS, isVideo } from "../api";
   import VideoPlayer from "./VideoPlayer.svelte";
   import { showMenu } from "../menu.svelte";
@@ -20,6 +22,31 @@
   let loaded = $state(false);
   let failed = $state(false);
   let stage: HTMLDivElement | undefined = $state();
+
+  // Full screen: the bars float over the photo and fade out (with the pointer) when
+  // the mouse rests, and come back as soon as it moves.
+  let idle = $state(false);
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Full screen was turned on here, so leaving the viewer turns it off again. */
+  let ownFullscreen = false;
+  function wake() {
+    idle = false;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => (idle = true), 2500);
+  }
+  function fullscreen() {
+    if (!app.fullscreen) ownFullscreen = true;
+    toggleFullscreen();
+    wake();
+  }
+  onDestroy(() => {
+    clearTimeout(idleTimer);
+    // Starting a slideshow from here keeps the screen for the slideshow.
+    if (ownFullscreen && app.fullscreen && !app.slideshow) setFullscreen(false);
+  });
+  function slideshow() {
+    startSlideshow(app.photos, scopeTitle(app.scope), app.viewerIndex);
+  }
 
   const BGS: { id: Bg; label: string; color: string }[] = [
     { id: "black", label: "Black", color: "#000000" },
@@ -66,7 +93,16 @@
     if (app.dialog) return;
     const meta = e.metaKey || e.ctrlKey;
     switch (e.key) {
-      case "Escape": close(); break;
+      case "Escape":
+        // The first Esc leaves full screen, the next one closes the viewer.
+        if (app.fullscreen) { ownFullscreen = false; setFullscreen(false); } else close();
+        break;
+      case "f": case "F":
+        if (!meta) fullscreen();
+        break;
+      case "p": case "P":
+        if (!meta) { e.preventDefault(); slideshow(); }
+        break;
       case "ArrowRight": case "ArrowDown": go(1); break;
       case "ArrowLeft": case "ArrowUp": go(-1); break;
       case " ":
@@ -130,10 +166,10 @@
   }
 </script>
 
-<svelte:window onkeydowncapture={onKey} onmouseup={() => (dragging = false)} onmousemove={move} />
+<svelte:window onkeydowncapture={onKey} onmouseup={() => (dragging = false)} onmousemove={(e) => { move(e); wake(); }} />
 
 {#if p}
-  <div class="viewer" style:--vbg={bgColor} class:light={lightBg}>
+  <div class="viewer" style:--vbg={bgColor} class:light={lightBg} class:immersive={app.fullscreen} class:idle={app.fullscreen && idle}>
     <div class="top">
       <div class="name">
         <strong>{p.filename}</strong>
@@ -152,6 +188,10 @@
         <button class="ghost icon" onclick={() => toggleZoom()} title="Zoom (Z)">{#if zoom === 1}<ZoomIn size={17} />{:else}<Maximize size={17} />{/if}</button>
         {/if}
         <button class="ghost icon" class:active={showInfo} onclick={() => (showInfo = !showInfo)} title="Info (I)"><Info size={17} /></button>
+        <button class="ghost icon" onclick={slideshow} title="Slideshow from this photo (P)" aria-label="Slideshow"><Play size={17} /></button>
+        <button class="ghost icon" onclick={fullscreen} title={app.fullscreen ? "Leave full screen (F or Esc)" : "Full screen (F)"} aria-label={app.fullscreen ? "Leave full screen" : "Full screen"}>
+          {#if app.fullscreen}<Shrink size={17} />{:else}<Expand size={17} />{/if}
+        </button>
         <button class="ghost icon" onclick={close} title="Close (Esc)"><X size={18} /></button>
       </div>
     </div>
@@ -213,6 +253,12 @@
 {/if}
 
 <style>
+  .viewer.immersive .top, .viewer.immersive .bottom { position: absolute; left: 0; right: 0; transition: opacity .25s; }
+  .viewer.immersive .top { top: 0; }
+  .viewer.immersive .bottom { bottom: 0; }
+  .viewer.immersive img.main, .viewer.immersive img.ph { max-width: 100%; max-height: 100%; }
+  .viewer.idle .top, .viewer.idle .bottom, .viewer.idle .nav { opacity: 0 !important; pointer-events: none; }
+  .viewer.idle { cursor: none; }
   .viewer { position: fixed; inset: 0; z-index: 500; background: var(--vbg); display: flex; flex-direction: column; color: #eee; }
   .top, .bottom {
     display: flex; align-items: center; gap: 14px; padding: 8px 14px; background: rgba(18, 19, 22, 0.88);
