@@ -19,6 +19,14 @@ export interface Photo extends PhotoLite {
   iso: number | null; fnumber: number | null; exposure: number | null; focal: number | null;
 }
 export interface FolderNode { path: string; name: string; count: number; has_children: boolean; online: boolean }
+export type NameCase = "keep" | "lower" | "upper";
+export interface RenameOptions {
+  mode: "pattern" | "replace"; pattern: string; start: number; digits: number;
+  find: string; replace: string; match_case: boolean; case: NameCase; ext_case: NameCase; keep_pairs: boolean;
+}
+export interface PlannedName { id: number; old: string; new: string; problem: string | null }
+/** `undo` holds [id, previous name] for every photo that was renamed. */
+export interface RenameReport { done: number; failed: [string, string][]; undo: [number, string][] }
 export interface OpReport { done: number; failed: [string, string][]; outside_library: boolean }
 export interface AppInfo { name: string; id: string; is_default: boolean }
 export interface Query {
@@ -56,7 +64,9 @@ export const api = {
   getPhotos: (ids: number[]) => invoke<Photo[]>("get_photos", { ids }),
   movePhotos: (ids: number[], dest: string, copy: boolean) => invoke<OpReport>("move_photos", { ids, dest, copy }),
   deletePhotos: (ids: number[], permanent: boolean) => invoke<OpReport>("delete_photos", { ids, permanent }),
-  renamePhoto: (id: number, name: string) => invoke<void>("rename_photo", { id, name }),
+  renamePhoto: (id: number, name: string) => invoke<RenameReport>("rename_photo", { id, name }),
+  renamePreview: (ids: number[], opts: RenameOptions) => invoke<PlannedName[]>("rename_preview", { ids, opts }),
+  renamePhotos: (items: [number, string][]) => invoke<RenameReport>("rename_photos", { items }),
   updateMetadata: (ids: number[], edit: Edit) => invoke<OpReport>("update_metadata", { ids, edit }),
   rotatePhotos: (ids: number[], op: Turn) => invoke<OpReport>("rotate_photos", { ids, op }),
   saveVideoThumb: (id: number, jpeg: string, width: number | null, height: number | null, duration: number | null) =>

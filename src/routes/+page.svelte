@@ -20,6 +20,7 @@
   import { watchVideoThumbs } from "$lib/videoThumbs.svelte";
   import SmugMugDialog from "$lib/components/SmugMugDialog.svelte";
   import ExportDialog from "$lib/components/ExportDialog.svelte";
+  import RenameDialog from "$lib/components/RenameDialog.svelte";
 
   onMount(() => { init(); });
   watchVideoThumbs();
@@ -49,6 +50,7 @@
 {#if app.viewerIndex >= 0}<Viewer />{/if}
 <SmugMugDialog />
 <ExportDialog />
+<RenameDialog />
 <ContextMenu />
 <Settings />
 <Dialog />

@@ -10,6 +10,7 @@ mod logfile;
 mod metadata;
 mod notify;
 mod openwith;
+mod rename;
 mod share;
 mod smugmug;
 mod state;
@@ -274,6 +275,8 @@ pub fn run() {
             commands::move_photos,
             commands::delete_photos,
             commands::rename_photo,
+            commands::rename_preview,
+            commands::rename_photos,
             commands::update_metadata,
             commands::rotate_photos,
             commands::save_video_thumb,

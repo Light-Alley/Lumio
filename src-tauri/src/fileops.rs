@@ -77,7 +77,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-fn sidecar_target(dst_photo: &Path, sidecar: &Path) -> PathBuf {
+pub(crate) fn sidecar_target(dst_photo: &Path, sidecar: &Path) -> PathBuf {
     // Keep the sidecar naming style: "name.xmp" or "name.ext.xmp".
     let side_name = sidecar.file_name().unwrap().to_string_lossy().to_string();
     let photo_name = dst_photo.file_name().unwrap().to_string_lossy().to_string();
@@ -204,7 +204,7 @@ pub fn move_folder(state: &AppState, src: &Path, dest_parent: &Path, copy: bool)
     Ok(OpReport { done: 1, failed: vec![], outside_library: dest_root.is_none() })
 }
 
-fn check_name(name: &str) -> Result<()> {
+pub(crate) fn check_name(name: &str) -> Result<()> {
     let n = name.trim();
     if n.is_empty() || n == "." || n == ".." || n.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|']) {
         bail!("\"{name}\" is not a valid name.");
@@ -239,33 +239,6 @@ pub fn rename_folder(state: &AppState, path: &Path, new_name: &str) -> Result<Pa
         params![dst.to_string_lossy(), new_name.trim(), path.to_string_lossy()],
     )?;
     Ok(dst)
-}
-
-pub fn rename_photo(state: &AppState, id: i64, new_name: &str) -> Result<()> {
-    check_name(new_name)?;
-    let conn = state.conn.lock();
-    let p = db::get_photo(&conn, id)?.ok_or_else(|| anyhow!("photo not found"))?;
-    let src = PathBuf::from(&p.path);
-    let mut name = new_name.trim().to_string();
-    // Keep the original extension if the user left it off.
-    if Path::new(&name).extension().is_none() && !p.ext.is_empty() {
-        name = format!("{name}.{}", src.extension().unwrap().to_string_lossy());
-    }
-    let dst = src.with_file_name(&name);
-    if dst.exists() {
-        bail!("A file named \"{name}\" already exists.");
-    }
-    let side = find_sidecar(&src);
-    std::fs::rename(&src, &dst)?;
-    if let Some(s) = side {
-        let _ = std::fs::rename(&s, sidecar_target(&dst, &s));
-    }
-    crate::notify::changed([dst.as_path()]);
-    conn.execute(
-        "UPDATE photos SET path = ?1, filename = ?2, ext = ?3 WHERE id = ?4",
-        params![dst.to_string_lossy(), name, indexer::ext_of(&dst), id],
-    )?;
-    Ok(())
 }
 
 /// Move photos to the system Trash / Recycle Bin (or delete permanently).
