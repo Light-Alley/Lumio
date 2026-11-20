@@ -9,7 +9,9 @@ mod indexer;
 mod logfile;
 mod metadata;
 mod notify;
+mod offline;
 mod openwith;
+mod pending;
 mod rename;
 mod share;
 mod smugmug;
@@ -127,11 +129,16 @@ fn serve_video(path: &std::path::Path, ext: &str, range: Option<&str>) -> Respon
 }
 
 /// Serves `photo://localhost/<id>`: the original if the webview can show it, otherwise a
-/// generated JPEG preview; when the drive is offline, the cached thumbnail.
-/// Videos are streamed in pieces (see `serve_video`).
+/// generated JPEG preview; when the drive is offline, the saved offline preview or,
+/// failing that, the thumbnail. Videos are streamed in pieces (see `serve_video`).
 fn serve_photo(state: &AppState, id: i64, range: Option<&str>) -> Response<Vec<u8>> {
-    let Ok(Some(p)) = db::get_photo(&state.conn.lock(), id) else { return not_found() };
-    let path = PathBuf::from(&p.path);
+    let (p, waiting_at) = {
+        let conn = state.conn.lock();
+        let Ok(Some(p)) = db::get_photo(&conn, id) else { return not_found() };
+        (p, pending::source_of(&conn, id).ok().flatten())
+    };
+    // A photo whose move is still waiting is really still at its old place.
+    let path = PathBuf::from(waiting_at.as_deref().unwrap_or(&p.path));
     if metadata::is_video(&p.ext) {
         return serve_video(&path, &p.ext, range);
     }
@@ -150,8 +157,20 @@ fn serve_photo(state: &AppState, id: i64, range: Option<&str>) -> Response<Vec<u
             return respond(StatusCode::OK, "image/jpeg", bytes, false);
         }
     }
+    serve_saved(state, id, true)
+}
+
+/// The saved offline preview (when `large`) or the thumbnail, from Lumio's own folders,
+/// so it works with the drive unplugged. Falls back to the thumbnail, uncached, so the
+/// sharper preview shows once it has been made.
+fn serve_saved(state: &AppState, id: i64, large: bool) -> Response<Vec<u8>> {
+    if large {
+        if let Ok(b) = std::fs::read(thumbs::offline_preview_path(&state.offline_dir, id)) {
+            return respond(StatusCode::OK, "image/jpeg", b, false);
+        }
+    }
     match std::fs::read(thumbs::thumb_path(&state.thumbs_dir, id)) {
-        Ok(b) => respond(StatusCode::OK, "image/jpeg", b, false),
+        Ok(b) => respond(StatusCode::OK, "image/jpeg", b, !large),
         Err(_) => not_found(),
     }
 }
@@ -183,12 +202,10 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("thumb", |ctx, request, responder| {
             let state = ctx.app_handle().state::<Arc<AppState>>().inner().clone();
             let id = id_from_uri(request.uri());
+            // `?s=L` asks for the sharper offline preview (for the large view and filmstrip).
+            let large = request.uri().query().is_some_and(|q| q.split('&').any(|kv| kv == "s=L"));
             std::thread::spawn(move || {
-                let resp = match id.and_then(|id| std::fs::read(thumbs::thumb_path(&state.thumbs_dir, id)).ok()) {
-                    Some(b) => respond(StatusCode::OK, "image/jpeg", b, true),
-                    None => not_found(),
-                };
-                responder.respond(resp);
+                responder.respond(id.map(|id| serve_saved(&state, id, large)).unwrap_or_else(not_found));
             });
         })
         .register_asynchronous_uri_scheme_protocol("photo", |ctx, request, responder| {
@@ -202,9 +219,10 @@ pub fn run() {
         .setup(|app| {
             let data = app.path().app_data_dir()?;
             let thumbs_dir = data.join("thumbnails");
+            let offline_dir = data.join("previews");
             let previews_dir = app.path().app_cache_dir()?.join("previews");
             let tmp_dir = app.path().app_cache_dir()?.join("tmp");
-            for d in [&data, &thumbs_dir, &previews_dir, &tmp_dir] {
+            for d in [&data, &thumbs_dir, &offline_dir, &previews_dir, &tmp_dir] {
                 std::fs::create_dir_all(d)?;
             }
             logfile::init(data.join("lumio.log"));
@@ -224,6 +242,7 @@ pub fn run() {
                 conn: Mutex::new(conn),
                 thumbs_dir,
                 previews_dir,
+                offline_dir,
                 tmp_dir,
                 et,
                 jobs: Mutex::new(tx),
@@ -254,6 +273,20 @@ pub fn run() {
                     state.queue(indexer::Job::ScanRoot(r.id));
                 }
             }
+            state.queue(indexer::Job::ApplyPending);
+            state.queue(indexer::Job::Previews);
+            // Drives come back without telling us: once a minute, if moves are waiting,
+            // let the worker see whether it can do them now.
+            {
+                let st = Arc::downgrade(&state);
+                std::thread::Builder::new().name("pending-moves".into()).spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                    let Some(st) = st.upgrade() else { break };
+                    if pending::count(&st.conn.lock()) > 0 {
+                        st.queue(indexer::Job::ApplyPending);
+                    }
+                })?;
+            }
             watcher::restart(&state);
             Ok(())
         })
@@ -273,6 +306,11 @@ pub fn run() {
             commands::get_photo,
             commands::get_photos,
             commands::move_photos,
+            commands::pending_moves,
+            commands::cancel_pending_moves,
+            commands::retry_pending_moves,
+            commands::offline_preview_stats,
+            commands::clear_offline_previews,
             commands::delete_photos,
             commands::rename_photo,
             commands::rename_preview,

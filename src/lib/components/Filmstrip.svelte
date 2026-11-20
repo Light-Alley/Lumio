@@ -5,7 +5,7 @@
   import Stars from "./Stars.svelte";
   import EmptyState from "./EmptyState.svelte";
   import { app, selection, clickSelect, openViewer, rate, setLabel, rootOnline, selectedIds, selectOnly, dropOnView, saveSetting, rotatePhotos, isClosedStack, type Bg } from "../store.svelte";
-  import { api, thumbUrl, photoUrl, labelColor, LABELS, formatExposure, formatDuration, isVideo, type Photo, type PhotoLite } from "../api";
+  import { api, thumbUrl, previewUrl, photoUrl, labelColor, LABELS, formatExposure, formatDuration, isVideo, type Photo, type PhotoLite } from "../api";
   import VideoPlayer from "./VideoPlayer.svelte";
   import { showMenu } from "../menu.svelte";
   import { photoMenu } from "../actions";
@@ -134,11 +134,11 @@
         <VideoPlayer bind:this={stagePlayer} p={current} compact />
       {:else}
       {#key current.id}
-        {#if current.thumb}<img class="ph" src={thumbUrl(current)} alt="" draggable="false" class:hide={loaded} />{/if}
+        {#if current.thumb}<img class="ph" src={previewUrl(current)} alt="" draggable="false" class:hide={loaded} />{/if}
         {#if rootOnline(current.root_id)}
           <img class="big" src={bigSrc} alt={current.filename} draggable="false" onload={() => (loaded = true)} class:show={loaded} />
         {:else}
-          <span class="off"><CloudOff size={14} /> Drive not connected, showing the thumbnail</span>
+          <span class="off"><CloudOff size={14} /> Drive not connected, showing the saved preview</span>
         {/if}
       {/key}
       {/if}

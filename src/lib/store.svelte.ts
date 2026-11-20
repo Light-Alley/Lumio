@@ -2,7 +2,7 @@
 import { SvelteSet } from "svelte/reactivity";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { api, errText, type PhotoLite, type Root, type Edit, type OpReport, type Turn } from "./api";
+import { api, errText, type PhotoLite, type Root, type Edit, type OpReport, type Turn, type PendingMove, type PendingReport } from "./api";
 
 export type Scope =
   | { kind: "all" }
@@ -78,6 +78,9 @@ export const app = $state({
   /** Photos being dragged. Their rows stay mounted (hidden) if a tab switches mid-drag, because removing a drag's source element cancels the drag. */
   dragPhotos: [] as PhotoLite[],
   tabs: [] as Tab[],
+  /** Moves waiting for a drive to be connected. */
+  pending: [] as PendingMove[],
+  showPending: false,
   activeTab: 0,
 });
 
@@ -133,6 +136,40 @@ function reportResult(r: OpReport, verb: string) {
 
 export async function loadRoots() {
   app.roots = await api.getRoots();
+}
+
+export async function loadPending() {
+  try {
+    app.pending = await api.pendingMoves();
+  } catch {
+    app.pending = [];
+  }
+  if (!app.pending.length) app.showPending = false;
+}
+
+export async function cancelPending(ids: number[]) {
+  try {
+    const n = await api.cancelPendingMoves(ids);
+    if (n) toast(`${n} move${n === 1 ? "" : "s"} cancelled. ${n === 1 ? "The photo is" : "The photos are"} back where ${n === 1 ? "it is" : "they are"} on disk.`, "success");
+    await loadPending();
+    await loadPhotos();
+    app.folderVersion++;
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
+/** The worker finished (or couldn't finish) moves that were waiting for a drive. */
+function pendingApplied(r: PendingReport) {
+  if (r.done) toast(`${r.done} waiting move${r.done === 1 ? " is" : "s are"} done now that the drive is connected.`, "success");
+  if (r.failed.length) {
+    const first = r.failed.slice(0, 3).map(([f, e]) => `${f}: ${e}`).join("\n");
+    toast(`${r.failed.length} waiting move${r.failed.length === 1 ? "" : "s"} couldn't be done yet.\n${first}`, "error", {
+      label: "Show",
+      run: () => (app.showPending = true),
+    });
+  }
+  loadPending();
 }
 
 let loadSeq = 0;
@@ -308,6 +345,7 @@ function scheduleRefresh() {
     refreshTimer = null;
     await loadRoots();
     await loadPhotos();
+    await loadPending();
     app.folderVersion++;
   }, 600);
 }
@@ -329,6 +367,8 @@ export async function init() {
     errorToast(e);
   }
   await listen("library-changed", scheduleRefresh);
+  await listen<PendingReport>("pending-moves", (e) => pendingApplied(e.payload));
+  loadPending();
   await listen<typeof app.progress>("index-progress", (e) => (app.progress = e.payload));
   await listen<typeof app.op>("op-progress", (e) => (app.op = e.payload));
   // When the window regains focus, pick up drives that were (dis)connected and, at most
@@ -342,6 +382,7 @@ export async function init() {
       lastRescan = Date.now();
       api.rescan().catch(() => {});
       if (changed) { loadPhotos(); app.folderVersion++; }
+      if (changed && app.pending.length) api.retryPendingMoves().catch(() => {});
     }
   });
 }
@@ -422,6 +463,14 @@ export async function moveOrCopy(ids: number[], copy: boolean, dest?: string) {
   try {
     const r = await api.movePhotos(withStacks(ids), d, copy);
     reportResult(r, copy ? "copied" : "moved");
+    if (r.queued) {
+      toast(
+        `${r.queued} photo${r.queued === 1 ? "" : "s"} moved in your library. The file${r.queued === 1 ? "" : "s"} will follow when the drive is connected.`,
+        "info",
+        { label: "Show waiting moves", run: () => (app.showPending = true) },
+      );
+      loadPending();
+    }
     if (r.outside_library && r.done) {
       toast(`That folder isn't in your library${copy ? "" : ", so the moved photos left the catalogue"}.`, "info", {
         label: "Add folder to library",

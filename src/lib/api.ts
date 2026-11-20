@@ -11,6 +11,8 @@ export interface PhotoLite {
   stack_id?: number | null; stack_top?: boolean; stack_count?: number;
   /** Videos only: length in seconds. */
   duration?: number | null;
+  /** Moved while a drive was away; the file follows when it's connected. */
+  pending?: boolean;
 }
 export interface Photo extends PhotoLite {
   size: number; title: string | null; caption: string | null;
@@ -27,7 +29,11 @@ export interface RenameOptions {
 export interface PlannedName { id: number; old: string; new: string; problem: string | null }
 /** `undo` holds [id, previous name] for every photo that was renamed. */
 export interface RenameReport { done: number; failed: [string, string][]; undo: [number, string][] }
-export interface OpReport { done: number; failed: [string, string][]; outside_library: boolean }
+export interface OpReport { done: number; failed: [string, string][]; outside_library: boolean; queued?: number }
+/** A move waiting for a drive to be connected. */
+export interface PendingMove { photo_id: number; filename: string; from: string; to: string; error: string | null }
+export interface PendingReport { done: number; failed: [string, string][]; waiting: number }
+export interface OfflineStats { saved: number; waiting: number; bytes: number; drives: string[] }
 export interface AppInfo { name: string; id: string; is_default: boolean }
 export interface Query {
   scope: string; folder?: string | null; recursive?: boolean; ids?: number[] | null; text?: string;
@@ -63,6 +69,11 @@ export const api = {
   getPhoto: (id: number) => invoke<Photo | null>("get_photo", { id }),
   getPhotos: (ids: number[]) => invoke<Photo[]>("get_photos", { ids }),
   movePhotos: (ids: number[], dest: string, copy: boolean) => invoke<OpReport>("move_photos", { ids, dest, copy }),
+  pendingMoves: () => invoke<PendingMove[]>("pending_moves"),
+  cancelPendingMoves: (ids: number[]) => invoke<number>("cancel_pending_moves", { ids }),
+  retryPendingMoves: () => invoke<void>("retry_pending_moves"),
+  offlinePreviewStats: () => invoke<OfflineStats>("offline_preview_stats"),
+  clearOfflinePreviews: () => invoke<void>("clear_offline_previews"),
   deletePhotos: (ids: number[], permanent: boolean) => invoke<OpReport>("delete_photos", { ids, permanent }),
   renamePhoto: (id: number, name: string) => invoke<RenameReport>("rename_photo", { id, name }),
   renamePreview: (ids: number[], opts: RenameOptions) => invoke<PlannedName[]>("rename_preview", { ids, opts }),
@@ -109,6 +120,9 @@ function scheme(name: string) {
 }
 type Versioned = { id: number; mtime: number; orientation?: number | null };
 export const thumbUrl = (p: Versioned) => `${scheme("thumb")}/${p.id}?m=${p.mtime}-${p.orientation ?? 1}`;
+/** The sharper preview Lumio keeps for offline viewing (about 1600 px), or the thumbnail
+ *  when there isn't one. Use it wherever a photo is shown large before the original loads. */
+export const previewUrl = (p: Versioned) => `${scheme("thumb")}/${p.id}?m=${p.mtime}-${p.orientation ?? 1}&s=L`;
 /** On Linux videos come from a small local server instead of photo:// (WebKitGTK won't
  *  play media from custom addresses); set once at start-up by `loadVideoBase`. */
 let videoBase: string | null = null;
