@@ -10,7 +10,8 @@
 //! Settings:
 //! - `offline_previews`: `removable` (default: external, network and cloud drives),
 //!   `all` (every library folder) or `off`.
-//! - `offline_preview_size`: long side in pixels, `1600` (default) or `2560`.
+//! - `offline_preview_size`: `1600` (normal quality, default) or `2560` (high quality).
+//!   Changing it remakes existing previews at the new size.
 //!
 //! `photos.preview` records the size a photo's preview was made at; 0 means none yet,
 //! and -1 that it could not be made (tried again when the file changes).
@@ -150,7 +151,7 @@ pub fn backfill_chunk(state: &AppState, conn: &Connection) -> Result<bool> {
     let mut todo: Vec<(i64, PathBuf, String, Option<i64>, i64)> = {
         let mut st = conn.prepare(&format!(
             "SELECT id, path, ext, orientation, root_id FROM photos
-             WHERE thumb = 1 AND preview >= 0 AND preview < ?1 AND root_id IN ({}) AND ext NOT IN ({})
+             WHERE thumb = 1 AND preview >= 0 AND preview <> ?1 AND root_id IN ({}) AND ext NOT IN ({})
                AND id NOT IN (SELECT photo_id FROM pending_moves)
              ORDER BY coalesce(taken_at, '') DESC, id DESC LIMIT ?2",
             list.join(","),
@@ -227,7 +228,7 @@ fn counts(conn: &Connection, rp: &RootPolicy) -> Result<(i64, i64)> {
     let videos: Vec<String> = metadata::VIDEO_EXTS.iter().map(|e| format!("'{e}'")).collect();
     Ok(conn.query_row(
         &format!(
-            "SELECT coalesce(SUM(preview >= 0 AND preview < ?1), 0), coalesce(SUM(preview >= ?1), 0) FROM photos
+            "SELECT coalesce(SUM(preview >= 0 AND preview <> ?1), 0), coalesce(SUM(preview = ?1), 0) FROM photos
              WHERE thumb = 1 AND root_id IN ({}) AND ext NOT IN ({})",
             ids.join(","),
             videos.join(",")

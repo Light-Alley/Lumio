@@ -87,12 +87,14 @@
             <span>For every library folder, including this computer's own disk</span></label>
           <label class="radio"><input type="radio" name="offline" checked={app.settings.offline_previews === "off"} onchange={() => setOffline("offline_previews", "off")} />
             <span>Off <span class="muted">(only thumbnails are kept)</span></span></label>
-          <label class="field"><span>Size</span>
-            <select value={app.settings.offline_preview_size ?? "1600"} onchange={(e) => setOffline("offline_preview_size", (e.target as HTMLSelectElement).value)}>
-              <option value="1600">Standard, 1600 px (about 0.3 MB a photo)</option>
-              <option value="2560">Large, 2560 px (about 0.8 MB a photo)</option>
-            </select>
-          </label>
+          {#if (app.settings.offline_previews ?? "removable") !== "off"}
+            <p class="muted">Quality</p>
+            <label class="radio"><input type="radio" name="offq" checked={(app.settings.offline_preview_size ?? "1600") === "1600"} onchange={() => setOffline("offline_preview_size", "1600")} />
+              <span>Normal quality, 1600 px <span class="muted">(about 0.3 MB a photo; sharp in a window, a little soft full screen on a Retina display)</span></span></label>
+            <label class="radio"><input type="radio" name="offq" checked={app.settings.offline_preview_size === "2560"} onchange={() => setOffline("offline_preview_size", "2560")} />
+              <span>High quality, 2560 px <span class="muted">(about 0.9 MB a photo; sharp full screen, uses about three times the space)</span></span></label>
+            <p class="muted">Changing the quality remakes the saved previews in the background while the drive is connected.</p>
+          {/if}
           {#if offline}
             <p class="muted">
               {offline.saved.toLocaleString()} saved, using {formatBytes(offline.bytes)}.

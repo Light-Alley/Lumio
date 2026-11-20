@@ -175,7 +175,8 @@ fn write_preview(img: &DynamicImage, dest: &Path, size: u32) -> Result<()> {
     } else {
         img.clone()
     };
-    let bytes = encode_jpeg(&img, 82)?;
+    // High quality previews (for full screen on sharp displays) also compress less.
+    let bytes = encode_jpeg(&img, if size >= 2400 { 90 } else { 82 })?;
     if let Some(p) = dest.parent() {
         std::fs::create_dir_all(p)?;
     }
