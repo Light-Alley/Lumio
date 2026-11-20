@@ -17,6 +17,9 @@ pub struct OpReport {
     pub failed: Vec<(String, String)>,
     /// True when the destination is not inside any library folder.
     pub outside_library: bool,
+    /// Moves that will happen when a drive that isn't connected comes back.
+    #[serde(default)]
+    pub queued: usize,
 }
 
 /// Pick a free name like "IMG_0001 (2).jpg" if the target exists.
@@ -38,7 +41,15 @@ pub fn unique_target(dir: &Path, name: &str) -> PathBuf {
 }
 
 fn copy_verified(src: &Path, dst: &Path) -> Result<()> {
-    let n = std::fs::copy(src, dst).with_context(|| format!("copying to {}", dst.display()))?;
+    // `dst` is always a new name, so a half-written copy (say the drive dropped out
+    // part-way) can be removed without touching anything else.
+    let n = match std::fs::copy(src, dst) {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = std::fs::remove_file(dst);
+            return Err(anyhow::Error::from(e).context(format!("copying to {}", dst.display())));
+        }
+    };
     let expected = std::fs::metadata(src)?.len();
     if n != expected || std::fs::metadata(dst)?.len() != expected {
         let _ = std::fs::remove_file(dst);
@@ -89,13 +100,18 @@ pub(crate) fn sidecar_target(dst_photo: &Path, sidecar: &Path) -> PathBuf {
 }
 
 pub fn move_photos(state: &AppState, ids: &[i64], dest: &Path, copy: bool) -> Result<OpReport> {
-    if !dest.is_dir() {
-        bail!("The destination folder is not available: {}", dest.display());
-    }
     let (photos, dest_root) = {
         let conn = state.conn.lock();
         (db::get_photos(&conn, ids)?, db::root_for_path(&conn, dest)?)
     };
+    // A folder on a library drive that isn't connected: moves wait for the drive.
+    let dest_away = !dest.is_dir() && dest_root.as_ref().is_some_and(|(_, root)| !indexer::reachable(root));
+    if !dest.is_dir() && !dest_away {
+        bail!("The destination folder is not available: {}", dest.display());
+    }
+    if dest_away && copy {
+        bail!("{} isn't connected. Photos can be moved there now and will follow when it's back, but copying needs the drive connected.", dest_root.map(|(_, r)| r.display().to_string()).unwrap_or_default());
+    }
     let mut rep = OpReport { outside_library: dest_root.is_none(), ..Default::default() };
     let total = photos.len();
     let mut new_files = vec![];
@@ -107,6 +123,35 @@ pub fn move_photos(state: &AppState, ids: &[i64], dest: &Path, copy: bool) -> Re
         );
         let src = PathBuf::from(&p.path);
         if src.parent() == Some(dest) && !copy {
+            continue;
+        }
+        // Moves that can't happen yet are made in the catalogue now and wait in
+        // `pending`: when the destination's drive is away, when this photo's own drive is
+        // away, or when the photo already has a move waiting.
+        if !copy {
+            let queue = {
+                let conn = state.conn.lock();
+                let waiting = crate::pending::source_of(&conn, p.id)?.is_some();
+                let src_away = !src.exists()
+                    && db::root_for_path(&conn, &src)?.map_or(true, |(_, root)| !indexer::reachable(&root));
+                match (&dest_root, dest_away || src_away || waiting) {
+                    (Some((root_id, _)), true) => Some(crate::pending::queue_move(&conn, p, dest, *root_id)),
+                    _ => None,
+                }
+            };
+            match queue {
+                Some(Ok(_)) => {
+                    rep.queued += 1;
+                    continue;
+                }
+                Some(Err(e)) => {
+                    rep.failed.push((p.filename.clone(), e.to_string()));
+                    continue;
+                }
+                None => {}
+            }
+        } else if crate::pending::source_of(&state.conn.lock(), p.id)?.is_some() {
+            rep.failed.push((p.filename.clone(), "it has a move waiting for a drive; copy it once that's done".into()));
             continue;
         }
         let res: Result<PathBuf> = (|| {
@@ -152,6 +197,10 @@ pub fn move_photos(state: &AppState, ids: &[i64], dest: &Path, copy: bool) -> Re
     }
     if !new_files.is_empty() && dest_root.is_some() {
         state.queue(Job::Files(new_files));
+    }
+    if rep.queued > 0 {
+        // If both drives are in fact here (a move was waiting already), do it now.
+        state.queue(Job::ApplyPending);
     }
     crate::notify::changed(&touched);
     let _ = state.app.emit("op-progress", serde_json::json!({ "done": total, "total": total, "message": "" }));
@@ -201,7 +250,7 @@ pub fn move_folder(state: &AppState, src: &Path, dest_parent: &Path, copy: bool)
         state.queue(Job::ScanFolder(dst));
     }
     let _ = state.app.emit("op-progress", serde_json::json!({ "done": 1, "total": 1, "message": "" }));
-    Ok(OpReport { done: 1, failed: vec![], outside_library: dest_root.is_none() })
+    Ok(OpReport { done: 1, failed: vec![], outside_library: dest_root.is_none(), queued: 0 })
 }
 
 pub(crate) fn check_name(name: &str) -> Result<()> {

@@ -28,6 +28,10 @@ pub enum Job {
     Refresh(Vec<PathBuf>),
     /// Paths that disappeared.
     Removed(Vec<PathBuf>),
+    /// Do moves that were waiting for a drive, if it's back.
+    ApplyPending,
+    /// Make some of the offline previews that are still missing.
+    Previews,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,12 +63,12 @@ impl std::error::Error for Offline {}
 
 /// Can the folder still be listed? Network drives and sync clients (pCloud, Dropbox, SMB)
 /// stop answering when the computer sleeps or the connection drops.
-fn reachable(dir: &Path) -> bool {
+pub fn reachable(dir: &Path) -> bool {
     std::fs::read_dir(dir).map(|mut rd| { let _ = rd.next(); true }).unwrap_or(false)
 }
 
 /// Can we actually read the start of the file?
-fn readable(p: &Path) -> bool {
+pub fn readable(p: &Path) -> bool {
     use std::io::Read;
     let mut buf = [0u8; 4096];
     std::fs::File::open(p).and_then(|mut f| f.read(&mut buf)).map(|n| n > 0).unwrap_or(false)
@@ -197,14 +201,26 @@ pub fn run_worker(state: Arc<AppState>, rx: Receiver<Job>) {
         let mut refresh: Vec<PathBuf> = vec![];
         let mut removed: Vec<PathBuf> = vec![];
         let mut scans: Vec<Job> = vec![];
+        let mut previews = false;
         for j in jobs {
             match j {
                 Job::Files(f) => files.extend(f),
                 Job::Refresh(f) => refresh.extend(f),
                 Job::Removed(f) => removed.extend(f),
+                Job::Previews => previews = true,
+                Job::ApplyPending => {}
                 other => scans.push(other),
             }
         }
+        // Moves made while a drive was away go first, so scans find files where the
+        // catalogue already says they are.
+        if crate::pending::count(&conn) > 0 {
+            if let Err(e) = crate::pending::apply(&state, &conn) {
+                log::warn!("waiting moves: {e:#}");
+            }
+        }
+        // Anything that indexed files may have left previews to make.
+        previews |= !scans.is_empty() || !files.is_empty() || !refresh.is_empty();
         if !removed.is_empty() {
             if let Err(e) = handle_removed(&state, &conn, &removed) {
                 log::warn!("remove: {e}");
@@ -237,8 +253,22 @@ pub fn run_worker(state: Arc<AppState>, rx: Receiver<Job>) {
                 paused |= on_err(e, "refresh");
             }
         }
+        // Offline previews for photos indexed earlier: a few at a time, so other work
+        // queued meanwhile goes first.
+        let mut more_previews = false;
+        if previews && !paused {
+            match crate::offline::backfill_chunk(&state, &conn) {
+                Ok(more) => more_previews = more,
+                Err(e) => paused |= on_err(e, "offline previews"),
+            }
+            if more_previews {
+                state.queue(Job::Previews);
+            }
+        }
         // Keep the "not reachable" notice up while a retry is waiting.
-        if pending.lock().is_empty() {
+        if more_previews {
+            // Still busy; the next chunk updates the status.
+        } else if pending.lock().is_empty() {
             if !paused {
                 notice.lock().clear();
                 emit_progress(&state, false, 0, 0, "");
@@ -280,10 +310,11 @@ fn handle_removed(state: &AppState, conn: &Connection, paths: &[PathBuf]) -> Res
         let clause = db::folder_clause(&ps, true, &mut args);
         args.push(ps.clone().into());
         let sql = format!("SELECT id FROM photos WHERE path = ?{} OR {clause}", args.len());
+        let waiting = crate::pending::photo_ids(conn)?;
         let ids: Vec<i64> = {
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| r.get(0))?;
-            rows.collect::<rusqlite::Result<_>>()?
+            rows.collect::<rusqlite::Result<Vec<i64>>>()?.into_iter().filter(|id| !waiting.contains(id)).collect()
         };
         delete_ids(state, conn, &ids)?;
     }
@@ -295,6 +326,7 @@ pub fn delete_ids(state: &AppState, conn: &Connection, ids: &[i64]) -> Result<()
     for id in ids {
         tx.execute("DELETE FROM photos WHERE id = ?1", [id])?;
         let _ = std::fs::remove_file(thumbs::thumb_path(&state.thumbs_dir, *id));
+        let _ = std::fs::remove_file(thumbs::offline_preview_path(&state.offline_dir, *id));
     }
     db::tidy_stacks(&tx)?;
     tx.commit()?;
@@ -350,8 +382,10 @@ fn scan_dir(state: &AppState, conn: &Connection, dir: &Path, _root_id: i64) -> R
         // The drive went away while we were listing it; don't forget photos we could not see.
         return Err(Offline { root_id: _root_id, root: dir.to_path_buf() }.into());
     }
-    // Forget files that no longer exist below this folder.
+    // Forget files that no longer exist below this folder (but not photos moved here
+    // while a drive was away: their files haven't arrived yet).
     let present: HashSet<String> = found.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    let waiting = crate::pending::photo_ids(conn)?;
     let ds = dir.to_string_lossy().to_string();
     let mut args = vec![];
     let clause = db::folder_clause(&ds, true, &mut args);
@@ -360,7 +394,10 @@ fn scan_dir(state: &AppState, conn: &Connection, dir: &Path, _root_id: i64) -> R
         let rows = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
         })?;
-        rows.filter_map(|r| r.ok()).filter(|(_, p)| !present.contains(p)).map(|(id, _)| id).collect()
+        rows.filter_map(|r| r.ok())
+            .filter(|(id, p)| !present.contains(p) && !waiting.contains(id))
+            .map(|(id, _)| id)
+            .collect()
     };
     if !gone.is_empty() {
         if walk_errors > 0 {
@@ -387,10 +424,13 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
         .into_iter()
         .map(|r| (r.id, PathBuf::from(r.path)))
         .collect();
+    // Files waiting to be moved are already in the catalogue at their new place.
+    let moving = crate::pending::sources(conn)?;
+    let previews = crate::offline::RootPolicy::load(conn)?;
     let mut todo: Vec<Pending> = vec![];
     for p in paths {
         let ext = ext_of(&p);
-        if !metadata::is_supported(&ext) || is_hidden(&p) {
+        if !metadata::is_supported(&ext) || is_hidden(&p) || moving.contains(p.to_string_lossy().as_ref()) {
             continue;
         }
         let Some(root_id) = roots
@@ -479,7 +519,7 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
         }
         // 2. Upsert rows.
         let now = chrono::Utc::now().timestamp_millis();
-        let mut ids: Vec<(i64, PathBuf, String, Option<i64>)> = vec![];
+        let mut ids: Vec<(i64, PathBuf, String, Option<i64>, i64)> = vec![];
         {
             let tx = conn.unchecked_transaction()?;
             for (i, (c, sc)) in chunk.iter().zip(sidecars.iter()).enumerate() {
@@ -492,7 +532,7 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
                     if let Some(id) = c.existing {
                         // Keep what we already know; just try the thumbnail again.
                         let o: Option<i64> = tx.query_row("SELECT orientation FROM photos WHERE id = ?1", [id], |r| r.get(0)).unwrap_or(None);
-                        ids.push((id, c.path.clone(), c.ext.clone(), o));
+                        ids.push((id, c.path.clone(), c.ext.clone(), o, c.root_id));
                         continue;
                     }
                 }
@@ -522,22 +562,26 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
                     )?;
                     tx.last_insert_rowid()
                 };
-                ids.push((id, c.path.clone(), c.ext.clone(), m.orientation));
+                ids.push((id, c.path.clone(), c.ext.clone(), m.orientation, c.root_id));
             }
             tx.commit()?;
         }
         // 3. Thumbnails, in parallel.
         // A failure only counts against the file if the file itself is still readable.
-        let results: Vec<(i64, Result<(u32, u32), bool>)> = ids
+        // Photos on drives that can go away also get a sharper preview from the same decode.
+        let results: Vec<(i64, Result<thumbs::Made, bool>, Option<u32>)> = ids
             .par_iter()
-            .map(|(id, path, ext, orient)| {
+            .map(|(id, path, ext, orient, root_id)| {
                 let dest = thumbs::thumb_path(&state.thumbs_dir, *id);
-                match thumbs::make_thumb(path, ext, *orient, &dest, &state.et, &state.tmp_dir) {
-                    Ok(wh) => (*id, Ok(wh)),
+                let size = previews.size_for(*root_id, ext);
+                let pdest = size.map(|_| thumbs::offline_preview_path(&state.offline_dir, *id));
+                let preview = pdest.as_deref().zip(size);
+                match thumbs::make_thumb(path, ext, *orient, &dest, preview, &state.et, &state.tmp_dir) {
+                    Ok(made) => (*id, Ok(made), size),
                     Err(e) => {
                         let ok = readable(path);
                         log::warn!("thumbnail failed for {}: {e:#}{}", path.display(), if ok { "" } else { " (file not readable)" });
-                        (*id, Err(ok))
+                        (*id, Err(ok), size)
                     }
                 }
             })
@@ -545,12 +589,23 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
         let mut unreadable = 0;
         {
             let tx = conn.unchecked_transaction()?;
-            for (id, r) in &results {
+            for (id, r, size) in &results {
                 match r {
-                    Ok((w, h)) => tx.execute(
-                        "UPDATE photos SET thumb = 1, thumb_tries = 0, width = coalesce(width, ?2), height = coalesce(height, ?3) WHERE id = ?1",
-                        params![id, w, h],
-                    )?,
+                    Ok(made) => {
+                        // The file changed (or is new): its old preview, if any, is stale.
+                        let preview = match made.preview {
+                            Some(true) => size.map(|s| s as i64).unwrap_or(0),
+                            Some(false) => -1,
+                            None => {
+                                let _ = std::fs::remove_file(thumbs::offline_preview_path(&state.offline_dir, *id));
+                                0
+                            }
+                        };
+                        tx.execute(
+                            "UPDATE photos SET thumb = 1, thumb_tries = 0, preview = ?4, width = coalesce(width, ?2), height = coalesce(height, ?3) WHERE id = ?1",
+                            params![id, made.width, made.height, preview],
+                        )?
+                    }
                     Err(true) => {
                         failed += 1;
                         tx.execute("UPDATE photos SET thumb = 0, thumb_tries = thumb_tries + 1 WHERE id = ?1", [id])?

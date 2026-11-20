@@ -105,7 +105,7 @@
           role="row"
           tabindex="-1"
           aria-selected={sel}
-          draggable={!offline}
+          draggable="true"
           ondragstart={(e) => photoDragStart(e, p)}
           ondragend={photoDragEnd}
           onmousedown={(e) => { if (e.button === 0 && !(sel && !e.shiftKey && !e.metaKey && !e.ctrlKey)) clickSelect(p.id, e); }}

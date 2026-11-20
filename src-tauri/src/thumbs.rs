@@ -17,6 +17,12 @@ pub fn thumb_path(dir: &Path, id: i64) -> PathBuf {
     dir.join(format!("{:02x}", id % 256)).join(format!("{id}.jpg"))
 }
 
+/// The sharper preview Lumio keeps for offline viewing (same layout as thumbnails,
+/// in its own folder). See `offline.rs` for which photos get one.
+pub fn offline_preview_path(dir: &Path, id: i64) -> PathBuf {
+    thumb_path(dir, id)
+}
+
 fn decode_with_orientation(reader: ImageReader<impl std::io::BufRead + std::io::Seek>) -> Result<DynamicImage> {
     let mut decoder = reader.with_guessed_format()?.into_decoder()?;
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
@@ -118,21 +124,65 @@ pub fn encode_jpeg(img: &DynamicImage, quality: u8) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Create a thumbnail file. Returns (width, height) of the source image.
+/// What `make_thumb` made.
+pub struct Made {
+    /// Size of the source image.
+    pub width: u32,
+    pub height: u32,
+    /// Whether the offline preview was saved, when one was asked for.
+    pub preview: Option<bool>,
+}
+
+/// Create a thumbnail file, and optionally an offline preview (`dest`, long side) from
+/// the same decoded image, so the file is only read once.
 pub fn make_thumb(
     src: &Path,
     ext: &str,
     orientation: Option<i64>,
     dest: &Path,
+    preview: Option<(&Path, u32)>,
     et: &ExifTool,
     tmp: &Path,
-) -> Result<(u32, u32)> {
-    let img = if metadata::is_video(ext) {
-        video_frame(src, et, tmp)?
+) -> Result<Made> {
+    if metadata::is_video(ext) {
+        let (width, height) = write_thumb(&video_frame(src, et, tmp)?, dest)?;
+        return Ok(Made { width, height, preview: None });
+    }
+    let want = preview.map(|(_, s)| s).unwrap_or(THUMB_SIZE);
+    let img = load_image(src, ext, orientation, want, et, tmp)?;
+    let (width, height) = write_thumb(&img, dest)?;
+    let preview = preview.map(|(p, size)| match write_preview(&img, p, size) {
+        Ok(()) => true,
+        Err(e) => {
+            log::warn!("offline preview failed for {}: {e:#}", src.display());
+            false
+        }
+    });
+    Ok(Made { width, height, preview })
+}
+
+/// Make just the offline preview (for photos indexed before previews were kept).
+pub fn make_offline_preview(src: &Path, ext: &str, orientation: Option<i64>, dest: &Path, size: u32, et: &ExifTool, tmp: &Path) -> Result<()> {
+    let img = load_image(src, ext, orientation, size, et, tmp)?;
+    write_preview(&img, dest, size)
+}
+
+/// Save a downscaled JPEG. Written to a temporary name first, so a preview is never
+/// left half-written if Lumio quits or the disk fills up.
+fn write_preview(img: &DynamicImage, dest: &Path, size: u32) -> Result<()> {
+    let img = if img.width() > size || img.height() > size {
+        img.resize(size, size, image::imageops::FilterType::CatmullRom)
     } else {
-        load_image(src, ext, orientation, THUMB_SIZE, et, tmp)?
+        img.clone()
     };
-    write_thumb(&img, dest)
+    let bytes = encode_jpeg(&img, 82)?;
+    if let Some(p) = dest.parent() {
+        std::fs::create_dir_all(p)?;
+    }
+    let part = dest.with_extension("part");
+    std::fs::write(&part, bytes)?;
+    std::fs::rename(&part, dest)?;
+    Ok(())
 }
 
 fn write_thumb(img: &DynamicImage, dest: &Path) -> Result<(u32, u32)> {
