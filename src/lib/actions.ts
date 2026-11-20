@@ -2,11 +2,13 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, errText, fileManagerName, isMac, isLinux, LABELS, shareApi, type PhotoLite, type FolderNode, type Root, type ShareOutcome } from "./api";
 import { menu, type MenuItem } from "./menu.svelte";
+import { setFullscreen } from "./fullscreen";
 import { openSmugMug, openWebExport } from "./publish.svelte";
 import {
   app, selection, selectedIds, rate, setLabel, moveOrCopy, trashPhotos, renameSelected, openViewer,
   errorToast, toast, newFolder, renameFolder, trashFolder, removeRoot, rootOnline, newTab,
   rotatePhotos, groupPhotos, ungroupPhotos, makeCover, toggleStack, openStacks,
+  slideshowSelectionOrView, slideshowGroup, slideshowFolder,
 } from "./store.svelte";
 
 const cmd = isMac ? "⌘" : "Ctrl+";
@@ -23,6 +25,8 @@ export function photoMenu(p: PhotoLite): MenuItem[] {
   const offlineNote = online ? undefined : true;
   return [
     { label: "Open in viewer", shortcut: "Space", action: () => openViewer(p.id) },
+    { label: "View full screen", action: () => { openViewer(p.id); setFullscreen(true); } },
+    { label: many ? `Slideshow of ${ids.length} photos` : "Slideshow from here", shortcut: "P", action: () => slideshowSelectionOrView() },
     { label: `Open in default app`, disabled: offlineNote, action: () => api.openDefault(ids).catch(errorToast) },
     {
       label: "Open with",
@@ -96,6 +100,7 @@ function stackItems(p: PhotoLite, ids: number[]): MenuItem[] {
     const open = openStacks.has(p.stack_id!);
     items.push({ label: open ? "Close group" : `Open group (${p.stack_count} photos)`, shortcut: "S", action: () => toggleStack(p.stack_id!) });
     if (open && !p.stack_top && ids.length === 1) items.push({ label: "Make cover of group", action: () => makeCover(p.id) });
+    items.push({ label: `Slideshow of this group`, action: () => slideshowGroup(p.stack_id!) });
     if (open) items.push({ label: ids.length > 1 ? "Remove these from group" : "Remove from group", action: () => ungroupPhotos(ids, false) });
     items.push({ label: "Ungroup", shortcut: isMac ? "⇧⌘G" : "Ctrl+Shift+G", action: () => ungroupPhotos(ids, true) });
   }
@@ -118,6 +123,7 @@ async function chooseApp(ids: number[]) {
 export function folderMenu(n: FolderNode, root?: Root): MenuItem[] {
   const items: MenuItem[] = [
     { label: "Open in new tab", action: () => newTab({ kind: "folder", path: n.path, name: n.name, rootId: root?.id }) },
+    { label: "Slideshow", action: () => slideshowFolder(n.path, n.name) },
     { separator: true },
     { label: "New folder…", disabled: !n.online, action: () => newFolder(n.path) },
     { label: "Rename…", disabled: !n.online || !!root, action: () => renameFolder(n.path, n.name) },

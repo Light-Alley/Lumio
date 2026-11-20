@@ -21,8 +21,10 @@
   import SmugMugDialog from "$lib/components/SmugMugDialog.svelte";
   import ExportDialog from "$lib/components/ExportDialog.svelte";
   import RenameDialog from "$lib/components/RenameDialog.svelte";
+  import Slideshow from "$lib/components/Slideshow.svelte";
+  import { watchFullscreen } from "$lib/fullscreen";
 
-  onMount(() => { init(); });
+  onMount(() => { init(); watchFullscreen(); });
   watchVideoThumbs();
   $effect(() => { document.documentElement.dataset.theme = app.theme; });
 </script>
@@ -48,6 +50,7 @@
 </div>
 
 {#if app.viewerIndex >= 0}<Viewer />{/if}
+{#if app.slideshow}<Slideshow />{/if}
 <SmugMugDialog />
 <ExportDialog />
 <RenameDialog />

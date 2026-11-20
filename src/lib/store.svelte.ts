@@ -71,6 +71,10 @@ export const app = $state({
   showSettings: false,
   /** Photos in the batch rename window; `null` when it is closed. */
   renameIds: null as number[] | null,
+  /** The running slideshow; `null` when none is playing. */
+  slideshow: null as { photos: PhotoLite[]; title: string; start: number; backToViewer?: boolean } | null,
+  /** The window fills the screen (set by `fullscreen.ts`). */
+  fullscreen: false,
   folderVersion: 0,
   settings: {} as Record<string, string>,
   exiftool: true,
@@ -187,7 +191,7 @@ export async function loadPhotos() {
  * Closed stacks show one photo: the cover, or the first match if the cover is filtered out.
  * Open stacks show every photo, kept together with the cover first.
  */
-function collapseStacks(list: PhotoLite[]): PhotoLite[] {
+export function collapseStacks(list: PhotoLite[]): PhotoLite[] {
   const rep = new Map<number, number>();
   const groups = new Map<number, PhotoLite[]>();
   for (const p of list) {
@@ -619,6 +623,52 @@ export function clickSelect(id: number, e: MouseEvent | KeyboardEvent) {
 export function openViewer(id: number) {
   const i = app.photos.findIndex((p) => p.id === id);
   if (i >= 0) app.viewerIndex = i;
+}
+
+// ------------------------------------------------------------------ slideshow
+
+/** Play these photos as a slideshow, starting with the one at `start`. */
+export function startSlideshow(photos: PhotoLite[], title: string, start = 0) {
+  if (!photos.length) { toast("There are no photos to show.", "info"); return; }
+  // Started from the viewer: go back to it, on the last photo shown, when the show ends.
+  const backToViewer = app.viewerIndex >= 0;
+  app.viewerIndex = -1;
+  app.slideshow = { photos: [...photos], title, start: Math.max(0, Math.min(start, photos.length - 1)), backToViewer };
+}
+
+/**
+ * The Slideshow button: with two or more photos selected it plays those (a selected
+ * group plays every photo in it); otherwise it plays everything in view, starting
+ * from the selected photo.
+ */
+export function slideshowSelectionOrView() {
+  const ids = selectedIds();
+  if (ids.length > 1) {
+    const all = new Set(withStacks(ids));
+    startSlideshow(app.allPhotos.filter((p) => all.has(p.id)), `${all.size} selected photos`);
+    return;
+  }
+  const at = ids.length === 1 ? app.photos.findIndex((p) => p.id === ids[0]) : 0;
+  startSlideshow(app.photos, scopeTitle(app.scope), Math.max(0, at));
+}
+
+/** Every photo in a group, cover first. */
+export function slideshowGroup(stackId: number) {
+  const members = app.allPhotos.filter((p) => p.stack_id === stackId);
+  startSlideshow([...members.filter((p) => p.stack_top), ...members.filter((p) => !p.stack_top)], "Group");
+}
+
+/** A folder and its subfolders, in the current sort order. Groups show their cover. */
+export async function slideshowFolder(path: string, name: string) {
+  try {
+    const photos = await api.queryPhotos({
+      scope: "folder", folder: path, recursive: true, ids: null, text: "", min_rating: 0, label: "",
+      sort: app.sort === "relevance" ? "date" : app.sort, desc: app.desc,
+    });
+    startSlideshow(collapseStacks(photos), name);
+  } catch (e) {
+    errorToast(e);
+  }
 }
 
 export function scopeTitle(s: Scope): string {
