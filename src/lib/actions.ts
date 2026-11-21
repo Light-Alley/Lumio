@@ -112,7 +112,7 @@ function stackItems(p: PhotoLite, ids: number[]): MenuItem[] {
   return items;
 }
 
-async function chooseApp(ids: number[]) {
+export async function chooseApp(ids: number[]) {
   const app = await openDialog({
     title: "Choose an application",
     multiple: false,
@@ -159,7 +159,7 @@ export function collectionMenu(c: Collection): MenuItem[] {
 // ------------------------------------------------------------------ sharing
 
 /** Run a share action, showing what to do next (these hints stay up a little longer). */
-function sharing(run: () => Promise<ShareOutcome>, busy = "Preparing…") {
+export function sharing(run: () => Promise<ShareOutcome>, busy = "Preparing…") {
   const slow = setTimeout(() => toast(busy), 600);
   run()
     .then((r) => { if (r.message) toast(r.message, "success", undefined, 9000); })

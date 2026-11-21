@@ -44,6 +44,7 @@ Choose how sharp those previews are in **Settings → General → Previews for o
 - **Sidebar (left):** smart views (*All photos*, *Recently added*, *Rated*, *On the map*, *Without location*) and your folders. Drag its edge to make it wider; double-click the edge to reset it.
 - **Toolbar (top):** search, sort, thumbnail size, view switch, the info panel, *Ask AI*, slideshow, share and settings.
 - **Info panel (right):** the selected photo or its histogram, rating, label, and metadata you can edit. Hide it with `I` or the tab on its edge.
+- **Menu bar:** every command is in the menus (File, Edit, View, Photo, Window, Help), with its shortcut beside it. Commands in the Photo menu act on the selected photos, or on the photo open in the viewer. **Help → Keyboard Shortcuts** lists all the keys.
 - **Tabs:** `⌘T` opens a new tab, `⌘W` closes one, `⌘1`…`⌘9` switch. Drag photos onto another tab to move them into that tab's folder.
 
 ### Views
@@ -119,7 +120,11 @@ Lumio keeps a catalogue (`catalogue.sqlite`), thumbnails, previews and a log (`l
 
 Deleting that folder resets Lumio. Your photos, and everything written into them, stay. API keys and the SmugMug sign-in are kept in your system keychain, not in that folder.
 
-## 12. Troubleshooting
+## 12. Updates
+
+Lumio tells you when a new version is out: a notice appears in the corner a few seconds after it opens. Click **See what's new** to read the release notes, then **Install and Restart** (or **Download**, which opens the release page so you can install the new version over the old one). Your library, settings and photos are kept. **Lumio → Check for Updates…** (on Windows and Linux, **Help → Check for Updates…**) checks straight away. To stop the automatic check, untick it in **Settings → General → Updates**.
+
+## 13. Troubleshooting
 
 | Problem | Try this |
 |---|---|
@@ -134,6 +139,10 @@ Deleting that folder resets Lumio. Your photos, and everything written into them
 | Where | Key | Does |
 |---|---|---|
 | Anywhere | `G` `L` `F` `M` | Grid, list, filmstrip, map |
+| | `⌘F`, `⌘O`, `⇧⌘N` | Search, add a folder, new folder |
+| | `⌘=` / `⌘-` | Larger or smaller thumbnails |
+| | `⌘,`, `⌘/` | Settings, list of shortcuts |
+| | `⌃⌘F` (Windows, Linux: `F11`) | Full screen |
 | | `I` | Show or hide the info panel |
 | | `P` | Slideshow |
 | | `⌘T` / `⌘W` / `⌘1`–`⌘9` | New tab, close tab, switch tab |

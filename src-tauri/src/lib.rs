@@ -1,6 +1,7 @@
 //! Lumio – a lightweight, open-source photo browser and digital asset manager.
 
 mod ai;
+mod appmenu;
 mod collections;
 mod commands;
 mod db;
@@ -21,6 +22,7 @@ mod share;
 mod smugmug;
 mod state;
 mod thumbs;
+mod updates;
 mod videoserver;
 mod watcher;
 mod webexport;
@@ -200,7 +202,24 @@ fn clean_previews(dir: &std::path::Path) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let context = tauri::generate_context!();
+    // The updater is set up only in builds that carry an updater public key (the release
+    // workflow adds it when the signing key is a repository secret; see docs/updates.md).
+    // Without one, the update notice still works and links to the download page.
+    let updater_key = context
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|u| u.get("pubkey"))
+        .and_then(|k| k.as_str())
+        .is_some_and(|k| !k.trim().is_empty());
+    let mut builder = tauri::Builder::default();
+    if updater_key {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    builder
+        .manage(updates::Installer(updater_key))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .register_asynchronous_uri_scheme_protocol("thumb", |ctx, request, responder| {
@@ -230,6 +249,11 @@ pub fn run() {
                 std::fs::create_dir_all(d)?;
             }
             logfile::init(data.join("lumio.log"));
+            if let Err(e) = appmenu::install(app.handle()) {
+                log::warn!("menu bar could not be built: {e}");
+            }
+            #[cfg(target_os = "macos")]
+            appmenu::mac_tidy();
             log::info!("Lumio {} starting", app.package_info().version);
             clean_previews(&previews_dir);
             let db_path = data.join("catalogue.sqlite");
@@ -366,8 +390,13 @@ pub fn run() {
             collections::cmd::count_rules,
             duplicates::cmd::find_duplicates,
             duplicates::cmd::cancel_duplicates,
+            appmenu::menu_sync,
+            updates::check_for_updates,
+            updates::install_update,
+            updates::open_project_page,
+            appmenu::show_log,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running Lumio");
 }
 

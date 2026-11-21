@@ -16,12 +16,14 @@ Adobe Bridge is free, but I didn't want to install Creative Cloud, create an Ado
 
 So I built something lightweight that does one job well: organising your library. Add folders from your computer, external drives or network drives, move photos in bulk between them, build a folder structure, rate photos and group shots of the same subject.
 
-Lumio is open source. You can use it, change it and share it. It has no account, no advertisements and no tracking. Nothing leaves your computer unless you use the map (which loads OpenStreetMap tiles) or switch on the AI photo finder.
+Lumio is open source. You can use it, change it and share it. It has no account, no advertisements and no tracking. Nothing leaves your computer unless you use the map (which loads OpenStreetMap tiles) or switch on the AI photo finder. The one exception is the update check: about twice a day Lumio asks GitHub whether a newer version is out, sending nothing about you or your photos (switch it off in Settings → General).
 
 ## Features
 
 | | |
 |---|---|
+| **Menu bar** | Every command has a place in the menu bar (File, Edit, View, Photo, Window and Help; the menu at the top of the screen on a Mac, inside the window on Windows and Linux), with its shortcut beside it, so nothing is hidden behind right-click. **Help → Keyboard Shortcuts** (`⌘/` / `Ctrl+/`) lists every key. |
+| **Updates** | Lumio tells you when a new version is out, shows what's new, and (for releases signed with the updater key) installs it and restarts with one click. **Lumio → Check for Updates…** (Help menu on Windows and Linux) checks straight away ([details](docs/updates.md)). |
 | **Browse** | Fast thumbnail grid for very large folders, a folder tree, smart views (recently added, rated, on the map, without location), search by name, keyword, caption, place, camera or lens, and filters for rating and colour label. |
 | **Views** | Thumbnail grid, a sortable list, and a filmstrip view with one large photo above a strip of thumbnails (`G`, `L`, `F` keys). |
 | **Layout** | Drag the edge of the folder sidebar to make it narrower or wider (double-click the edge for the standard width); Lumio remembers it. Hide the info panel on the right with the small tab on its edge, the Info button or `I`, to give the photos the whole window, and bring it back the same way. |
@@ -116,6 +118,8 @@ To build installers for all three systems at once, push the repository to GitHub
   - `collections.rs`: smart collections (rules turned into catalogue queries)
   - `duplicates.rs`: the duplicate finder (file fingerprints and thumbnail look-alike hashes)
   - `ai.rs`: the AI finder (Claude Messages API with tool use, or any OpenAI-compatible server)
+  - `appmenu.rs`: the native menu bar (its commands run in `src/lib/menubar.svelte.ts`)
+  - `updates.rs`: the update check against GitHub Releases and in-app install ([docs/updates.md](docs/updates.md))
 - **Svelte 5 + TypeScript** front end in `src/`, with [Leaflet](https://leafletjs.com) for maps and [Lucide](https://lucide.dev) icons.
 
 ## Contributing and support

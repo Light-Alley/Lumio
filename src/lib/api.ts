@@ -121,7 +121,21 @@ export const api = {
   countRules: (rules: RuleSet) => invoke<number>("count_rules", { rules }),
   findDuplicates: (opts: DupOptions) => invoke<DupReport>("find_duplicates", { opts }),
   cancelDuplicates: () => invoke<void>("cancel_duplicates"),
+  menuSync: (items: MenuItemState[]) => invoke<void>("menu_sync", { items }),
+  showLog: () => invoke<void>("show_log"),
+  checkForUpdates: () => invoke<UpdateInfo>("check_for_updates"),
+  installUpdate: () => invoke<void>("install_update"),
+  /** Open a page of Lumio's GitHub project (anything else opens the latest release). */
+  openProjectPage: (url?: string) => invoke<void>("open_project_page", { url: url ?? null }),
 };
+
+/** A change to one item of the native menu bar. */
+export interface MenuItemState { id: string; enabled?: boolean; checked?: boolean; text?: string }
+export interface UpdateInfo {
+  current: string; latest: string; newer: boolean; name: string; notes: string;
+  url: string; published: string; can_install: boolean;
+}
+export const REPO_URL = "https://github.com/LIght-Alley/Lumio";
 
 export const VIDEO_EXTS = ["mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv"];
 export const isVideo = (p: { ext: string } | null | undefined) => !!p && VIDEO_EXTS.includes(p.ext.toLowerCase());
@@ -134,7 +148,7 @@ export function formatDuration(s: number | null | undefined): string {
   return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }
 
-const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+export const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
 export const isLinux = typeof navigator !== "undefined" && /Linux/i.test(navigator.userAgent) && !isWindows;
 export const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 export const fileManagerName = isMac ? "Finder" : isWindows ? "File Explorer" : "file manager";
