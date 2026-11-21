@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in Lumio doesn't work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. If photos were lost or damaged, say so in the title so we look at it first.
+  - type: input
+    id: version
+    attributes:
+      label: Lumio version
+      description: Settings → About
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options: [macOS (Apple silicon), macOS (Intel), Windows 11, Windows 10, Linux]
+    validations:
+      required: true
+  - type: input
+    id: system-version
+    attributes:
+      label: System version or Linux distribution
+      placeholder: "macOS 15.2 / Ubuntu 24.04"
+  - type: dropdown
+    id: drive
+    attributes:
+      label: Where are the photos?
+      multiple: true
+      options: [This computer, External drive (USB/Thunderbolt), Network drive (SMB/NAS), Cloud drive (pCloud, Dropbox, iCloud, OneDrive…), Not relevant]
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add a folder on …
+        2. Select … and press …
+        3. …
+  - type: textarea
+    id: log
+    attributes:
+      label: lumio.log (optional)
+      description: The last lines of lumio.log from Lumio's data folder (see the user guide, section 11). Remove anything private.
+      render: text

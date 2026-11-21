@@ -10,3 +10,4 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 /src-tauri/resources/exiftool/*
 !/src-tauri/resources/exiftool/.keep
+src-tauri/tauri.signing.json
