@@ -1,6 +1,6 @@
 // Context-menu builders shared by the grid, viewer and map.
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { api, errText, fileManagerName, isMac, isLinux, LABELS, shareApi, type PhotoLite, type FolderNode, type Root, type ShareOutcome } from "./api";
+import { api, errText, fileManagerName, isMac, isLinux, LABELS, shareApi, type PhotoLite, type FolderNode, type Root, type ShareOutcome, type Collection } from "./api";
 import { menu, type MenuItem } from "./menu.svelte";
 import { setFullscreen } from "./fullscreen";
 import { openSmugMug, openWebExport } from "./publish.svelte";
@@ -8,7 +8,8 @@ import {
   app, selection, selectedIds, rate, setLabel, moveOrCopy, trashPhotos, renameSelected, openViewer,
   errorToast, toast, newFolder, renameFolder, trashFolder, removeRoot, rootOnline, newTab,
   rotatePhotos, groupPhotos, ungroupPhotos, makeCover, toggleStack, openStacks,
-  slideshowSelectionOrView, slideshowGroup, slideshowFolder,
+  slideshowSelectionOrView, slideshowGroup, slideshowFolder, slideshowCollection,
+  newCollection, editCollection, duplicateCollection, deleteCollection, findDuplicates,
 } from "./store.svelte";
 
 const cmd = isMac ? "⌘" : "Ctrl+";
@@ -126,6 +127,8 @@ export function folderMenu(n: FolderNode, root?: Root): MenuItem[] {
   const items: MenuItem[] = [
     { label: "Open in new tab", action: () => newTab({ kind: "folder", path: n.path, name: n.name, rootId: root?.id }) },
     { label: "Slideshow", action: () => slideshowFolder(n.path, n.name) },
+    { label: "Find duplicates here…", action: () => findDuplicates(n.path, n.name) },
+    { label: "New smart collection from this folder…", action: () => newCollection(n.name, { any: false, rules: [{ field: "folder", op: "in", value: n.path, value2: "" }] }) },
     { separator: true },
     { label: "New folder…", disabled: !n.online, action: () => newFolder(n.path) },
     { label: "Rename…", disabled: !n.online || !!root, action: () => renameFolder(n.path, n.name) },
@@ -139,6 +142,18 @@ export function folderMenu(n: FolderNode, root?: Root): MenuItem[] {
     items.push({ label: "Move folder to Trash", danger: true, disabled: !n.online, action: () => trashFolder(n.path, n.name) });
   }
   return items;
+}
+
+export function collectionMenu(c: Collection): MenuItem[] {
+  return [
+    { label: "Open in new tab", action: () => newTab({ kind: "collection", id: c.id, name: c.name }) },
+    { label: "Slideshow", action: () => slideshowCollection(c) },
+    { separator: true },
+    { label: "Edit…", action: () => editCollection(c) },
+    { label: "Duplicate", action: () => duplicateCollection(c) },
+    { separator: true },
+    { label: "Delete collection…", danger: true, action: () => deleteCollection(c) },
+  ];
 }
 
 // ------------------------------------------------------------------ sharing

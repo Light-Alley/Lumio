@@ -6,7 +6,7 @@ use crate::indexer::{self, Job};
 use crate::metadata::{self, Edit};
 use crate::openwith::{self, AppInfo};
 use crate::state::AppState;
-use crate::{ai, rename, share, watcher};
+use crate::{ai, history, rename, share, watcher};
 use rusqlite::params;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -189,12 +189,29 @@ pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
     Ok(out)
 }
 
+/// Folder commands only touch folders inside the library. `strictly` also refuses a
+/// library root itself (roots are removed from the library, never renamed, moved or
+/// trashed from Lumio). Paths with ".." are refused so they can't step outside a root.
+fn in_library(st: &AppState, path: &Path, strictly: bool) -> anyhow::Result<()> {
+    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        anyhow::bail!("\"{}\" is not a folder in your library.", path.display());
+    }
+    match db::root_for_path(&st.conn.lock(), path)? {
+        Some((_, root)) if !(strictly && root == path) => Ok(()),
+        Some(_) => anyhow::bail!("A library folder can't be changed here. Use Remove from library instead."),
+        None => anyhow::bail!("\"{}\" is not a folder in your library.", path.display()),
+    }
+}
+
 #[tauri::command]
 pub async fn create_folder(state: S<'_>, parent: String, name: String) -> R<String> {
     let st = state.inner().clone();
     blocking(move || {
+        in_library(&st, Path::new(&parent), false)?;
         let p = fileops::create_folder(Path::new(&parent), &name)?;
         st.queue(Job::ScanFolder(p.clone()));
+        let label = format!("Created folder {}", name.trim());
+        history::record(&st.conn.lock(), &label, &history::Change::FolderCreate { path: p.clone() })?;
         Ok(p.to_string_lossy().to_string())
     })
     .await
@@ -203,7 +220,17 @@ pub async fn create_folder(state: S<'_>, parent: String, name: String) -> R<Stri
 #[tauri::command]
 pub async fn rename_folder(state: S<'_>, path: String, name: String) -> R<String> {
     let st = state.inner().clone();
-    let r = blocking(move || Ok(fileops::rename_folder(&st, Path::new(&path), &name)?.to_string_lossy().to_string())).await;
+    let r = blocking(move || {
+        let from = PathBuf::from(&path);
+        in_library(&st, &from, true)?;
+        let to = fileops::rename_folder(&*st, &from, &name)?;
+        if to != from {
+            let label = format!("Renamed folder {} to {}", from.file_name().unwrap_or_default().to_string_lossy(), name.trim());
+            history::record(&st.conn.lock(), &label, &history::Change::FolderRename { from, to: to.clone() })?;
+        }
+        Ok(to.to_string_lossy().to_string())
+    })
+    .await;
     watcher::restart(&state);
     r
 }
@@ -211,13 +238,38 @@ pub async fn rename_folder(state: S<'_>, path: String, name: String) -> R<String
 #[tauri::command]
 pub async fn delete_folder(state: S<'_>, path: String, permanent: bool) -> R<()> {
     let st = state.inner().clone();
-    blocking(move || fileops::delete_folder(&st, Path::new(&path), permanent)).await
+    blocking(move || {
+        in_library(&st, Path::new(&path), true)?;
+        fileops::delete_folder(&*st, Path::new(&path), permanent)?;
+        let name = Path::new(&path).file_name().unwrap_or_default().to_string_lossy().to_string();
+        let label = if permanent { format!("Deleted folder {name} permanently") } else { format!("Moved folder {name} to the Trash") };
+        history::record(&st.conn.lock(), &label, &history::Change::Trash { count: 1, permanent })?;
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn move_folder(state: S<'_>, src: String, dest: String, copy: bool) -> R<OpReport> {
     let st = state.inner().clone();
-    blocking(move || fileops::move_folder(&st, Path::new(&src), Path::new(&dest), copy)).await
+    blocking(move || {
+        let from = PathBuf::from(&src);
+        in_library(&st, &from, true)?;
+        in_library(&st, Path::new(&dest), false)?;
+        let mut rep = fileops::move_folder(&*st, &from, Path::new(&dest), copy)?;
+        if let Some(to) = rep.folder.clone() {
+            let name = from.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let into = Path::new(&dest).file_name().unwrap_or_default().to_string_lossy().to_string();
+            let (label, change) = if copy {
+                (format!("Copied folder {name} into {into}"), history::Change::FolderCopy { to })
+            } else {
+                (format!("Moved folder {name} into {into}"), history::Change::FolderMove { from, to })
+            };
+            rep.history = Some(history::record(&st.conn.lock(), &label, &change)?);
+        }
+        Ok(rep)
+    })
+    .await
 }
 
 // ------------------------------------------------------------ photos
@@ -240,7 +292,28 @@ pub fn get_photos(state: S, ids: Vec<i64>) -> R<Vec<Photo>> {
 #[tauri::command]
 pub async fn move_photos(state: S<'_>, ids: Vec<i64>, dest: String, copy: bool) -> R<OpReport> {
     let st = state.inner().clone();
-    blocking(move || fileops::move_photos(&st, &ids, Path::new(&dest), copy)).await
+    blocking(move || {
+        let mut rep = fileops::move_photos(&*st, &ids, Path::new(&dest), copy)?;
+        history::record_move(&st.conn.lock(), &mut rep, copy, Path::new(&dest))?;
+        Ok(rep)
+    })
+    .await
+}
+
+/// The undo history, newest first.
+#[tauri::command]
+pub fn history_list(state: S) -> R<Vec<history::Entry>> {
+    history::list(&state.conn.lock(), 300).map_err(e)
+}
+
+/// Undo a change and everything after it (or just the latest change, without an id).
+#[tauri::command]
+pub async fn history_undo(state: S<'_>, id: Option<i64>) -> R<history::UndoReport> {
+    let st = state.inner().clone();
+    let r = blocking(move || history::undo(&*st, id)).await;
+    // Folders may have been renamed or moved back.
+    watcher::restart(&state);
+    r
 }
 
 /// Moves waiting for a drive to be connected.
@@ -298,13 +371,23 @@ pub async fn clear_offline_previews(state: S<'_>) -> R<()> {
 #[tauri::command]
 pub async fn delete_photos(state: S<'_>, ids: Vec<i64>, permanent: bool) -> R<OpReport> {
     let st = state.inner().clone();
-    blocking(move || fileops::delete_photos(&st, &ids, permanent)).await
+    blocking(move || {
+        let mut rep = fileops::delete_photos(&*st, &ids, permanent)?;
+        history::record_trash(&st.conn.lock(), &mut rep, permanent)?;
+        Ok(rep)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn rename_photo(state: S<'_>, id: i64, name: String) -> R<rename::RenameReport> {
     let st = state.inner().clone();
-    blocking(move || rename::rename_one(&st, id, &name)).await
+    blocking(move || {
+        let mut rep = rename::rename_one(&st, id, &name)?;
+        history::record_rename(&st.conn.lock(), &mut rep)?;
+        Ok(rep)
+    })
+    .await
 }
 
 /// Show what a batch rename would do, without changing anything.
@@ -325,7 +408,52 @@ pub async fn rename_preview(state: S<'_>, ids: Vec<i64>, opts: rename::BatchOpti
 #[tauri::command]
 pub async fn rename_photos(state: S<'_>, items: Vec<(i64, String)>) -> R<rename::RenameReport> {
     let st = state.inner().clone();
-    blocking(move || rename::rename_many(&st, &items)).await
+    blocking(move || {
+        let mut rep = rename::rename_many(&st, &items)?;
+        history::record_rename(&st.conn.lock(), &mut rep)?;
+        Ok(rep)
+    })
+    .await
+}
+
+/// Every keyword in the library with how many photos have it, most used first
+/// (for suggestions while typing a keyword).
+#[tauri::command]
+pub async fn keyword_list(state: S<'_>) -> R<Vec<(String, i64)>> {
+    let st = state.inner().clone();
+    blocking(move || {
+        let conn = st.conn.lock();
+        let mut stmt = conn.prepare("SELECT keywords FROM photos WHERE keywords IS NOT NULL AND keywords != ''")?;
+        let mut counts: HashMap<String, (String, i64)> = HashMap::new();
+        for row in stmt.query_map([], |r| r.get::<_, String>(0))? {
+            for k in db::decode_keywords(Some(&row?)) {
+                counts.entry(k.to_lowercase()).or_insert_with(|| (k.clone(), 0)).1 += 1;
+            }
+        }
+        let mut out: Vec<(String, i64)> = counts.into_values().collect();
+        out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+        Ok(out)
+    })
+    .await
+}
+
+/// The "where do edits go" settings: RAW files (`sidecar` | `embed`) and every other
+/// photo or video (`embed` | `sidecar`).
+fn write_modes(st: &AppState) -> (String, String) {
+    let conn = st.conn.lock();
+    (
+        db::get_setting(&conn, "raw_write_mode").unwrap_or_else(|| "sidecar".into()),
+        db::get_setting(&conn, "image_write_mode").unwrap_or_else(|| "embed".into()),
+    )
+}
+
+/// Do this photo's edits go into an XMP sidecar rather than the file itself?
+pub(crate) fn edits_go_to_sidecar(ext: &str, raw_mode: &str, image_mode: &str) -> bool {
+    if metadata::is_raw(ext) {
+        raw_mode != "embed"
+    } else {
+        metadata::video_needs_sidecar(ext) || image_mode == "sidecar"
+    }
 }
 
 /// Write metadata to the files (or their XMP sidecars) and update the catalogue.
@@ -334,13 +462,14 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
     let st = state.inner().clone();
     blocking(move || {
         let photos = db::get_photos(&st.conn.lock(), &ids)?;
-        let raw_mode = db::get_setting(&st.conn.lock(), "raw_write_mode").unwrap_or_else(|| "sidecar".into());
+        let (raw_mode, image_mode) = write_modes(&st);
         let mut rep = OpReport::default();
         for p in photos {
             let path = PathBuf::from(&p.path);
-            // Work out the final keyword list.
-            let final_kw: Option<Vec<String>> = if let Some(k) = &edit.keywords {
-                Some(k.clone())
+            // Work out the keyword list the photo ends up with, and what was taken off.
+            let keyword_change: Option<(Vec<String>, Vec<String>)> = if let Some(k) = &edit.keywords {
+                let removed = p.keywords.iter().filter(|x| !k.iter().any(|y| y.eq_ignore_ascii_case(x))).cloned().collect();
+                Some((k.clone(), removed))
             } else if edit.add_keywords.is_some() || edit.remove_keywords.is_some() {
                 let mut k = p.keywords.clone();
                 for a in edit.add_keywords.iter().flatten() {
@@ -348,29 +477,46 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
                         k.push(a.trim().to_string());
                     }
                 }
-                if let Some(rm) = &edit.remove_keywords {
-                    k.retain(|x| !rm.iter().any(|r| r.eq_ignore_ascii_case(x)));
-                }
-                Some(k)
+                let rm = edit.remove_keywords.clone().unwrap_or_default();
+                k.retain(|x| !rm.iter().any(|r| r.eq_ignore_ascii_case(x)));
+                Some((k, rm))
             } else {
                 None
             };
+            let mut plan: Option<metadata::KeywordPlan> = None;
             let res: anyhow::Result<()> = (|| {
                 if !path.exists() {
                     anyhow::bail!("the file is not available (is its drive connected?)");
                 }
-                let use_sidecar = (metadata::is_raw(&p.ext) && raw_mode != "embed") || metadata::video_needs_sidecar(&p.ext);
-                if use_sidecar {
-                    let side = indexer::find_sidecar(&path).unwrap_or_else(|| path.with_extension("xmp"));
+                let use_sidecar = edits_go_to_sidecar(&p.ext, &raw_mode, &image_mode);
+                let target = if use_sidecar {
+                    let side = indexer::sidecar_path(&path);
                     if !side.exists() {
                         st.et.create_sidecar(&path, &side)?;
                     }
-                    st.et.write(&side, &metadata::write_args(&edit, final_kw.as_deref(), true))?;
+                    side
                 } else {
-                    // MP4 and MOV hold XMP but not EXIF or IPTC.
-                    let xmp_only = metadata::is_video(&p.ext);
-                    st.et.write(&path, &metadata::write_args(&edit, final_kw.as_deref(), xmp_only))?;
-                }
+                    path.clone()
+                };
+                // Keyword paths (Lightroom's lr:hierarchicalSubject) already in the file.
+                let kw = match &keyword_change {
+                    Some((wanted, removed)) => {
+                        let old_hier = st
+                            .et
+                            .read_json(std::slice::from_ref(&target))
+                            .ok()
+                            .and_then(|v| v.first().map(|x| metadata::parse(x).hier_keywords))
+                            .unwrap_or_default();
+                        let pl = metadata::plan_keywords(wanted, removed, &old_hier);
+                        let had = !old_hier.is_empty();
+                        plan = Some(pl);
+                        Some((plan.as_ref().unwrap(), had))
+                    }
+                    None => None,
+                };
+                // Sidecars and MP4/MOV hold XMP but not EXIF or IPTC.
+                let xmp_only = use_sidecar || metadata::is_video(&p.ext);
+                st.et.write(&target, &metadata::write_args(&edit, kw, xmp_only))?;
                 Ok(())
             })();
             match res {
@@ -383,7 +529,7 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
                     if let Some(v) = &edit.caption { conn.execute("UPDATE photos SET caption=?1 WHERE id=?2", params![nz(v), p.id])?; }
                     if let Some(v) = &edit.creator { conn.execute("UPDATE photos SET creator=?1 WHERE id=?2", params![nz(v), p.id])?; }
                     if let Some(v) = &edit.copyright { conn.execute("UPDATE photos SET copyright=?1 WHERE id=?2", params![nz(v), p.id])?; }
-                    if let Some(k) = &final_kw { conn.execute("UPDATE photos SET keywords=?1 WHERE id=?2", params![db::encode_keywords(k), p.id])?; }
+                    if let Some(k) = &plan { conn.execute("UPDATE photos SET keywords=?1 WHERE id=?2", params![db::encode_keywords(&k.subject), p.id])?; }
                     if let Some(g) = &edit.gps_change() {
                         let (la, lo) = g.map(|(a, b)| (Some(a), Some(b))).unwrap_or((None, None));
                         conn.execute("UPDATE photos SET lat=?1, lon=?2 WHERE id=?3", params![la, lo, p.id])?;
@@ -408,7 +554,7 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
     let st = state.inner().clone();
     blocking(move || {
         let photos = db::get_photos(&st.conn.lock(), &ids)?;
-        let raw_mode = db::get_setting(&st.conn.lock(), "raw_write_mode").unwrap_or_else(|| "sidecar".into());
+        let (raw_mode, image_mode) = write_modes(&st);
         let mut rep = OpReport::default();
         for p in photos {
             let path = PathBuf::from(&p.path);
@@ -422,11 +568,12 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
                 if metadata::is_video(&p.ext) {
                     anyhow::bail!("videos can't be rotated in Lumio");
                 }
-                if matches!(p.ext.as_str(), "gif" | "bmp") {
+                let use_sidecar = edits_go_to_sidecar(&p.ext, &raw_mode, &image_mode);
+                if matches!(p.ext.as_str(), "gif" | "bmp") && !use_sidecar {
                     anyhow::bail!("{} files can't store a rotation", p.ext.to_uppercase());
                 }
-                if metadata::is_raw(&p.ext) && raw_mode != "embed" {
-                    let side = indexer::find_sidecar(&path).unwrap_or_else(|| path.with_extension("xmp"));
+                if use_sidecar {
+                    let side = indexer::sidecar_path(&path);
                     if !side.exists() {
                         st.et.create_sidecar(&path, &side)?;
                     }

@@ -4,7 +4,7 @@
   import { tick } from "svelte";
   import { X, TriangleAlert } from "@lucide/svelte";
   import { api, errText, type PlannedName, type RenameOptions, type NameCase } from "../api";
-  import { app, loadPhotos, offerUndoRename, toast } from "../store.svelte";
+  import { app, loadHistory, loadPhotos, offerUndo, toast } from "../store.svelte";
   import { remember, keep } from "../publish.svelte";
 
   const TOKENS: [string, string][] = [
@@ -92,7 +92,8 @@
       if (r.failed.length) {
         toast(`${r.done} renamed, ${r.failed.length} could not be.\n${r.failed[0][0]}: ${r.failed[0][1]}`, "error");
       }
-      if (r.done) offerUndoRename(r.undo, r.done === 1 ? "Renamed 1 photo." : `Renamed ${r.done} photos.`);
+      loadHistory();
+      if (r.done) offerUndo(r.history, r.done === 1 ? "Renamed 1 photo." : `Renamed ${r.done} photos.`);
     } catch (e) {
       error = errText(e);
     } finally {
@@ -170,7 +171,7 @@
         {/if}
       </div>
 
-      <p class="faint small">Ratings, labels, metadata, groups and thumbnails stay with each photo, and XMP sidecars are renamed with it. You can undo straight after.</p>
+      <p class="faint small">Ratings, labels, metadata, groups and thumbnails stay with each photo, and XMP sidecars are renamed with it. You can undo it any time from Edit history (⌘/Ctrl+Z undoes the latest change).</p>
       <p class="warn small" aria-live="polite">
         {#if problems.length && !error}
           {problems.length === 1 ? "1 photo" : `${problems.length} photos`} can't take the new name and will be left as they are.

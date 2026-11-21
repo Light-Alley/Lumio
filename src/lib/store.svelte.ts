@@ -2,7 +2,7 @@
 import { SvelteSet } from "svelte/reactivity";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { api, errText, type PhotoLite, type Root, type Edit, type OpReport, type Turn, type PendingMove, type PendingReport } from "./api";
+import { api, errText, type PhotoLite, type Root, type Edit, type OpReport, type Turn, type PendingMove, type PendingReport, type HistoryEntry, type Collection, type RuleSet } from "./api";
 
 export type Scope =
   | { kind: "all" }
@@ -11,6 +11,7 @@ export type Scope =
   | { kind: "geotagged" }
   | { kind: "nogps" }
   | { kind: "folder"; path: string; name: string; rootId?: number }
+  | { kind: "collection"; id: number; name: string }
   | { kind: "ai"; ids: number[]; title: string };
 
 export type Bg = "black" | "grey" | "lightgrey" | "white";
@@ -75,6 +76,12 @@ export const app = $state({
   toasts: [] as Toast[],
   dialog: null as DialogState | null,
   showSettings: false,
+  /** Smart collections (saved rules), with how many photos each matches. */
+  collections: [] as Collection[],
+  /** The collection being edited (`id` null for a new one); `null` when the editor is closed. */
+  collectionEdit: null as { id: number | null; name: string; rules: RuleSet } | null,
+  /** The duplicate finder, and the folder it looks in (`null` = whole library); `null` when closed. */
+  dupes: null as { folder: string | null; name: string } | null,
   /** Photos in the batch rename window; `null` when it is closed. */
   renameIds: null as number[] | null,
   /** The running slideshow; `null` when none is playing. */
@@ -91,6 +98,11 @@ export const app = $state({
   /** Moves waiting for a drive to be connected. */
   pending: [] as PendingMove[],
   showPending: false,
+  /** The undo history, newest first. */
+  history: [] as HistoryEntry[],
+  showHistory: false,
+  /** An undo is running. */
+  undoing: false,
   activeTab: 0,
 });
 
@@ -167,6 +179,14 @@ export async function loadRoots() {
   app.roots = await api.getRoots();
 }
 
+export async function loadCollections() {
+  try {
+    app.collections = await api.listCollections();
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
 export async function loadPending() {
   try {
     app.pending = await api.pendingMoves();
@@ -174,6 +194,59 @@ export async function loadPending() {
     app.pending = [];
   }
   if (!app.pending.length) app.showPending = false;
+}
+
+export async function loadHistory() {
+  try {
+    app.history = await api.historyList();
+  } catch {
+    app.history = [];
+  }
+}
+
+/** The newest change that can still be undone. */
+export function latestUndoable(): HistoryEntry | undefined {
+  return app.history.find((h) => h.undoable && !h.undone);
+}
+
+/** Undo a change and everything after it, or just the latest change without an id. */
+export async function undo(id?: number) {
+  if (app.undoing) return;
+  if (id === undefined && !latestUndoable()) {
+    await loadHistory();
+    if (!latestUndoable()) return toast("There is nothing to undo.", "info");
+  }
+  app.undoing = true;
+  try {
+    const r = await api.historyUndo(id);
+    const what = r.steps > 1 ? `${r.steps} changes` : `“${r.label ?? "the last change"}”`;
+    if (r.failed.length) {
+      const first = r.failed.slice(0, 3).map(([f, e]) => `${f}: ${e}`).join("\n");
+      toast(`Undid ${what}, but ${r.failed.length} item${r.failed.length === 1 ? "" : "s"} could not be put back.\n${first}`, "error", {
+        label: "Show history",
+        run: () => (app.showHistory = true),
+      });
+    } else {
+      toast(`Undid ${what}.`, "success");
+    }
+  } catch (e) {
+    errorToast(e);
+  } finally {
+    app.undoing = false;
+    await afterFileChange();
+  }
+}
+
+/** Show a toast with an Undo button for a change that just happened. */
+export function offerUndo(history: number | null | undefined, text: string) {
+  if (!history) return toast(text, "success");
+  toast(text, "success", { label: "Undo", run: () => undo(history) }, 10000);
+}
+
+/** Refresh everything a file change can affect. */
+async function afterFileChange() {
+  await Promise.all([loadRoots(), loadPhotos(), loadPending(), loadHistory(), loadCollections()]);
+  app.folderVersion++;
 }
 
 export async function cancelPending(ids: number[]) {
@@ -212,6 +285,7 @@ export async function loadPhotos() {
       folder: s.kind === "folder" ? s.path : null,
       recursive: app.recursive,
       ids: s.kind === "ai" ? s.ids : null,
+      collection: s.kind === "collection" ? s.id : null,
       text: app.text,
       min_rating: app.minRating,
       label: app.label,
@@ -375,6 +449,7 @@ function scheduleRefresh() {
     await loadRoots();
     await loadPhotos();
     await loadPending();
+    await loadCollections();
     app.folderVersion++;
   }, 600);
 }
@@ -394,12 +469,14 @@ export async function init() {
     app.exiftool = status.exiftool;
     await loadRoots();
     await loadPhotos();
+    await loadCollections();
   } catch (e) {
     errorToast(e);
   }
   await listen("library-changed", scheduleRefresh);
   await listen<PendingReport>("pending-moves", (e) => pendingApplied(e.payload));
   loadPending();
+  loadHistory();
   await listen<typeof app.progress>("index-progress", (e) => (app.progress = e.payload));
   await listen<typeof app.op>("op-progress", (e) => (app.op = e.payload));
   // When the window regains focus, pick up drives that were (dis)connected and, at most
@@ -493,7 +570,8 @@ export async function moveOrCopy(ids: number[], copy: boolean, dest?: string) {
   if (!d) return;
   try {
     const r = await api.movePhotos(withStacks(ids), d, copy);
-    reportResult(r, copy ? "copied" : "moved");
+    if (r.failed.length || !r.done) reportResult(r, copy ? "copied" : "moved");
+    else offerUndo(r.history, `${r.done} photo${r.done === 1 ? "" : "s"} ${copy ? "copied" : "moved"}.`);
     if (r.queued) {
       toast(
         `${r.queued} photo${r.queued === 1 ? "" : "s"} moved in your library. The file${r.queued === 1 ? "" : "s"} will follow when the drive is connected.`,
@@ -508,23 +586,23 @@ export async function moveOrCopy(ids: number[], copy: boolean, dest?: string) {
         run: () => addFolderToLibrary(d),
       });
     }
-    await loadPhotos();
-    app.folderVersion++;
+    await afterFileChange();
   } catch (e) {
     errorToast(e);
   }
 }
 
-export async function trashPhotos(ids: number[]) {
-  if (!ids.length) return;
+/** Move photos to the Trash after asking. Returns false if the user said no. */
+export async function trashPhotos(ids: number[], message?: string): Promise<boolean> {
+  if (!ids.length) return false;
   const n = ids.length;
   const ok = await confirm(
     `Move ${n} photo${n === 1 ? "" : "s"} to the Trash?`,
-    "Their XMP sidecar files go too. You can restore them from the system Trash / Recycle Bin.",
+    message ?? "Their XMP sidecar files go too. You can restore them from the system Trash / Recycle Bin.",
     "Move to Trash",
     true,
   );
-  if (!ok) return;
+  if (!ok) return false;
   try {
     let r = await api.deletePhotos(ids, false);
     if (r.failed.length && r.failed.every(([, e]) => /Trash/i.test(e))) {
@@ -535,19 +613,20 @@ export async function trashPhotos(ids: number[]) {
         true,
       );
       if (again) {
+        // Look the photos up by id: they may not be in the current view (e.g. from the duplicate finder).
         const failedNames = new Set(r.failed.map(([f]) => f));
-        const retry = app.photos.filter((p) => ids.includes(p.id) && failedNames.has(p.filename)).map((p) => p.id);
+        const retry = (await api.getPhotos(ids)).filter((p) => failedNames.has(p.filename)).map((p) => p.id);
         const r2 = await api.deletePhotos(retry, true);
         r = { done: r.done + r2.done, failed: r2.failed, outside_library: false };
       }
     }
     reportResult(r, "deleted");
     selection.clear();
-    await loadPhotos();
-    app.folderVersion++;
+    await afterFileChange();
   } catch (e) {
     errorToast(e);
   }
+  return true;
 }
 
 export async function renamePhoto(p: PhotoLite) {
@@ -556,7 +635,8 @@ export async function renamePhoto(p: PhotoLite) {
   try {
     const r = await api.renamePhoto(p.id, name);
     await loadPhotos();
-    if (r.done) offerUndoRename(r.undo, `Renamed to “${app.photos.find((x) => x.id === p.id)?.filename ?? name}”.`);
+    loadHistory();
+    if (r.done) offerUndo(r.history, `Renamed to “${app.photos.find((x) => x.id === p.id)?.filename ?? name}”.`);
   } catch (e) {
     errorToast(e);
   }
@@ -573,30 +653,13 @@ export function renameSelected(ids = selectedIds()) {
   } else app.renameIds = [...ids];
 }
 
-/** Show a toast with an Undo button that puts the old names back. */
-export function offerUndoRename(undo: [number, string][], text: string) {
-  if (!undo.length) return;
-  toast(text, "success", {
-    label: "Undo",
-    run: async () => {
-      try {
-        const r = await api.renamePhotos(undo);
-        await loadPhotos();
-        if (r.failed.length) toast(`${r.done} name${r.done === 1 ? "" : "s"} put back, ${r.failed.length} could not be.\n${r.failed[0][0]}: ${r.failed[0][1]}`, "error");
-        else toast(r.done === 1 ? "Old name put back." : `${r.done} old names put back.`, "success");
-      } catch (e) {
-        errorToast(e);
-      }
-    },
-  }, 10000);
-}
-
 export async function newFolder(parent: string) {
   const name = await prompt("New folder", "", "Create", `Inside ${parent}`);
   if (!name) return;
   try {
     await api.createFolder(parent, name);
     app.folderVersion++;
+    loadHistory();
   } catch (e) {
     errorToast(e);
   }
@@ -608,9 +671,9 @@ export async function renameFolder(path: string, current: string) {
   try {
     const np = await api.renameFolder(path, name);
     if (app.scope.kind === "folder" && app.scope.path === path) app.scope = { ...app.scope, path: np, name };
-    await loadRoots();
-    await loadPhotos();
-    app.folderVersion++;
+    await afterFileChange();
+    const h = latestUndoable();
+    offerUndo(h?.kind === "folder_rename" ? h.id : null, `Folder renamed to “${name}”.`);
   } catch (e) {
     errorToast(e);
   }
@@ -643,6 +706,7 @@ export async function trashFolder(path: string, name: string) {
   if (app.scope.kind === "folder" && app.scope.path.startsWith(path)) setScope({ kind: "all" });
   toast(`“${name}” moved to the Trash.`, "success");
   app.folderVersion++;
+  loadHistory();
 }
 
 export async function dropOnFolder(dest: string, e: DragEvent) {
@@ -656,10 +720,9 @@ export async function dropOnFolder(dest: string, e: DragEvent) {
     if (folderData === dest || dest.startsWith(folderData)) return;
     try {
       const r = await api.moveFolder(folderData, dest, copy);
-      toast(`Folder ${copy ? "copied" : "moved"}.`, "success");
+      if (r.done) offerUndo(r.history, `Folder ${copy ? "copied" : "moved"}.`);
       if (r.outside_library) toast("The destination isn't in your library.", "info");
-      await loadPhotos();
-      app.folderVersion++;
+      await afterFileChange();
     } catch (err) {
       errorToast(err);
     }
@@ -747,6 +810,19 @@ export async function slideshowFolder(path: string, name: string) {
   }
 }
 
+export async function slideshowCollection(c: Collection) {
+  try {
+    const photos = await api.queryPhotos({
+      scope: "collection", collection: c.id, text: "", min_rating: 0, label: "",
+      sort: app.sort === "relevance" ? "date" : app.sort, desc: app.desc,
+    });
+    if (!photos.length) { toast("No photos in this collection yet."); return; }
+    startSlideshow(collapseStacks(photos), c.name);
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
 export function scopeTitle(s: Scope): string {
   switch (s.kind) {
     case "all": return "All photos";
@@ -755,6 +831,7 @@ export function scopeTitle(s: Scope): string {
     case "geotagged": return "On the map";
     case "nogps": return "Without location";
     case "folder": return s.name;
+    case "collection": return s.name;
     case "ai": return s.title;
   }
 }
@@ -902,4 +979,54 @@ export async function dropOnView(e: DragEvent) {
   // Dropping photos back where they already are does nothing.
   if (ids.every((id) => app.photos.some((p) => p.id === id && p.folder === dest))) return;
   await moveOrCopy(ids, e.altKey, dest);
+}
+
+// ------------------------------------------------------------------ smart collections
+
+/** Open the editor for a new collection, optionally starting from some rules. */
+export function newCollection(name = "", rules: RuleSet = { any: false, rules: [] }) {
+  app.collectionEdit = { id: null, name, rules: $state.snapshot(rules) as RuleSet };
+}
+
+export function editCollection(c: Collection) {
+  app.collectionEdit = { id: c.id, name: c.name, rules: $state.snapshot(c.rules) as RuleSet };
+}
+
+/** Save the collection in the editor and show it. */
+export async function saveCollection(id: number | null, name: string, rules: RuleSet): Promise<boolean> {
+  try {
+    const saved = await api.saveCollection(id, name, rules);
+    app.collectionEdit = null;
+    await loadCollections();
+    const now = { kind: "collection", id: saved, name: name.trim() } as const;
+    // Tabs showing this collection pick up a new name.
+    app.tabs.forEach((t) => { if (t.scope.kind === "collection" && t.scope.id === saved) t.scope = { ...now }; });
+    if (app.scope.kind === "collection" && app.scope.id === saved) { app.scope = { ...now }; loadPhotos(); saveTabs(); }
+    else setScope(now);
+    return true;
+  } catch (e) {
+    errorToast(e);
+    return false;
+  }
+}
+
+export async function deleteCollection(c: Collection) {
+  const ok = await confirm(`Delete the collection “${c.name}”?`, "Only the saved rules are deleted. Your photos stay exactly as they are.", "Delete");
+  if (!ok) return;
+  try {
+    await api.deleteCollection(c.id);
+    await loadCollections();
+    if (app.scope.kind === "collection" && app.scope.id === c.id) setScope({ kind: "all" });
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
+export function duplicateCollection(c: Collection) {
+  newCollection(`${c.name} copy`, c.rules);
+}
+
+/** Open the duplicate finder for the whole library, or for one folder and its subfolders. */
+export function findDuplicates(folder: string | null = null, name = "") {
+  app.dupes = { folder, name };
 }

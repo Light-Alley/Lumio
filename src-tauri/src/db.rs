@@ -66,6 +66,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // -1 = could not be made), and moves waiting for a drive to come back.
     add_column(conn, "photos", "preview", "INTEGER NOT NULL DEFAULT 0")?;
     crate::pending::migrate(conn)?;
+    crate::history::migrate(conn)?;
+    // 0.4: smart collections and the fingerprints the duplicate finder keeps.
+    crate::collections::migrate(conn)?;
+    crate::duplicates::migrate(conn)?;
     // 0.3.2: HEIC/AVIF thumbnails made on macOS before this version ignored the photo's
     // orientation. Rebuild the ones that are not upright, once.
     if get_setting(conn, "fix_heic_thumbs").is_none() {
@@ -252,6 +256,8 @@ pub struct Query {
     pub label: Option<String>,
     pub sort: Option<String>,
     pub desc: bool,
+    /// Scope "collection": the smart collection whose rules choose the photos.
+    pub collection: Option<i64>,
 }
 
 pub fn folder_clause(folder: &str, recursive: bool, args: &mut Vec<rusqlite::types::Value>) -> String {
@@ -295,6 +301,15 @@ pub fn query_photos(conn: &Connection, q: &Query) -> Result<Vec<PhotoLite>> {
         "geotagged" => wh.push("lat IS NOT NULL AND lon IS NOT NULL".into()),
         "nogps" => wh.push("(lat IS NULL OR lon IS NULL)".into()),
         "rated" => wh.push("rating > 0".into()),
+        "collection" => {
+            // A collection that was deleted (say, still open in another tab) shows nothing.
+            let Some(rules) = q.collection.and_then(|id| crate::collections::get_rules(conn, id).ok().flatten()) else {
+                return Ok(vec![]);
+            };
+            if let Some(w) = crate::collections::where_sql(&rules, &mut args)? {
+                wh.push(w);
+            }
+        }
         _ => {}
     }
     if let Some(t) = q.text.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {

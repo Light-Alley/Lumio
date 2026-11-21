@@ -1,9 +1,9 @@
 <script lang="ts">
   import FolderTree from "./FolderTree.svelte";
-  import { Images, Clock, Star, MapPin, MapPinOff, Sparkles, Plus, HardDrive, CloudOff, ChevronRight } from "@lucide/svelte";
-  import { app, setScope, addFolderToLibrary, dropOnFolder, type Scope } from "../store.svelte";
+  import { Images, Clock, Star, MapPin, MapPinOff, Sparkles, Plus, HardDrive, CloudOff, ChevronRight, ListFilter, Copy } from "@lucide/svelte";
+  import { app, setScope, addFolderToLibrary, dropOnFolder, newCollection, findDuplicates, type Scope } from "../store.svelte";
   import { showMenu } from "../menu.svelte";
-  import { folderMenu } from "../actions";
+  import { folderMenu, collectionMenu } from "../actions";
   import type { FolderNode, Root } from "../api";
 
   let expanded = $state<Record<number, boolean>>({});
@@ -32,6 +32,27 @@
   {#if app.scope.kind === "ai"}
     <button class="item active"><Sparkles size={15} /> <span class="ell">{app.scope.title}</span></button>
   {/if}
+
+  <button class="item" onclick={() => findDuplicates()} title="Find exact copies and look-alikes to tidy up">
+    <Copy size={15} /> <span>Find duplicates…</span>
+  </button>
+
+  <div class="section-title">
+    Smart collections
+    <button class="ghost icon add" title="New smart collection" onclick={() => newCollection()}><Plus size={14} /></button>
+  </div>
+  {#each app.collections as c (c.id)}
+    {@const active = app.scope.kind === "collection" && app.scope.id === c.id}
+    <button class="item" class:active title={c.name}
+      onclick={() => setScope({ kind: "collection", id: c.id, name: c.name })}
+      oncontextmenu={(e) => showMenu(e, collectionMenu(c))}>
+      <ListFilter size={15} /> <span class="ell grow">{c.name}</span> <span class="count">{c.count.toLocaleString()}</span>
+    </button>
+  {:else}
+    <button class="item hint" onclick={() => newCollection()}>
+      <Plus size={15} /> <span class="ell">Make one, e.g. 5 stars from 2024</span>
+    </button>
+  {/each}
 
   <div class="section-title">
     Folders
@@ -87,7 +108,9 @@
   .item.active { background: var(--accent-soft) !important; color: var(--text); }
   .item :global(svg) { color: var(--text-3); }
   .item.active :global(svg) { color: var(--accent); }
-  .ell { overflow: hidden; text-overflow: ellipsis; }
+  .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .grow { flex: 1; text-align: left; }
+  .item.hint { color: var(--text-3); font-size: 12px; }
   .add { padding: 2px; }
   .root {
     display: flex; align-items: center; gap: 5px; height: 28px; margin: 0 6px; padding: 0 10px 0 8px;

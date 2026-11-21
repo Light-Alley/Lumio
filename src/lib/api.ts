@@ -28,8 +28,12 @@ export interface RenameOptions {
 }
 export interface PlannedName { id: number; old: string; new: string; problem: string | null }
 /** `undo` holds [id, previous name] for every photo that was renamed. */
-export interface RenameReport { done: number; failed: [string, string][]; undo: [number, string][] }
-export interface OpReport { done: number; failed: [string, string][]; outside_library: boolean; queued?: number }
+export interface RenameReport { done: number; failed: [string, string][]; undo: [number, string][]; history?: number | null }
+/** `history` is the undo history entry for the change, when something changed. */
+export interface OpReport { done: number; failed: [string, string][]; outside_library: boolean; queued?: number; history?: number | null }
+/** One change in the undo history. `at` is in milliseconds. */
+export interface HistoryEntry { id: number; at: number; label: string; kind: string; undoable: boolean; undone: boolean; note: string | null }
+export interface UndoReport { steps: number; done: number; failed: [string, string][]; label: string | null }
 /** A move waiting for a drive to be connected. */
 export interface PendingMove { photo_id: number; filename: string; from: string; to: string; error: string | null }
 export interface PendingReport { done: number; failed: [string, string][]; waiting: number }
@@ -37,8 +41,17 @@ export interface OfflineStats { saved: number; waiting: number; bytes: number; d
 export interface AppInfo { name: string; id: string; is_default: boolean }
 export interface Query {
   scope: string; folder?: string | null; recursive?: boolean; ids?: number[] | null; text?: string;
-  min_rating?: number; label?: string; sort?: string; desc?: boolean;
+  min_rating?: number; label?: string; sort?: string; desc?: boolean; collection?: number | null;
 }
+/** One condition of a smart collection; see `src/lib/collections.ts` for the fields. */
+export interface Rule { field: string; op: string; value: string; value2: string }
+/** `any`: a photo matches if any rule does; otherwise every rule must. */
+export interface RuleSet { any: boolean; rules: Rule[] }
+export interface Collection { id: number; name: string; rules: RuleSet; count: number }
+export interface DupMember { photo: Photo; keep: boolean; distance: number; online: boolean }
+export interface DupGroup { members: DupMember[] }
+export interface DupReport { groups: DupGroup[]; checked: number; skipped: number; extra_bytes: number; cancelled: boolean }
+export interface DupOptions { mode: "exact" | "similar"; distance: number; folder: string | null }
 export interface Edit {
   rating?: number; label?: string; title?: string; caption?: string; keywords?: string[];
   add_keywords?: string[]; remove_keywords?: string[]; creator?: string; copyright?: string;
@@ -72,6 +85,9 @@ export const api = {
   pendingMoves: () => invoke<PendingMove[]>("pending_moves"),
   cancelPendingMoves: (ids: number[]) => invoke<number>("cancel_pending_moves", { ids }),
   retryPendingMoves: () => invoke<void>("retry_pending_moves"),
+  historyList: () => invoke<HistoryEntry[]>("history_list"),
+  /** Undo a change and everything after it; without an id, the latest change. */
+  historyUndo: (id?: number) => invoke<UndoReport>("history_undo", { id: id ?? null }),
   histogram: (id: number) => invoke<Histogram>("histogram", { id }),
   offlinePreviewStats: () => invoke<OfflineStats>("offline_preview_stats"),
   clearOfflinePreviews: () => invoke<void>("clear_offline_previews"),
@@ -80,6 +96,7 @@ export const api = {
   renamePreview: (ids: number[], opts: RenameOptions) => invoke<PlannedName[]>("rename_preview", { ids, opts }),
   renamePhotos: (items: [number, string][]) => invoke<RenameReport>("rename_photos", { items }),
   updateMetadata: (ids: number[], edit: Edit) => invoke<OpReport>("update_metadata", { ids, edit }),
+  keywordList: () => invoke<[string, number][]>("keyword_list"),
   rotatePhotos: (ids: number[], op: Turn) => invoke<OpReport>("rotate_photos", { ids, op }),
   saveVideoThumb: (id: number, jpeg: string, width: number | null, height: number | null, duration: number | null) =>
     invoke<void>("save_video_thumb", { id, jpeg, width, height, duration }),
@@ -98,6 +115,12 @@ export const api = {
   aiChat: (text: string) => invoke<ChatReply>("ai_chat", { text }),
   aiReset: () => invoke<void>("ai_reset"),
   geocode: (query: string) => invoke<Place[]>("geocode", { query }),
+  listCollections: () => invoke<Collection[]>("list_collections"),
+  saveCollection: (id: number | null, name: string, rules: RuleSet) => invoke<number>("save_collection", { id, name, rules }),
+  deleteCollection: (id: number) => invoke<void>("delete_collection", { id }),
+  countRules: (rules: RuleSet) => invoke<number>("count_rules", { rules }),
+  findDuplicates: (opts: DupOptions) => invoke<DupReport>("find_duplicates", { opts }),
+  cancelDuplicates: () => invoke<void>("cancel_duplicates"),
 };
 
 export const VIDEO_EXTS = ["mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv"];
@@ -149,7 +172,13 @@ export const LABELS = [
   { name: "Blue", color: "#3e63dd" },
   { name: "Purple", color: "#8e4ec6" },
 ];
-export const labelColor = (l: string | null | undefined) => LABELS.find((x) => x.name.toLowerCase() === (l ?? "").toLowerCase())?.color;
+/** Capture One also has orange and pink colour tags; Lumio shows them but doesn't set them. */
+const OTHER_LABELS = [
+  { name: "Orange", color: "#f76b15" },
+  { name: "Pink", color: "#e93d82" },
+];
+export const labelColor = (l: string | null | undefined) =>
+  [...LABELS, ...OTHER_LABELS].find((x) => x.name.toLowerCase() === (l ?? "").toLowerCase())?.color;
 
 export function formatDate(s: string | null | undefined): string {
   if (!s) return "";

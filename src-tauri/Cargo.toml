@@ -1,8 +1,8 @@
 [package]
 name = "lumio"
-version = "0.3.8"
+version = "1.0.0"
 description = "Lumio – a lightweight, open-source photo browser and digital asset manager"
-authors = ["Lumio contributors"]
+authors = ["Light and Alley and Lumio contributors"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.80"
@@ -21,7 +21,7 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp", "tiff", "rayon"] }
 rayon = "1"
 walkdir = "2"

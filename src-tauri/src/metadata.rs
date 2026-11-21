@@ -75,6 +75,13 @@ pub struct Meta {
     pub title: Option<String>,
     pub caption: Option<String>,
     pub keywords: Vec<String>,
+    /// Lightroom-style keyword paths ("Places|France|Paris"), from lr:hierarchicalSubject.
+    pub hier_keywords: Vec<String>,
+    /// Whether the file actually holds a rating, label or keyword tag. A sidecar that says
+    /// "no rating" (because it was cleared in Lightroom) must win over the RAW's own value.
+    pub has_rating: bool,
+    pub has_label: bool,
+    pub has_keywords: bool,
     pub creator: Option<String>,
     pub copyright: Option<String>,
     pub lat: Option<f64>,
@@ -157,6 +164,24 @@ fn list(v: &Value, keys: &[&str]) -> Vec<String> {
     vec![]
 }
 
+/// A list tag whose items may themselves contain commas (keyword paths): a single string
+/// is one item, not a comma-separated list.
+fn list_exact(v: &Value, key: &str) -> Vec<String> {
+    match v.get(key) {
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|x| match x {
+                Value::String(s) => Some(s.trim().to_string()),
+                Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            })
+            .filter(|s| !s.is_empty())
+            .collect(),
+        Some(Value::String(x)) if !x.trim().is_empty() => vec![x.trim().to_string()],
+        _ => vec![],
+    }
+}
+
 /// ExifTool dates look like "2023:07:14 18:22:05+02:00"; store ISO-like "2023-07-14T18:22:05".
 pub fn normalize_date(d: &str) -> Option<String> {
     let d = d.trim();
@@ -183,7 +208,9 @@ pub fn parse(v: &Value) -> Meta {
     }
     m.taken_at = s(v, &["DateTimeOriginal", "CreateDate", "DateCreated"]).and_then(|d| normalize_date(&d));
     m.rating = f(v, &["Rating"]).map(|r| r.clamp(-1.0, 5.0) as i64).unwrap_or(0).max(0);
+    m.has_rating = v.get("Rating").is_some();
     m.label = s(v, &["Label"]);
+    m.has_label = v.get("Label").is_some();
     m.title = s(v, &["Title", "ObjectName"]);
     m.caption = s(v, &["Description", "Caption-Abstract", "ImageDescription"]);
     let mut kw = list(v, &["Subject"]);
@@ -192,6 +219,16 @@ pub fn parse(v: &Value) -> Meta {
             kw.push(k);
         }
     }
+    m.hier_keywords = list_exact(v, "HierarchicalSubject");
+    // Files tagged only with keyword paths still show their keywords.
+    for h in &m.hier_keywords {
+        if let Some(leaf) = split_path(h).last() {
+            if !kw.iter().any(|x| x.eq_ignore_ascii_case(leaf)) {
+                kw.push(leaf.to_string());
+            }
+        }
+    }
+    m.has_keywords = ["Subject", "Keywords", "HierarchicalSubject"].iter().any(|k| v.get(*k).is_some());
     m.keywords = kw;
     m.creator = s(v, &["Creator", "Artist", "By-line"]);
     m.copyright = s(v, &["Rights", "Copyright", "CopyrightNotice"]);
@@ -240,9 +277,16 @@ pub fn fix_video_size(m: &mut Meta) {
 }
 
 /// Overlay XMP sidecar values (Lightroom / Bridge style) on top of the image's own.
+///
+/// Rating, label and keywords follow the sidecar whenever it has the tag at all, so that
+/// clearing them in Lightroom or Capture One (rating 0, no label) is not undone by the
+/// value the camera wrote into the RAW file.
 pub fn merge_sidecar(base: &mut Meta, side: &Meta) {
-    if side.rating > 0 {
+    if side.has_rating || side.rating > 0 {
         base.rating = side.rating;
+    }
+    if side.has_label {
+        base.label = side.label.clone();
     }
     macro_rules! take {
         ($($f:ident),*) => { $( if side.$f.is_some() { base.$f = side.$f.clone(); } )* };
@@ -255,9 +299,89 @@ pub fn merge_sidecar(base: &mut Meta, side: &Meta) {
         }
         base.orientation = Some(o);
     }
-    if !side.keywords.is_empty() {
+    if side.has_keywords || !side.keywords.is_empty() {
         base.keywords = side.keywords.clone();
+        base.hier_keywords = side.hier_keywords.clone();
     }
+}
+
+/// Split a keyword path. Lightroom and Capture One store "Places|France|Paris"; people
+/// often type "Places > France > Paris", which Lumio accepts too.
+pub fn split_path(k: &str) -> Vec<&str> {
+    let parts: Vec<&str> = if k.contains('|') { k.split('|').collect() } else { k.split(" > ").collect() };
+    parts.into_iter().map(str::trim).filter(|p| !p.is_empty()).collect()
+}
+
+fn has_ci(list: &[String], k: &str) -> bool {
+    list.iter().any(|x| x.eq_ignore_ascii_case(k))
+}
+
+fn push_ci(list: &mut Vec<String>, k: &str) {
+    if !k.is_empty() && !has_ci(list, k) {
+        list.push(k.to_string());
+    }
+}
+
+/// The keywords to write, as Lightroom and Capture One expect them.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct KeywordPlan {
+    /// dc:subject (and IPTC Keywords): every keyword, including the parents of a path.
+    pub subject: Vec<String>,
+    /// lr:hierarchicalSubject: the keyword paths.
+    pub hierarchy: Vec<String>,
+}
+
+/// Work out dc:subject and lr:hierarchicalSubject for a new keyword list.
+///
+/// `wanted` is the list the person ended up with; entries may be paths ("Places|France|Paris").
+/// `removed` are keywords they took off. `old_hier` is the file's current
+/// lr:hierarchicalSubject. A path is kept while its last keyword is still wanted and none
+/// of its keywords was removed; otherwise Lightroom would bring the keyword back the next
+/// time it reads the file. Parents that only came from a dropped path go with it, as they
+/// do in Lightroom.
+pub fn plan_keywords(wanted: &[String], removed: &[String], old_hier: &[String]) -> KeywordPlan {
+    let mut flat: Vec<String> = vec![];
+    let mut new_paths: Vec<Vec<String>> = vec![];
+    for w in wanted {
+        let parts = split_path(w);
+        match parts.len() {
+            0 => {}
+            1 => push_ci(&mut flat, parts[0]),
+            _ => new_paths.push(parts.iter().map(|s| s.to_string()).collect()),
+        }
+    }
+    let mut hierarchy: Vec<String> = vec![];
+    let mut kept: Vec<Vec<String>> = vec![];
+    let mut dropped: Vec<Vec<String>> = vec![];
+    for h in old_hier {
+        let parts: Vec<String> = split_path(h).iter().map(|s| s.to_string()).collect();
+        let Some(leaf) = parts.last() else { continue };
+        let leaf_wanted = has_ci(&flat, leaf) || new_paths.iter().any(|p| p.last().is_some_and(|l| l.eq_ignore_ascii_case(leaf)));
+        if leaf_wanted && !parts.iter().any(|p| has_ci(removed, p)) {
+            push_ci(&mut hierarchy, &parts.join("|"));
+            kept.push(parts);
+        } else {
+            dropped.push(parts);
+        }
+    }
+    for p in &new_paths {
+        push_ci(&mut hierarchy, &p.join("|"));
+    }
+    // Parents of dropped paths that nothing else still needs.
+    let needed = |k: &str| kept.iter().chain(new_paths.iter()).any(|p| has_ci(p, k));
+    let orphan = |k: &str| !needed(k) && dropped.iter().any(|p| p[..p.len() - 1].iter().any(|x| x.eq_ignore_ascii_case(k)));
+    let mut subject: Vec<String> = vec![];
+    for k in &flat {
+        if !orphan(k) {
+            push_ci(&mut subject, k);
+        }
+    }
+    for p in kept.iter().chain(new_paths.iter()) {
+        for k in p {
+            push_ci(&mut subject, k);
+        }
+    }
+    KeywordPlan { subject, hierarchy }
 }
 
 /// A partial edit coming from the UI. Only fields that are `Some` are written.
@@ -292,7 +416,9 @@ impl Edit {
 }
 
 /// Build ExifTool assignments for an edit. `xmp_only` is used for sidecar files.
-pub fn write_args(e: &Edit, final_keywords: Option<&[String]>, xmp_only: bool) -> Vec<String> {
+/// `keywords` is the result of [`plan_keywords`] when the keywords change; the
+/// hierarchy is written only when there is one (or was one to clear).
+pub fn write_args(e: &Edit, keywords: Option<(&KeywordPlan, bool)>, xmp_only: bool) -> Vec<String> {
     let mut a = vec![];
     if let Some(r) = e.rating {
         a.push(format!("-XMP-xmp:Rating={}", r.clamp(0, 5)));
@@ -317,10 +443,17 @@ pub fn write_args(e: &Edit, final_keywords: Option<&[String]>, xmp_only: bool) -
             a.push(format!("-EXIF:ImageDescription={c}"));
         }
     }
-    if let Some(k) = final_keywords {
+    if let Some((plan, had_hier)) = keywords {
+        let k = &plan.subject;
         a.push("-XMP-dc:Subject=".into());
         if !xmp_only {
             a.push("-IPTC:Keywords=".into());
+        }
+        if had_hier || !plan.hierarchy.is_empty() {
+            a.push("-XMP-lr:HierarchicalSubject=".into());
+            for h in &plan.hierarchy {
+                a.push(format!("-XMP-lr:HierarchicalSubject={h}"));
+            }
         }
         for kw in k {
             a.push(format!("-XMP-dc:Subject={kw}"));
@@ -480,5 +613,136 @@ mod video_tests {
     fn webm_duration_as_text() {
         let m = parse(&serde_json::json!({"Duration": "00:01:30.008000000"}));
         assert!((m.duration.unwrap() - 90.008).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod keyword_tests {
+    use super::*;
+
+    fn v(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn typed_paths_become_lightroom_paths() {
+        let p = plan_keywords(&v(&["Holiday", "Places > France > Paris"]), &[], &[]);
+        assert_eq!(p.subject, v(&["Holiday", "Places", "France", "Paris"]));
+        assert_eq!(p.hierarchy, v(&["Places|France|Paris"]));
+    }
+
+    #[test]
+    fn untouched_paths_are_kept() {
+        let old = v(&["Places|France|Paris"]);
+        let p = plan_keywords(&v(&["Places", "France", "Paris", "Holiday"]), &[], &old);
+        assert_eq!(p.hierarchy, old);
+        assert_eq!(p.subject, v(&["Places", "France", "Paris", "Holiday"]));
+    }
+
+    #[test]
+    fn removing_a_keyword_drops_its_path_and_lonely_parents() {
+        // Otherwise Lightroom would bring "Paris" back from lr:hierarchicalSubject.
+        let old = v(&["Places|France|Paris", "Places|France|Lyon"]);
+        let p = plan_keywords(&v(&["Places", "France", "Lyon", "Holiday"]), &v(&["Paris"]), &old);
+        assert_eq!(p.hierarchy, v(&["Places|France|Lyon"]));
+        assert_eq!(p.subject, v(&["Places", "France", "Lyon", "Holiday"]));
+
+        let p = plan_keywords(&v(&["Places", "France", "Holiday"]), &v(&["Paris"]), &v(&["Places|France|Paris"]));
+        assert!(p.hierarchy.is_empty());
+        assert_eq!(p.subject, v(&["Holiday"]));
+    }
+
+    #[test]
+    fn removing_a_parent_drops_the_path_but_keeps_the_keyword() {
+        let p = plan_keywords(&v(&["Places", "Paris"]), &v(&["France"]), &v(&["Places|France|Paris"]));
+        assert!(p.hierarchy.is_empty());
+        assert_eq!(p.subject, v(&["Paris"]));
+    }
+
+    #[test]
+    fn hierarchy_written_only_when_needed() {
+        let e = Edit::default();
+        let flat = plan_keywords(&v(&["A"]), &[], &[]);
+        let args = write_args(&e, Some((&flat, false)), true);
+        assert!(!args.iter().any(|a| a.contains("HierarchicalSubject")));
+        let args = write_args(&e, Some((&flat, true)), true);
+        assert!(args.contains(&"-XMP-lr:HierarchicalSubject=".to_string()));
+    }
+
+    #[test]
+    fn sidecar_clears_win_over_the_raw_file() {
+        let mut raw = parse(&serde_json::json!({"Rating": 3, "Label": "Red", "Subject": ["a"]}));
+        let side = parse(&serde_json::json!({"Rating": 0, "Label": "", "Subject": []}));
+        merge_sidecar(&mut raw, &side);
+        assert_eq!((raw.rating, raw.label.clone(), raw.keywords.len()), (0, None, 0));
+        // A sidecar without those tags leaves the file's values alone.
+        let mut raw = parse(&serde_json::json!({"Rating": 3, "Label": "Red"}));
+        merge_sidecar(&mut raw, &parse(&serde_json::json!({"Title": "x"})));
+        assert_eq!((raw.rating, raw.label.as_deref()), (3, Some("Red")));
+    }
+
+    #[test]
+    fn keywords_from_paths_only() {
+        let m = parse(&serde_json::json!({"HierarchicalSubject": "Places|France, south|Nice"}));
+        assert_eq!(m.hier_keywords, v(&["Places|France, south|Nice"]));
+        assert_eq!(m.keywords, v(&["Nice"]));
+    }
+}
+
+/// Round trips through a real ExifTool (skipped when none is installed).
+#[cfg(test)]
+mod exiftool_tests {
+    use super::*;
+    use crate::exiftool::ExifTool;
+
+    const LR_SIDECAR: &str = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    xmlns:lr="http://ns.adobe.com/lightroom/1.0/"
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+   xmp:Rating="4"
+   xmp:Label="Red"
+   crs:Exposure2012="+0.35">
+   <dc:subject><rdf:Bag><rdf:li>Paris</rdf:li><rdf:li>France</rdf:li><rdf:li>Places</rdf:li><rdf:li>Holiday</rdf:li></rdf:Bag></dc:subject>
+   <lr:hierarchicalSubject><rdf:Bag><rdf:li>Places|France|Paris</rdf:li></rdf:Bag></lr:hierarchicalSubject>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+"#;
+
+    #[test]
+    fn edits_a_lightroom_sidecar_without_losing_develop_settings() {
+        let et = ExifTool::new(None);
+        if !et.available() {
+            eprintln!("ExifTool not installed; skipping");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("lumio-xmp-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let side = dir.join("IMG_1.xmp");
+        std::fs::write(&side, LR_SIDECAR).unwrap();
+        let read = |et: &ExifTool| parse(&et.read_json(std::slice::from_ref(&side)).unwrap()[0]);
+
+        let m = read(&et);
+        assert_eq!((m.rating, m.label.as_deref()), (4, Some("Red")));
+        assert_eq!(m.hier_keywords, vec!["Places|France|Paris".to_string()]);
+
+        // Take "Paris" off, add a path, change rating and clear the label.
+        let wanted: Vec<String> = ["Places", "France", "Holiday", "People|Family"].iter().map(|s| s.to_string()).collect();
+        let plan = plan_keywords(&wanted, &["Paris".to_string()], &m.hier_keywords);
+        let edit = Edit { rating: Some(2), label: Some(String::new()), ..Default::default() };
+        et.write(&side, &write_args(&edit, Some((&plan, true)), true)).unwrap();
+
+        let m = read(&et);
+        assert_eq!(m.rating, 2);
+        assert!(m.has_rating);
+        assert_eq!(m.label, None);
+        assert_eq!(m.hier_keywords, vec!["People|Family".to_string()]);
+        assert_eq!(m.keywords, vec!["Holiday".to_string(), "People".to_string(), "Family".to_string()]);
+        let text = std::fs::read_to_string(&side).unwrap();
+        assert!(text.contains("Exposure2012"), "Lightroom develop settings must survive:\n{text}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

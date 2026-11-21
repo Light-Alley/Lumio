@@ -68,40 +68,38 @@ fn split(path: &Path) -> (String, String) {
     )
 }
 
-/// A name in `dir` that neither the catalogue nor the disk (if we can see it) uses.
-fn free_target(conn: &Connection, dir: &Path, name: &str, photo_id: i64) -> Result<PathBuf> {
-    let taken = |p: &Path| -> Result<bool> {
-        let other: Option<i64> = conn
-            .query_row("SELECT id FROM photos WHERE path = ?1", [p.to_string_lossy()], |r| r.get(0))
-            .optional()?;
-        Ok(other.is_some_and(|id| id != photo_id) || p.exists())
-    };
-    let first = dir.join(name);
-    if !taken(&first)? {
-        return Ok(first);
-    }
-    let p = Path::new(name);
-    let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    let ext = p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
-    for i in 2.. {
-        let c = dir.join(format!("{stem} ({i}){ext}"));
-        if !taken(&c)? {
-            return Ok(c);
+/// A name in `dir` that neither the catalogue nor the disk (if we can see it) uses, for
+/// the photo and for its sidecar when it has one.
+fn free_target(conn: &Connection, dir: &Path, name: &str, photo_id: i64, sidecar: Option<&Path>) -> Result<PathBuf> {
+    let mut err = None;
+    let found = fileops::free_name(dir, name, sidecar, |p| {
+        let other: rusqlite::Result<Option<i64>> =
+            conn.query_row("SELECT id FROM photos WHERE path = ?1", [p.to_string_lossy()], |r| r.get(0)).optional();
+        match other {
+            Ok(other) => other.is_some_and(|id| id != photo_id) || p.exists(),
+            Err(e) => {
+                err = Some(e);
+                false
+            }
         }
+    });
+    match err {
+        Some(e) => Err(e.into()),
+        None => Ok(found),
     }
-    unreachable!()
 }
 
 /// Move a photo in the catalogue now and remember to move the file later.
 /// Returns where it will end up.
-pub fn queue_move(conn: &Connection, photo: &db::Photo, dest: &Path, dest_root: i64) -> Result<PathBuf> {
+/// `name` is the file name it should have there (normally the one it has now).
+pub fn queue_move(conn: &Connection, photo: &db::Photo, dest: &Path, name: &str, dest_root: i64) -> Result<PathBuf> {
     let src = source_of(conn, photo.id)?.unwrap_or_else(|| photo.path.clone());
     // Moving it back to where the file really is cancels the move.
-    if Path::new(&src).parent() == Some(dest) {
+    if Path::new(&src).parent() == Some(dest) && Path::new(&src).file_name().is_some_and(|n| n.to_string_lossy() == name) {
         cancel_one(conn, photo.id)?;
         return Ok(PathBuf::from(src));
     }
-    let target = free_target(conn, dest, &photo.filename, photo.id)?;
+    let target = free_target(conn, dest, name, photo.id, None)?;
     let (folder, filename) = split(&target);
     let tx = conn.unchecked_transaction()?;
     tx.execute(
@@ -213,8 +211,18 @@ impl Reach<'_> {
     }
 }
 
-/// Do every waiting move whose drives are both connected.
+/// Do every waiting move whose drives are both connected, and tell the window.
 pub fn apply(state: &AppState, conn: &Connection) -> Result<ApplyReport> {
+    let rep = apply_in(conn)?;
+    if rep.done > 0 || !rep.failed.is_empty() {
+        let _ = state.app.emit("pending-moves", rep.clone());
+        let _ = state.app.emit("library-changed", ());
+    }
+    Ok(rep)
+}
+
+/// Do every waiting move whose drives are both connected.
+pub fn apply_in(conn: &Connection) -> Result<ApplyReport> {
     let rows: Vec<(i64, String, String, String, i64, Option<String>)> = {
         let mut st = conn.prepare(
             "SELECT m.photo_id, m.src, p.path, p.filename, p.size, m.error FROM pending_moves m JOIN photos p ON p.id = m.photo_id ORDER BY m.created",
@@ -261,10 +269,6 @@ pub fn apply(state: &AppState, conn: &Connection) -> Result<ApplyReport> {
     if !touched.is_empty() {
         crate::notify::changed(&touched);
     }
-    if rep.done > 0 || !rep.failed.is_empty() {
-        let _ = state.app.emit("pending-moves", rep.clone());
-        let _ = state.app.emit("library-changed", ());
-    }
     Ok(rep)
 }
 
@@ -284,11 +288,24 @@ fn move_one(conn: &Connection, id: i64, src: &Path, dest: &Path, filename: &str,
     }
     // The folder may have been removed while the drive was away; make it again.
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-    let target = if dest.exists() { free_target(conn, dir, filename, id)? } else { dest.to_path_buf() };
     let side = find_sidecar(src);
+    // Nothing is overwritten: not a file that turned up with the same name while the
+    // drive was away, and not another photo's sidecar.
+    let side_taken = side.as_ref().is_some_and(|s| {
+        let t = fileops::sidecar_target(dest, s);
+        t.exists() && !fileops::same_content(s, &t).unwrap_or(false)
+    });
+    let target = if dest.exists() || side_taken {
+        let name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| filename.to_string());
+        free_target(conn, dir, &name, id, side.as_deref())?
+    } else {
+        dest.to_path_buf()
+    };
     fileops::move_file(src, &target)?;
     if let Some(s) = &side {
-        if let Err(e) = fileops::move_file(s, &fileops::sidecar_target(&target, s)) {
+        let leaving: HashSet<PathBuf> = [src.to_path_buf()].into();
+        let t = fileops::sidecar_target(&target, s);
+        if let Err(e) = fileops::carry_sidecar(s, &t, fileops::sidecar_shared(src, s, &leaving)) {
             log::warn!("sidecar {} could not follow its photo: {e:#}", s.display());
         }
     }
@@ -362,7 +379,7 @@ mod tests {
         let id = add_photo(&conn, ra, &src, 5);
         let photo = db::get_photo(&conn, id).unwrap().unwrap();
         // Drive b is "away": the move waits, but the catalogue shows the new place.
-        let planned = queue_move(&conn, &photo, &b, rb).unwrap();
+        let planned = queue_move(&conn, &photo, &b, &photo.filename, rb).unwrap();
         assert_eq!(planned, b.join("IMG_1.jpg"));
         assert_eq!(db::get_photo(&conn, id).unwrap().unwrap().folder, b.to_string_lossy());
         assert!(sources(&conn).unwrap().contains(&src.to_string_lossy().to_string()));
@@ -394,7 +411,7 @@ mod tests {
         let src = a.join("IMG_2.jpg");
         let id = add_photo(&conn, ra, &src, 5);
         let photo = db::get_photo(&conn, id).unwrap().unwrap();
-        let planned = queue_move(&conn, &photo, &b, rb).unwrap();
+        let planned = queue_move(&conn, &photo, &b, &photo.filename, rb).unwrap();
         assert!(move_one(&conn, id, &src, &planned, "IMG_2.jpg", 5).is_err());
         assert_eq!(count(&conn), 1);
         cancel_one(&conn, id).unwrap();
@@ -415,9 +432,9 @@ mod tests {
         let src = a.join("IMG_3.jpg");
         let id = add_photo(&conn, ra, &src, 5);
         let photo = db::get_photo(&conn, id).unwrap().unwrap();
-        queue_move(&conn, &photo, &b, rb).unwrap();
+        queue_move(&conn, &photo, &b, &photo.filename, rb).unwrap();
         let photo = db::get_photo(&conn, id).unwrap().unwrap();
-        queue_move(&conn, &photo, &a, ra).unwrap();
+        queue_move(&conn, &photo, &a, &photo.filename, ra).unwrap();
         assert_eq!(count(&conn), 0);
         assert_eq!(db::get_photo(&conn, id).unwrap().unwrap().path, src.to_string_lossy());
     }
@@ -434,9 +451,89 @@ mod tests {
         let src = a.join("IMG_4.jpg");
         let id = add_photo(&conn, ra, &src, 5);
         let photo = db::get_photo(&conn, id).unwrap().unwrap();
-        let planned = queue_move(&conn, &photo, &b, rb).unwrap();
+        let planned = queue_move(&conn, &photo, &b, &photo.filename, rb).unwrap();
         std::fs::write(&planned, b"photo").unwrap();
         assert_eq!(move_one(&conn, id, &src, &planned, "IMG_4.jpg", 5).unwrap(), None);
         assert_eq!(count(&conn), 0);
+    }
+
+    #[test]
+    fn waits_while_a_drive_is_away_and_never_overwrites_a_sidecar() {
+        let t = tempdir();
+        let conn = setup(t.path());
+        let a = t.path().join("a");
+        let b = t.path().join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        let ra = add_root(&conn, &a);
+        let rb = add_root(&conn, &b);
+        let src = a.join("IMG_5.jpg");
+        std::fs::write(&src, b"photo").unwrap();
+        std::fs::write(a.join("IMG_5.xmp"), b"mine").unwrap();
+        let id = add_photo(&conn, ra, &src, 5);
+        let photo = db::get_photo(&conn, id).unwrap().unwrap();
+        queue_move(&conn, &photo, &b, &photo.filename, rb).unwrap();
+        // Drive b is away: nothing happens, the move keeps waiting.
+        let rep = apply_in(&conn).unwrap();
+        assert_eq!((rep.done, rep.waiting), (0, 1));
+        assert!(src.exists());
+        // It comes back with an IMG_5.xmp that belongs to someone else's IMG_5.CR2.
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(b.join("IMG_5.CR2"), b"raw").unwrap();
+        std::fs::write(b.join("IMG_5.xmp"), b"theirs").unwrap();
+        let rep = apply_in(&conn).unwrap();
+        assert_eq!(rep.done, 1, "{:?}", rep.failed);
+        assert_eq!(std::fs::read(b.join("IMG_5.xmp")).unwrap(), b"theirs");
+        assert_eq!(std::fs::read(b.join("IMG_5 (2).xmp")).unwrap(), b"mine");
+        assert_eq!(std::fs::read(b.join("IMG_5 (2).jpg")).unwrap(), b"photo");
+        assert_eq!(db::get_photo(&conn, id).unwrap().unwrap().filename, "IMG_5 (2).jpg");
+    }
+
+    #[test]
+    fn two_waiting_moves_with_the_same_name_get_different_names() {
+        let t = tempdir();
+        let conn = setup(t.path());
+        let a = t.path().join("a");
+        let b = t.path().join("b");
+        std::fs::create_dir_all(a.join("x")).unwrap();
+        std::fs::create_dir_all(a.join("y")).unwrap();
+        let ra = add_root(&conn, &a);
+        let rb = add_root(&conn, &b);
+        let mut ids = vec![];
+        for (dir, body) in [("x", b"one" as &[u8]), ("y", b"two")] {
+            let src = a.join(dir).join("IMG_1.jpg");
+            std::fs::write(&src, body).unwrap();
+            let id = add_photo(&conn, ra, &src, 3);
+            let photo = db::get_photo(&conn, id).unwrap().unwrap();
+            queue_move(&conn, &photo, &b, &photo.filename, rb).unwrap();
+            ids.push(id);
+        }
+        assert_eq!(db::get_photo(&conn, ids[1]).unwrap().unwrap().filename, "IMG_1 (2).jpg");
+        std::fs::create_dir_all(&b).unwrap();
+        assert_eq!(apply_in(&conn).unwrap().done, 2);
+        assert_eq!(std::fs::read(b.join("IMG_1.jpg")).unwrap(), b"one");
+        assert_eq!(std::fs::read(b.join("IMG_1 (2).jpg")).unwrap(), b"two");
+    }
+
+    #[test]
+    fn a_raw_sidecar_stays_behind_for_a_waiting_jpeg_move() {
+        let t = tempdir();
+        let conn = setup(t.path());
+        let a = t.path().join("a");
+        let b = t.path().join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        let ra = add_root(&conn, &a);
+        let rb = add_root(&conn, &b);
+        std::fs::write(a.join("IMG_6.CR2"), b"raw").unwrap();
+        std::fs::write(a.join("IMG_6.xmp"), b"edits").unwrap();
+        let src = a.join("IMG_6.jpg");
+        std::fs::write(&src, b"jpeg").unwrap();
+        let id = add_photo(&conn, ra, &src, 4);
+        let photo = db::get_photo(&conn, id).unwrap().unwrap();
+        queue_move(&conn, &photo, &b, &photo.filename, rb).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        assert_eq!(apply_in(&conn).unwrap().done, 1);
+        assert!(a.join("IMG_6.xmp").exists(), "the RAW keeps its sidecar");
+        // "IMG_6.xmp" is the RAW's, so the JPEG goes without it.
+        assert!(!b.join("IMG_6.xmp").exists());
     }
 }

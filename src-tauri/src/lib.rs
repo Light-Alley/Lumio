@@ -1,11 +1,14 @@
 //! Lumio – a lightweight, open-source photo browser and digital asset manager.
 
 mod ai;
+mod collections;
 mod commands;
 mod db;
+mod duplicates;
 mod exiftool;
 mod fileops;
 mod histogram;
+mod history;
 mod indexer;
 mod logfile;
 mod metadata;
@@ -310,6 +313,8 @@ pub fn run() {
             commands::pending_moves,
             commands::cancel_pending_moves,
             commands::retry_pending_moves,
+            commands::history_list,
+            commands::history_undo,
             commands::histogram,
             commands::offline_preview_stats,
             commands::clear_offline_previews,
@@ -318,6 +323,7 @@ pub fn run() {
             commands::rename_preview,
             commands::rename_photos,
             commands::update_metadata,
+            commands::keyword_list,
             commands::rotate_photos,
             commands::save_video_thumb,
             commands::stack_photos,
@@ -354,6 +360,12 @@ pub fn run() {
             smugmug::cmd::smugmug_open,
             webexport::cmd::web_export,
             webexport::cmd::web_export_cancel,
+            collections::cmd::list_collections,
+            collections::cmd::save_collection,
+            collections::cmd::delete_collection,
+            collections::cmd::count_rules,
+            duplicates::cmd::find_duplicates,
+            duplicates::cmd::cancel_duplicates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lumio");
