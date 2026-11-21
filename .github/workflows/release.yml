@@ -1,6 +1,10 @@
 # Builds installers for macOS (Apple Silicon + Intel), Windows and Linux.
 # Run it from the Actions tab ("Run workflow") or by pushing a tag like v0.1.0.
 # The installers are attached to a draft GitHub Release.
+#
+# Code signing is switched on by repository secrets and skipped when they are
+# missing, so the workflow keeps working (unsigned) until they are added.
+# What each secret is and how to get it: docs/code-signing.md.
 name: Build installers
 
 on:
@@ -57,6 +61,67 @@ jobs:
       - name: Bundle ExifTool
         run: node scripts/fetch-exiftool.mjs
 
+      # Turns signing on only for the secrets that are actually set. Tauri treats an
+      # empty variable as "set", so they can't simply be passed through as env.
+      - name: Code signing setup
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+        run: |
+          put() { # name value -> $GITHUB_ENV (multi-line safe)
+            local d="EOF_$RANDOM$RANDOM"
+            printf '%s<<%s\n%s\n%s\n' "$1" "$d" "$2" "$d" >> "$GITHUB_ENV"
+          }
+          echo "SIGNING_ARGS=" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ]; then
+              put APPLE_CERTIFICATE "$APPLE_CERTIFICATE"
+              put APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD"
+              [ -n "$APPLE_SIGNING_IDENTITY" ] && put APPLE_SIGNING_IDENTITY "$APPLE_SIGNING_IDENTITY"
+              echo "macOS: signing with the Developer ID certificate."
+              if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+                put APPLE_ID "$APPLE_ID"
+                put APPLE_PASSWORD "$APPLE_PASSWORD"
+                put APPLE_TEAM_ID "$APPLE_TEAM_ID"
+                echo "macOS: notarising with Apple."
+              else
+                echo "::warning::macOS build is signed but NOT notarised (APPLE_ID, APPLE_PASSWORD or APPLE_TEAM_ID missing)."
+              fi
+            else
+              echo "::warning::macOS build is not signed (APPLE_CERTIFICATE secrets not set). See docs/code-signing.md."
+            fi
+          fi
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CLIENT_SECRET" ] && [ -n "$AZURE_TENANT_ID" ] \
+               && [ -n "$AZURE_SIGNING_ENDPOINT" ] && [ -n "$AZURE_SIGNING_ACCOUNT" ] && [ -n "$AZURE_SIGNING_PROFILE" ]; then
+              put AZURE_CLIENT_ID "$AZURE_CLIENT_ID"
+              put AZURE_CLIENT_SECRET "$AZURE_CLIENT_SECRET"
+              put AZURE_TENANT_ID "$AZURE_TENANT_ID"
+              cmd="trusted-signing-cli -e $AZURE_SIGNING_ENDPOINT -a $AZURE_SIGNING_ACCOUNT -c $AZURE_SIGNING_PROFILE -d Lumio %1"
+              node -e 'require("fs").writeFileSync("src-tauri/tauri.signing.json", JSON.stringify({bundle:{windows:{signCommand:process.argv[1]}}}))' "$cmd"
+              echo "SIGNING_ARGS=--config src-tauri/tauri.signing.json" >> "$GITHUB_ENV"
+              echo "WINDOWS_SIGN=1" >> "$GITHUB_ENV"
+              echo "Windows: signing with Azure Artifact Signing."
+            else
+              echo "::warning::Windows build is not signed (AZURE_* secrets not set). See docs/code-signing.md."
+            fi
+          fi
+
+      - name: Install the Azure signing tool
+        if: env.WINDOWS_SIGN == '1'
+        run: cargo install trusted-signing-cli --locked
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -66,4 +131,4 @@ jobs:
           releaseBody: See the assets below to download and install Lumio for your computer.
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ env.SIGNING_ARGS }}

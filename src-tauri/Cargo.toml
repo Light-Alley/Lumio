@@ -2,7 +2,7 @@
 name = "lumio"
 version = "0.3.8"
 description = "Lumio – a lightweight, open-source photo browser and digital asset manager"
-authors = ["Lumio contributors"]
+authors = ["Light and Alley and Lumio contributors"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.80"

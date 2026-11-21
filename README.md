@@ -6,6 +6,8 @@ Lumio is for photographers who want something simple: browse folders of photos o
 
 ![Lumio](docs/screenshot.png)
 
+**New to Lumio?** Read the [user guide](docs/user-guide.md): installing, adding your photos, shortcuts and troubleshooting, in about ten minutes.
+
 ## Why I built Lumio
 
 I wanted a simple way to organise a large photo library, and the tools I tried didn't suit me.
@@ -51,10 +53,10 @@ Videos: MP4, MOV, M4V and WebM play on every system; MKV, AVI, MTS, MPG, WMV and
 Download the installer for your system from the **Releases** page:
 
 - **macOS**: `Lumio_x.y.z_aarch64.dmg` (Apple Silicon) or `_x64.dmg` (Intel). Open the .dmg and drag Lumio to Applications.
-- **Windows 11**: `Lumio_x.y.z_x64-setup.exe` or `.msi`.
+- **Windows 10 or 11**: `Lumio_x.y.z_x64-setup.exe` or `.msi`.
 - **Linux**: `.AppImage` (any distro), `.deb` (Ubuntu/Debian) or `.rpm` (Fedora).
 
-The builds are not code-signed yet, so the first launch shows a warning:
+If a build isn't code-signed, the first launch shows a warning (release notes say whether a build is signed):
 
 - **macOS**: right-click Lumio in Applications, choose **Open**, then **Open** again. If macOS says the app "is damaged", run `xattr -cr /Applications/Lumio.app` in Terminal once.
 - **Windows**: on the SmartScreen prompt, click **More info**, then **Run anyway**.
@@ -91,7 +93,7 @@ npm run app              # run in development mode
 npm run dist             # build an installer for this computer (src-tauri/target/release/bundle/)
 ```
 
-To build installers for all three systems at once, push the repository to GitHub and run the **Build installers** workflow (`.github/workflows/release.yml`) from the Actions tab. It produces a draft release with every installer attached.
+To build installers for all three systems at once, push the repository to GitHub and run the **Build installers** workflow (`.github/workflows/release.yml`) from the Actions tab. It produces a draft release with every installer attached. It signs and notarises the macOS builds (and signs Windows builds) when the signing secrets are set; see [docs/code-signing.md](docs/code-signing.md). How releases are made, and the plan for 1.0, are in [docs/release-1.0.md](docs/release-1.0.md).
 
 ## How it's built
 
@@ -114,7 +116,10 @@ To build installers for all three systems at once, push the repository to GitHub
 Lumio is a hobby project. I have a full-time and very different day job, so I fix things in my free time and replies can be slow.
 
 - **Found a problem or have an idea?** Open an [issue](https://github.com/LIght-Alley/Lumio/issues). Feedback and suggestions are welcome.
-- **Want to work on Lumio?** Pull requests are welcome, and so are people who would like to help maintain it. Open an issue to say hello. Please keep Lumio light: no pixel editing, no heavy dependencies, and every change that touches files should be safe on external and network drives.
+- **Want to work on Lumio?** Pull requests are welcome, and so are people who would like to help maintain it. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, and open an issue to say hello. Please keep Lumio light: no pixel editing, no heavy dependencies, and every change that touches files should be safe on external and network drives.
+- **Found a security problem?** Please report it privately, as described in [SECURITY.md](SECURITY.md).
+
+Everyone taking part is asked to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Credits & licence
 
