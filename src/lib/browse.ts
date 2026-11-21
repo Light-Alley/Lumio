@@ -8,7 +8,7 @@ import { copyPhotos } from "./actions";
  * (e.g. a whole row in the grid). `reveal` scrolls the focused photo into view.
  */
 export function browseKeys(e: KeyboardEvent, step: Record<string, number>, reveal: (index: number) => void) {
-  if (app.viewerIndex >= 0 || app.dialog || app.renameIds || app.showSettings || (e.target as HTMLElement)?.closest("input, textarea, select")) return;
+  if (app.viewerIndex >= 0 || app.dialog || app.renameIds || app.collectionEdit || app.dupes || app.showSettings || (e.target as HTMLElement)?.closest("input, textarea, select")) return;
   const n = app.photos.length;
   if (!n) return;
   const meta = e.metaKey || e.ctrlKey;

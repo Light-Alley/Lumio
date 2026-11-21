@@ -23,7 +23,7 @@
 </script>
 
 <svelte:window onkeydown={(e) => {
-  if (e.metaKey || e.ctrlKey || e.altKey || app.dialog || app.renameIds || app.viewerIndex >= 0 || app.slideshow || app.showSettings || (e.target as HTMLElement)?.closest("input, textarea, select")) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || app.dialog || app.renameIds || app.collectionEdit || app.dupes || app.viewerIndex >= 0 || app.slideshow || app.showSettings || (e.target as HTMLElement)?.closest("input, textarea, select")) return;
   const v = ({ g: "grid", l: "list", f: "filmstrip", m: "map" } as const)[e.key.toLowerCase() as "g"];
   if (v) setView(v);
   if (e.key.toLowerCase() === "p" && app.photos.length) slideshowSelectionOrView();

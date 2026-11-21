@@ -2,7 +2,7 @@
 import { SvelteSet } from "svelte/reactivity";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { api, errText, type PhotoLite, type Root, type Edit, type OpReport, type Turn, type PendingMove, type PendingReport, type HistoryEntry } from "./api";
+import { api, errText, type PhotoLite, type Root, type Edit, type OpReport, type Turn, type PendingMove, type PendingReport, type HistoryEntry, type Collection, type RuleSet } from "./api";
 
 export type Scope =
   | { kind: "all" }
@@ -11,6 +11,7 @@ export type Scope =
   | { kind: "geotagged" }
   | { kind: "nogps" }
   | { kind: "folder"; path: string; name: string; rootId?: number }
+  | { kind: "collection"; id: number; name: string }
   | { kind: "ai"; ids: number[]; title: string };
 
 export type Bg = "black" | "grey" | "lightgrey" | "white";
@@ -75,6 +76,12 @@ export const app = $state({
   toasts: [] as Toast[],
   dialog: null as DialogState | null,
   showSettings: false,
+  /** Smart collections (saved rules), with how many photos each matches. */
+  collections: [] as Collection[],
+  /** The collection being edited (`id` null for a new one); `null` when the editor is closed. */
+  collectionEdit: null as { id: number | null; name: string; rules: RuleSet } | null,
+  /** The duplicate finder, and the folder it looks in (`null` = whole library); `null` when closed. */
+  dupes: null as { folder: string | null; name: string } | null,
   /** Photos in the batch rename window; `null` when it is closed. */
   renameIds: null as number[] | null,
   /** The running slideshow; `null` when none is playing. */
@@ -172,6 +179,14 @@ export async function loadRoots() {
   app.roots = await api.getRoots();
 }
 
+export async function loadCollections() {
+  try {
+    app.collections = await api.listCollections();
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
 export async function loadPending() {
   try {
     app.pending = await api.pendingMoves();
@@ -230,7 +245,7 @@ export function offerUndo(history: number | null | undefined, text: string) {
 
 /** Refresh everything a file change can affect. */
 async function afterFileChange() {
-  await Promise.all([loadRoots(), loadPhotos(), loadPending(), loadHistory()]);
+  await Promise.all([loadRoots(), loadPhotos(), loadPending(), loadHistory(), loadCollections()]);
   app.folderVersion++;
 }
 
@@ -270,6 +285,7 @@ export async function loadPhotos() {
       folder: s.kind === "folder" ? s.path : null,
       recursive: app.recursive,
       ids: s.kind === "ai" ? s.ids : null,
+      collection: s.kind === "collection" ? s.id : null,
       text: app.text,
       min_rating: app.minRating,
       label: app.label,
@@ -433,6 +449,7 @@ function scheduleRefresh() {
     await loadRoots();
     await loadPhotos();
     await loadPending();
+    await loadCollections();
     app.folderVersion++;
   }, 600);
 }
@@ -452,6 +469,7 @@ export async function init() {
     app.exiftool = status.exiftool;
     await loadRoots();
     await loadPhotos();
+    await loadCollections();
   } catch (e) {
     errorToast(e);
   }
@@ -574,16 +592,17 @@ export async function moveOrCopy(ids: number[], copy: boolean, dest?: string) {
   }
 }
 
-export async function trashPhotos(ids: number[]) {
-  if (!ids.length) return;
+/** Move photos to the Trash after asking. Returns false if the user said no. */
+export async function trashPhotos(ids: number[], message?: string): Promise<boolean> {
+  if (!ids.length) return false;
   const n = ids.length;
   const ok = await confirm(
     `Move ${n} photo${n === 1 ? "" : "s"} to the Trash?`,
-    "Their XMP sidecar files go too. You can restore them from the system Trash / Recycle Bin.",
+    message ?? "Their XMP sidecar files go too. You can restore them from the system Trash / Recycle Bin.",
     "Move to Trash",
     true,
   );
-  if (!ok) return;
+  if (!ok) return false;
   try {
     let r = await api.deletePhotos(ids, false);
     if (r.failed.length && r.failed.every(([, e]) => /Trash/i.test(e))) {
@@ -594,8 +613,9 @@ export async function trashPhotos(ids: number[]) {
         true,
       );
       if (again) {
+        // Look the photos up by id: they may not be in the current view (e.g. from the duplicate finder).
         const failedNames = new Set(r.failed.map(([f]) => f));
-        const retry = app.photos.filter((p) => ids.includes(p.id) && failedNames.has(p.filename)).map((p) => p.id);
+        const retry = (await api.getPhotos(ids)).filter((p) => failedNames.has(p.filename)).map((p) => p.id);
         const r2 = await api.deletePhotos(retry, true);
         r = { done: r.done + r2.done, failed: r2.failed, outside_library: false };
       }
@@ -606,6 +626,7 @@ export async function trashPhotos(ids: number[]) {
   } catch (e) {
     errorToast(e);
   }
+  return true;
 }
 
 export async function renamePhoto(p: PhotoLite) {
@@ -789,6 +810,19 @@ export async function slideshowFolder(path: string, name: string) {
   }
 }
 
+export async function slideshowCollection(c: Collection) {
+  try {
+    const photos = await api.queryPhotos({
+      scope: "collection", collection: c.id, text: "", min_rating: 0, label: "",
+      sort: app.sort === "relevance" ? "date" : app.sort, desc: app.desc,
+    });
+    if (!photos.length) { toast("No photos in this collection yet."); return; }
+    startSlideshow(collapseStacks(photos), c.name);
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
 export function scopeTitle(s: Scope): string {
   switch (s.kind) {
     case "all": return "All photos";
@@ -797,6 +831,7 @@ export function scopeTitle(s: Scope): string {
     case "geotagged": return "On the map";
     case "nogps": return "Without location";
     case "folder": return s.name;
+    case "collection": return s.name;
     case "ai": return s.title;
   }
 }
@@ -944,4 +979,54 @@ export async function dropOnView(e: DragEvent) {
   // Dropping photos back where they already are does nothing.
   if (ids.every((id) => app.photos.some((p) => p.id === id && p.folder === dest))) return;
   await moveOrCopy(ids, e.altKey, dest);
+}
+
+// ------------------------------------------------------------------ smart collections
+
+/** Open the editor for a new collection, optionally starting from some rules. */
+export function newCollection(name = "", rules: RuleSet = { any: false, rules: [] }) {
+  app.collectionEdit = { id: null, name, rules: $state.snapshot(rules) as RuleSet };
+}
+
+export function editCollection(c: Collection) {
+  app.collectionEdit = { id: c.id, name: c.name, rules: $state.snapshot(c.rules) as RuleSet };
+}
+
+/** Save the collection in the editor and show it. */
+export async function saveCollection(id: number | null, name: string, rules: RuleSet): Promise<boolean> {
+  try {
+    const saved = await api.saveCollection(id, name, rules);
+    app.collectionEdit = null;
+    await loadCollections();
+    const now = { kind: "collection", id: saved, name: name.trim() } as const;
+    // Tabs showing this collection pick up a new name.
+    app.tabs.forEach((t) => { if (t.scope.kind === "collection" && t.scope.id === saved) t.scope = { ...now }; });
+    if (app.scope.kind === "collection" && app.scope.id === saved) { app.scope = { ...now }; loadPhotos(); saveTabs(); }
+    else setScope(now);
+    return true;
+  } catch (e) {
+    errorToast(e);
+    return false;
+  }
+}
+
+export async function deleteCollection(c: Collection) {
+  const ok = await confirm(`Delete the collection “${c.name}”?`, "Only the saved rules are deleted. Your photos stay exactly as they are.", "Delete");
+  if (!ok) return;
+  try {
+    await api.deleteCollection(c.id);
+    await loadCollections();
+    if (app.scope.kind === "collection" && app.scope.id === c.id) setScope({ kind: "all" });
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
+export function duplicateCollection(c: Collection) {
+  newCollection(`${c.name} copy`, c.rules);
+}
+
+/** Open the duplicate finder for the whole library, or for one folder and its subfolders. */
+export function findDuplicates(folder: string | null = null, name = "") {
+  app.dupes = { folder, name };
 }
