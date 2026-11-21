@@ -273,15 +273,24 @@ pub(crate) fn sidecar_target(dst_photo: &Path, sidecar: &Path) -> PathBuf {
     }
 }
 
-/// Is a "name.xmp" sidecar also the sidecar of another photo that is staying where it is
-/// (a RAW and its JPEG share one)? Then it has to stay too, and the photo that leaves
-/// takes a copy.
+/// Is a "name.xmp" sidecar also the sidecar of another photo that is staying where it is?
+/// Then it has to stay too, and the photo that leaves takes a copy.
+///
+/// "name.xmp" belongs to a RAW file (see [`indexer::find_sidecar`]), so a JPEG staying
+/// next to a departing RAW does not need it, while another RAW (or a video that keeps a
+/// sidecar) does. A sidecar that a non-RAW file uses is shared with any other non-RAW
+/// file of the same name, since both read it.
 pub(crate) fn sidecar_shared(src: &Path, side: &Path, leaving: &HashSet<PathBuf>) -> bool {
     let side_name = side.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
     let full = src.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
     if side_name == format!("{full}.xmp") {
         return false; // "IMG_1.CR2.xmp" belongs to that one file.
     }
+    let owner = |p: &Path| {
+        let e = indexer::ext_of(p);
+        metadata::is_raw(&e) || metadata::video_needs_sidecar(&e)
+    };
+    let src_owns = owner(src);
     let stem = src.file_stem().unwrap_or_default().to_string_lossy().to_lowercase();
     let Some(dir) = src.parent() else { return false };
     let Ok(rd) = std::fs::read_dir(dir) else { return false };
@@ -290,6 +299,7 @@ pub(crate) fn sidecar_shared(src: &Path, side: &Path, leaving: &HashSet<PathBuf>
             && !leaving.contains(&p)
             && p.file_stem().map(|s| s.to_string_lossy().to_lowercase()) == Some(stem.clone())
             && metadata::is_supported(&indexer::ext_of(&p))
+            && (owner(&p) || !src_owns)
     })
 }
 
@@ -888,7 +898,22 @@ mod tests {
     }
 
     #[test]
-    fn moving_half_a_raw_jpeg_pair_leaves_the_shared_sidecar() {
+    fn moving_the_raw_of_a_raw_jpeg_pair_takes_its_sidecar() {
+        let t = Tmp::new("fo");
+        let h = host();
+        let r = h.root(&t.0);
+        let raw = h.file(r, &t.join("in/IMG_1.CR2"), None);
+        h.file(r, &t.join("in/IMG_1.JPG"), None);
+        h.file(r, &t.join("in/IMG_1.xmp"), Some("edits"));
+        std::fs::create_dir_all(t.join("out")).unwrap();
+        move_photos(&h, &[raw], &t.join("out"), false).unwrap();
+        // No copy is left behind: the JPEG would otherwise start showing the RAW's rating.
+        assert_eq!(names(&t.join("in")), ["IMG_1.JPG"]);
+        assert_eq!(names(&t.join("out")), ["IMG_1.CR2", "IMG_1.xmp"]);
+    }
+
+    #[test]
+    fn moving_the_jpeg_of_a_raw_jpeg_pair_leaves_the_raw_sidecar() {
         let t = Tmp::new("fo");
         let h = host();
         let r = h.root(&t.0);
@@ -898,9 +923,9 @@ mod tests {
         std::fs::create_dir_all(t.join("out")).unwrap();
         move_photos(&h, &[jpg], &t.join("out"), false).unwrap();
         assert_eq!(names(&t.join("in")), ["IMG_1.CR2", "IMG_1.xmp"], "the RAW keeps its sidecar");
-        assert_eq!(names(&t.join("out")), ["IMG_1.JPG", "IMG_1.xmp"], "the JPEG takes a copy");
-        // Moving the RAW after it: it joins its JPEG under the same name, and the
-        // identical sidecar copy there is all it needs.
+        // "IMG_1.xmp" is the RAW's (Lightroom's naming), so the JPEG leaves without it.
+        assert_eq!(names(&t.join("out")), ["IMG_1.JPG"]);
+        // Moving the RAW after it brings the sidecar along.
         move_photos(&h, &[raw], &t.join("out"), false).unwrap();
         assert!(names(&t.join("in")).is_empty());
         assert_eq!(names(&t.join("out")), ["IMG_1.CR2", "IMG_1.JPG", "IMG_1.xmp"]);

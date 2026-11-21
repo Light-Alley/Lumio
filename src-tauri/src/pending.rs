@@ -515,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn a_shared_sidecar_is_copied_for_a_waiting_move() {
+    fn a_raw_sidecar_stays_behind_for_a_waiting_jpeg_move() {
         let t = tempdir();
         let conn = setup(t.path());
         let a = t.path().join("a");
@@ -533,6 +533,7 @@ mod tests {
         std::fs::create_dir_all(&b).unwrap();
         assert_eq!(apply_in(&conn).unwrap().done, 1);
         assert!(a.join("IMG_6.xmp").exists(), "the RAW keeps its sidecar");
-        assert!(b.join("IMG_6.xmp").exists());
+        // "IMG_6.xmp" is the RAW's, so the JPEG goes without it.
+        assert!(!b.join("IMG_6.xmp").exists());
     }
 }
