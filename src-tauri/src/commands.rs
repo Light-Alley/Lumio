@@ -262,6 +262,22 @@ pub fn retry_pending_moves(state: S) -> R<()> {
     Ok(())
 }
 
+/// Colour histogram of a photo, counted from the preview or thumbnail Lumio keeps for it.
+#[tauri::command]
+pub async fn histogram(state: S<'_>, id: i64) -> R<crate::histogram::Histogram> {
+    let st = state.inner().clone();
+    blocking(move || {
+        let preview = crate::thumbs::offline_preview_path(&st.offline_dir, id);
+        let thumb = crate::thumbs::thumb_path(&st.thumbs_dir, id);
+        let src = if preview.exists() { preview } else { thumb };
+        if !src.exists() {
+            anyhow::bail!("No preview yet");
+        }
+        crate::histogram::from_file(&src)
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn offline_preview_stats(state: S<'_>) -> R<crate::offline::Stats> {
     let st = state.inner().clone();

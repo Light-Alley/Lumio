@@ -22,7 +22,7 @@
   }
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" style:width={`${app.sidebarWidth}px`}>
   <div class="section-title">Library</div>
   {#each smart as s}
     <button class="item" class:active={app.scope.kind === s.kind} onclick={() => setScope({ kind: s.kind } as Scope)}>
@@ -78,7 +78,7 @@
 </aside>
 
 <style>
-  .sidebar { width: 250px; flex-shrink: 0; background: var(--bg-2); border-right: 1px solid var(--line); overflow-y: auto; padding-bottom: 20px; }
+  .sidebar { flex-shrink: 0; background: var(--bg-2); border-right: 1px solid var(--line); overflow-y: auto; padding-bottom: 20px; }
   .item {
     display: flex; align-items: center; gap: 8px; width: calc(100% - 12px); margin: 0 6px; height: 28px;
     background: none; border: none; color: var(--text-2); border-radius: 6px; padding: 0 10px;

@@ -72,6 +72,7 @@ export const api = {
   pendingMoves: () => invoke<PendingMove[]>("pending_moves"),
   cancelPendingMoves: (ids: number[]) => invoke<number>("cancel_pending_moves", { ids }),
   retryPendingMoves: () => invoke<void>("retry_pending_moves"),
+  histogram: (id: number) => invoke<Histogram>("histogram", { id }),
   offlinePreviewStats: () => invoke<OfflineStats>("offline_preview_stats"),
   clearOfflinePreviews: () => invoke<void>("clear_offline_previews"),
   deletePhotos: (ids: number[], permanent: boolean) => invoke<OpReport>("delete_photos", { ids, permanent }),
@@ -114,6 +115,9 @@ const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.
 export const isLinux = typeof navigator !== "undefined" && /Linux/i.test(navigator.userAgent) && !isWindows;
 export const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 export const fileManagerName = isMac ? "Finder" : isWindows ? "File Explorer" : "file manager";
+
+/** Pixel counts for the 256 levels of each channel and of luminance. */
+export type Histogram = { r: number[]; g: number[]; b: number[]; l: number[]; shadows_clipped: number; highlights_clipped: number };
 
 function scheme(name: string) {
   return isWindows ? `http://${name}.localhost` : `${name}://localhost`;

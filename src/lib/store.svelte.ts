@@ -15,6 +15,10 @@ export type Scope =
 
 export type Bg = "black" | "grey" | "lightgrey" | "white";
 export type View = "grid" | "list" | "filmstrip" | "map";
+export type Panel = "info" | "ai" | null;
+export const SIDEBAR_DEFAULT = 250;
+export const SIDEBAR_MIN = 180;
+export const SIDEBAR_MAX = 480;
 
 /** What each tab remembers: where it's looking and how. */
 export interface Tab {
@@ -58,7 +62,9 @@ export const app = $state({
   desc: true,
   thumbSize: 180,
   view: "grid" as View,
-  panel: "info" as "info" | "ai" | null,
+  panel: "info" as Panel,
+  /** Width of the folder sidebar in pixels (dragged by its right edge, remembered). */
+  sidebarWidth: SIDEBAR_DEFAULT,
   viewerIndex: -1,
   viewerBg: "black" as Bg,
   theme: "dark" as "dark" | "light",
@@ -89,6 +95,25 @@ export const app = $state({
 });
 
 export const selection = new SvelteSet<number>();
+
+// ------------------------------------------------------------------ side panels
+
+/** Show the info or AI panel on the right, or hide it (`null`). Remembered between sessions. */
+export function setPanel(p: Panel) {
+  app.panel = p;
+  saveSetting("panel", p ?? "none");
+}
+
+/** Open the panel, or hide it if it is already showing. */
+export function togglePanel(p: "info" | "ai" = "info") {
+  setPanel(app.panel === p ? null : p);
+}
+
+/** Keeps the folder sidebar between a usable minimum and a sensible share of the window. */
+export function clampSidebar(w: number): number {
+  const max = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(window.innerWidth * 0.4)));
+  return Math.round(Math.max(SIDEBAR_MIN, Math.min(max, w)));
+}
 /** Stacks the user has opened to see every photo in them. */
 export const openStacks = new SvelteSet<number>();
 
@@ -362,6 +387,8 @@ export async function init() {
     if (st.theme) app.theme = st.theme as "dark" | "light";
     if (st.thumb_size) app.thumbSize = Number(st.thumb_size) || 180;
     if (st.recursive) app.recursive = st.recursive === "1";
+    if (st.sidebar_width) app.sidebarWidth = clampSidebar(Number(st.sidebar_width) || SIDEBAR_DEFAULT);
+    if (st.panel) app.panel = st.panel === "none" ? null : (st.panel as Panel);
     restoreTabs(st);
     const status = await api.appStatus();
     app.exiftool = status.exiftool;
