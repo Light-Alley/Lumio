@@ -28,9 +28,13 @@
   import CollectionDialog from "$lib/components/CollectionDialog.svelte";
   import DuplicatesDialog from "$lib/components/DuplicatesDialog.svelte";
   import Slideshow from "$lib/components/Slideshow.svelte";
+  import UpdateDialog from "$lib/components/UpdateDialog.svelte";
+  import ShortcutsDialog from "$lib/components/ShortcutsDialog.svelte";
   import { watchFullscreen } from "$lib/fullscreen";
+  import { startMenubar } from "$lib/menubar.svelte";
+  import { startUpdateChecks } from "$lib/updates.svelte";
 
-  onMount(() => { init(); watchFullscreen(); });
+  onMount(() => { init().then(startUpdateChecks); watchFullscreen(); startMenubar(); });
   watchVideoThumbs();
   $effect(() => { document.documentElement.dataset.theme = app.theme; });
 </script>
@@ -70,6 +74,8 @@
 <DuplicatesDialog />
 <ContextMenu />
 <Settings />
+<UpdateDialog />
+<ShortcutsDialog />
 <Dialog />
 <Toasts />
 

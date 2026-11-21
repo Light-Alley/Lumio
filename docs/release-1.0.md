@@ -66,7 +66,7 @@ Build `1.0.0-rc.1` with the workflow and test on real machines, with a **copy** 
 
 ## After 1.0
 
-Ideas to consider, in no particular order: an in-app update check or Tauri's updater (needs its own signing key), resizable right panel, face or object search with a local model, Flatpak or Homebrew cask, translations, and published docs on GitHub Pages.
+Ideas to consider, in no particular order: resizable right panel, face or object search with a local model, Flatpak or Homebrew cask, translations, and published docs on GitHub Pages.
 
 ## Making a release (any version)
 

@@ -4,7 +4,8 @@
 #
 # Code signing is switched on by repository secrets and skipped when they are
 # missing, so the workflow keeps working (unsigned) until they are added.
-# What each secret is and how to get it: docs/code-signing.md.
+# What each secret is and how to get it: docs/code-signing.md, and for in-app
+# updates docs/updates.md.
 name: Build installers
 
 on:
@@ -78,12 +79,37 @@ jobs:
           AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
           AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
           AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          LUMIO_UPDATER_PUBKEY: ${{ vars.LUMIO_UPDATER_PUBKEY }}
         run: |
           put() { # name value -> $GITHUB_ENV (multi-line safe)
             local d="EOF_$RANDOM$RANDOM"
             printf '%s<<%s\n%s\n%s\n' "$1" "$d" "$2" "$d" >> "$GITHUB_ENV"
           }
           echo "SIGNING_ARGS=" >> "$GITHUB_ENV"
+          cfgs=()
+          # In-app updates (Lumio > Check for Updates… > Install and Restart). This key is
+          # Tauri's own update-signing key, not an Apple or Windows certificate. Without it
+          # the app still tells people about new versions and links to the download page.
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$LUMIO_UPDATER_PUBKEY" ]; then
+            put TAURI_SIGNING_PRIVATE_KEY "$TAURI_SIGNING_PRIVATE_KEY"
+            [ -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ] && put TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+            node -e '
+              const repo = "https://github.com/" + process.env.GITHUB_REPOSITORY;
+              require("fs").writeFileSync("src-tauri/tauri.updater.json", JSON.stringify({
+                bundle: { createUpdaterArtifacts: true },
+                plugins: { updater: {
+                  pubkey: process.env.LUMIO_UPDATER_PUBKEY.trim(),
+                  endpoints: [repo + "/releases/latest/download/latest.json"],
+                  windows: { installMode: "passive" },
+                } },
+              }));'
+            cfgs+=("src-tauri/tauri.updater.json")
+            echo "In-app updates: on (update files are signed with the updater key)."
+          else
+            echo "::warning::In-app updates are off (TAURI_SIGNING_PRIVATE_KEY secret or LUMIO_UPDATER_PUBKEY variable not set). Lumio will still announce new versions. See docs/updates.md."
+          fi
           if [ "$RUNNER_OS" = "macOS" ]; then
             if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ]; then
               put APPLE_CERTIFICATE "$APPLE_CERTIFICATE"
@@ -110,12 +136,21 @@ jobs:
               put AZURE_TENANT_ID "$AZURE_TENANT_ID"
               cmd="trusted-signing-cli -e $AZURE_SIGNING_ENDPOINT -a $AZURE_SIGNING_ACCOUNT -c $AZURE_SIGNING_PROFILE -d Lumio %1"
               node -e 'require("fs").writeFileSync("src-tauri/tauri.signing.json", JSON.stringify({bundle:{windows:{signCommand:process.argv[1]}}}))' "$cmd"
-              echo "SIGNING_ARGS=--config src-tauri/tauri.signing.json" >> "$GITHUB_ENV"
+              cfgs+=("src-tauri/tauri.signing.json")
               echo "WINDOWS_SIGN=1" >> "$GITHUB_ENV"
               echo "Windows: signing with Azure Artifact Signing."
             else
               echo "::warning::Windows build is not signed (AZURE_* secrets not set). See docs/code-signing.md."
             fi
+          fi
+          # Merge the extra settings into one --config file.
+          if [ ${#cfgs[@]} -gt 0 ]; then
+            node -e '
+              const fs = require("fs");
+              const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && typeof v === "object" && !Array.isArray(v) ? merge(a[k] || {}, v) : v; return a; };
+              const out = process.argv.slice(1).reduce((acc, f) => merge(acc, JSON.parse(fs.readFileSync(f, "utf8"))), {});
+              fs.writeFileSync("src-tauri/tauri.ci.json", JSON.stringify(out));' "${cfgs[@]}"
+            echo "SIGNING_ARGS=--config src-tauri/tauri.ci.json" >> "$GITHUB_ENV"
           fi
 
       - name: Install the Azure signing tool
@@ -132,3 +167,6 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }} ${{ env.SIGNING_ARGS }}
+          # latest.json tells installed copies about the new version (only written when
+          # the updater key is set, see above).
+          includeUpdaterJson: true

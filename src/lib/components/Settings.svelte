@@ -2,6 +2,7 @@
   import { X, Check, AlertTriangle } from "@lucide/svelte";
   import { app, saveSetting, toast, errorToast } from "../store.svelte";
   import { api, formatBytes, type AiSettings, type AppStatus, type OfflineStats } from "../api";
+  import { autoCheckOn, checkForUpdates, updates } from "../updates.svelte";
 
   let tab = $state<"general" | "ai" | "map" | "about">("general");
   let ai = $state<AiSettings | null>(null);
@@ -12,6 +13,8 @@
 
   $effect(() => {
     if (app.showSettings) {
+      // Focus the window so Esc closes it, also when it was opened from the menu bar.
+      setTimeout(() => (document.querySelector(".settings") as HTMLElement | null)?.focus(), 0);
       api.aiSettings().then((s) => (ai = s));
       api.appStatus().then((s) => (status = s));
       loadOffline();
@@ -129,6 +132,10 @@
               <p class="bad"><AlertTriangle size={14} /> ExifTool was not found. Lumio can browse photos but can't read or write most metadata. Install it from exiftool.org (on a Mac: <code>brew install exiftool</code>) and restart Lumio.</p>
             {/if}
           {/if}
+          <h3>Updates</h3>
+          <label class="check"><input type="checkbox" checked={autoCheckOn()} onchange={(e) => saveSetting("update_check", (e.target as HTMLInputElement).checked ? "1" : "0")} />
+            <span>Tell me when a new version of Lumio is out. Lumio asks GitHub about twice a day; nothing about you or your photos is sent.</span></label>
+          <button disabled={updates.checking} onclick={() => checkForUpdates(true)}>{updates.checking ? "Checking…" : "Check Now"}</button>
         {:else if tab === "ai" && ai}
           <h3>Provider</h3>
           <label class="radio"><input type="radio" name="prov" checked={ai.provider === "anthropic"} onchange={() => setAi("ai_provider", "anthropic")} />
@@ -186,6 +193,7 @@
             <dt>Catalogue & thumbnails</dt><dd><code>{status.data_dir}</code></dd>
           </dl>
           <p class="muted">Metadata is read and written with ExifTool by Phil Harvey. Maps © OpenStreetMap contributors.</p>
+          <button disabled={updates.checking} onclick={() => checkForUpdates(true)}>{updates.checking ? "Checking…" : "Check for Updates…"}</button>
         {/if}
       </section>
     </div>
