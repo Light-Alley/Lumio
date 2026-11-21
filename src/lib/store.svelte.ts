@@ -2,7 +2,7 @@
 import { SvelteSet } from "svelte/reactivity";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { api, errText, type PhotoLite, type Root, type Edit, type OpReport, type Turn, type PendingMove, type PendingReport } from "./api";
+import { api, errText, type PhotoLite, type Root, type Edit, type OpReport, type Turn, type PendingMove, type PendingReport, type HistoryEntry } from "./api";
 
 export type Scope =
   | { kind: "all" }
@@ -91,6 +91,11 @@ export const app = $state({
   /** Moves waiting for a drive to be connected. */
   pending: [] as PendingMove[],
   showPending: false,
+  /** The undo history, newest first. */
+  history: [] as HistoryEntry[],
+  showHistory: false,
+  /** An undo is running. */
+  undoing: false,
   activeTab: 0,
 });
 
@@ -174,6 +179,59 @@ export async function loadPending() {
     app.pending = [];
   }
   if (!app.pending.length) app.showPending = false;
+}
+
+export async function loadHistory() {
+  try {
+    app.history = await api.historyList();
+  } catch {
+    app.history = [];
+  }
+}
+
+/** The newest change that can still be undone. */
+export function latestUndoable(): HistoryEntry | undefined {
+  return app.history.find((h) => h.undoable && !h.undone);
+}
+
+/** Undo a change and everything after it, or just the latest change without an id. */
+export async function undo(id?: number) {
+  if (app.undoing) return;
+  if (id === undefined && !latestUndoable()) {
+    await loadHistory();
+    if (!latestUndoable()) return toast("There is nothing to undo.", "info");
+  }
+  app.undoing = true;
+  try {
+    const r = await api.historyUndo(id);
+    const what = r.steps > 1 ? `${r.steps} changes` : `“${r.label ?? "the last change"}”`;
+    if (r.failed.length) {
+      const first = r.failed.slice(0, 3).map(([f, e]) => `${f}: ${e}`).join("\n");
+      toast(`Undid ${what}, but ${r.failed.length} item${r.failed.length === 1 ? "" : "s"} could not be put back.\n${first}`, "error", {
+        label: "Show history",
+        run: () => (app.showHistory = true),
+      });
+    } else {
+      toast(`Undid ${what}.`, "success");
+    }
+  } catch (e) {
+    errorToast(e);
+  } finally {
+    app.undoing = false;
+    await afterFileChange();
+  }
+}
+
+/** Show a toast with an Undo button for a change that just happened. */
+export function offerUndo(history: number | null | undefined, text: string) {
+  if (!history) return toast(text, "success");
+  toast(text, "success", { label: "Undo", run: () => undo(history) }, 10000);
+}
+
+/** Refresh everything a file change can affect. */
+async function afterFileChange() {
+  await Promise.all([loadRoots(), loadPhotos(), loadPending(), loadHistory()]);
+  app.folderVersion++;
 }
 
 export async function cancelPending(ids: number[]) {
@@ -400,6 +458,7 @@ export async function init() {
   await listen("library-changed", scheduleRefresh);
   await listen<PendingReport>("pending-moves", (e) => pendingApplied(e.payload));
   loadPending();
+  loadHistory();
   await listen<typeof app.progress>("index-progress", (e) => (app.progress = e.payload));
   await listen<typeof app.op>("op-progress", (e) => (app.op = e.payload));
   // When the window regains focus, pick up drives that were (dis)connected and, at most
@@ -493,7 +552,8 @@ export async function moveOrCopy(ids: number[], copy: boolean, dest?: string) {
   if (!d) return;
   try {
     const r = await api.movePhotos(withStacks(ids), d, copy);
-    reportResult(r, copy ? "copied" : "moved");
+    if (r.failed.length || !r.done) reportResult(r, copy ? "copied" : "moved");
+    else offerUndo(r.history, `${r.done} photo${r.done === 1 ? "" : "s"} ${copy ? "copied" : "moved"}.`);
     if (r.queued) {
       toast(
         `${r.queued} photo${r.queued === 1 ? "" : "s"} moved in your library. The file${r.queued === 1 ? "" : "s"} will follow when the drive is connected.`,
@@ -508,8 +568,7 @@ export async function moveOrCopy(ids: number[], copy: boolean, dest?: string) {
         run: () => addFolderToLibrary(d),
       });
     }
-    await loadPhotos();
-    app.folderVersion++;
+    await afterFileChange();
   } catch (e) {
     errorToast(e);
   }
@@ -543,8 +602,7 @@ export async function trashPhotos(ids: number[]) {
     }
     reportResult(r, "deleted");
     selection.clear();
-    await loadPhotos();
-    app.folderVersion++;
+    await afterFileChange();
   } catch (e) {
     errorToast(e);
   }
@@ -556,7 +614,8 @@ export async function renamePhoto(p: PhotoLite) {
   try {
     const r = await api.renamePhoto(p.id, name);
     await loadPhotos();
-    if (r.done) offerUndoRename(r.undo, `Renamed to “${app.photos.find((x) => x.id === p.id)?.filename ?? name}”.`);
+    loadHistory();
+    if (r.done) offerUndo(r.history, `Renamed to “${app.photos.find((x) => x.id === p.id)?.filename ?? name}”.`);
   } catch (e) {
     errorToast(e);
   }
@@ -573,30 +632,13 @@ export function renameSelected(ids = selectedIds()) {
   } else app.renameIds = [...ids];
 }
 
-/** Show a toast with an Undo button that puts the old names back. */
-export function offerUndoRename(undo: [number, string][], text: string) {
-  if (!undo.length) return;
-  toast(text, "success", {
-    label: "Undo",
-    run: async () => {
-      try {
-        const r = await api.renamePhotos(undo);
-        await loadPhotos();
-        if (r.failed.length) toast(`${r.done} name${r.done === 1 ? "" : "s"} put back, ${r.failed.length} could not be.\n${r.failed[0][0]}: ${r.failed[0][1]}`, "error");
-        else toast(r.done === 1 ? "Old name put back." : `${r.done} old names put back.`, "success");
-      } catch (e) {
-        errorToast(e);
-      }
-    },
-  }, 10000);
-}
-
 export async function newFolder(parent: string) {
   const name = await prompt("New folder", "", "Create", `Inside ${parent}`);
   if (!name) return;
   try {
     await api.createFolder(parent, name);
     app.folderVersion++;
+    loadHistory();
   } catch (e) {
     errorToast(e);
   }
@@ -608,9 +650,9 @@ export async function renameFolder(path: string, current: string) {
   try {
     const np = await api.renameFolder(path, name);
     if (app.scope.kind === "folder" && app.scope.path === path) app.scope = { ...app.scope, path: np, name };
-    await loadRoots();
-    await loadPhotos();
-    app.folderVersion++;
+    await afterFileChange();
+    const h = latestUndoable();
+    offerUndo(h?.kind === "folder_rename" ? h.id : null, `Folder renamed to “${name}”.`);
   } catch (e) {
     errorToast(e);
   }
@@ -643,6 +685,7 @@ export async function trashFolder(path: string, name: string) {
   if (app.scope.kind === "folder" && app.scope.path.startsWith(path)) setScope({ kind: "all" });
   toast(`“${name}” moved to the Trash.`, "success");
   app.folderVersion++;
+  loadHistory();
 }
 
 export async function dropOnFolder(dest: string, e: DragEvent) {
@@ -656,10 +699,9 @@ export async function dropOnFolder(dest: string, e: DragEvent) {
     if (folderData === dest || dest.startsWith(folderData)) return;
     try {
       const r = await api.moveFolder(folderData, dest, copy);
-      toast(`Folder ${copy ? "copied" : "moved"}.`, "success");
+      if (r.done) offerUndo(r.history, `Folder ${copy ? "copied" : "moved"}.`);
       if (r.outside_library) toast("The destination isn't in your library.", "info");
-      await loadPhotos();
-      app.folderVersion++;
+      await afterFileChange();
     } catch (err) {
       errorToast(err);
     }

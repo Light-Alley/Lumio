@@ -28,8 +28,12 @@ export interface RenameOptions {
 }
 export interface PlannedName { id: number; old: string; new: string; problem: string | null }
 /** `undo` holds [id, previous name] for every photo that was renamed. */
-export interface RenameReport { done: number; failed: [string, string][]; undo: [number, string][] }
-export interface OpReport { done: number; failed: [string, string][]; outside_library: boolean; queued?: number }
+export interface RenameReport { done: number; failed: [string, string][]; undo: [number, string][]; history?: number | null }
+/** `history` is the undo history entry for the change, when something changed. */
+export interface OpReport { done: number; failed: [string, string][]; outside_library: boolean; queued?: number; history?: number | null }
+/** One change in the undo history. `at` is in milliseconds. */
+export interface HistoryEntry { id: number; at: number; label: string; kind: string; undoable: boolean; undone: boolean; note: string | null }
+export interface UndoReport { steps: number; done: number; failed: [string, string][]; label: string | null }
 /** A move waiting for a drive to be connected. */
 export interface PendingMove { photo_id: number; filename: string; from: string; to: string; error: string | null }
 export interface PendingReport { done: number; failed: [string, string][]; waiting: number }
@@ -72,6 +76,9 @@ export const api = {
   pendingMoves: () => invoke<PendingMove[]>("pending_moves"),
   cancelPendingMoves: (ids: number[]) => invoke<number>("cancel_pending_moves", { ids }),
   retryPendingMoves: () => invoke<void>("retry_pending_moves"),
+  historyList: () => invoke<HistoryEntry[]>("history_list"),
+  /** Undo a change and everything after it; without an id, the latest change. */
+  historyUndo: (id?: number) => invoke<UndoReport>("history_undo", { id: id ?? null }),
   histogram: (id: number) => invoke<Histogram>("histogram", { id }),
   offlinePreviewStats: () => invoke<OfflineStats>("offline_preview_stats"),
   clearOfflinePreviews: () => invoke<void>("clear_offline_previews"),

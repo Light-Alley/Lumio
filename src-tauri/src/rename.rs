@@ -6,9 +6,8 @@
 //! batch (A -> B while B -> A) are handled by parking files under a hidden temporary name first.
 
 use crate::db::{self, Photo};
-use crate::fileops::{check_name, sidecar_target};
+use crate::fileops::{check_name, same_place, sidecar_shared, sidecar_target};
 use crate::indexer::{self, find_sidecar};
-use crate::metadata;
 use crate::state::AppState;
 use anyhow::{anyhow, bail, Context, Result};
 use parking_lot::Mutex;
@@ -67,6 +66,11 @@ pub struct RenameReport {
     pub failed: Vec<(String, String)>,
     /// (id, previous name) for everything renamed, so the app can offer Undo.
     pub undo: Vec<(i64, String)>,
+    /// The undo history entry for this rename, if anything changed.
+    pub history: Option<i64>,
+    /// (id, previous name, new name) for the undo history.
+    #[serde(skip)]
+    pub renamed: Vec<(i64, String, String)>,
 }
 
 /// Split "IMG_0001.CR2" into ("IMG_0001", ".CR2"); a name without a dot has no extension.
@@ -197,6 +201,11 @@ pub fn plan(photos: &[Photo], o: &BatchOptions) -> Result<Vec<PlannedName>> {
     // Problems we can see before touching anything.
     let by_id: HashMap<i64, &Photo> = photos.iter().map(|p| (p.id, p)).collect();
     let leaving: HashSet<String> = photos.iter().map(|p| p.path.to_lowercase()).collect();
+    let batch_sides: HashSet<String> = photos
+        .iter()
+        .filter_map(|p| find_sidecar(Path::new(&p.path)))
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .collect();
     let mut seen: HashMap<String, usize> = HashMap::new();
     for i in 0..out.len() {
         let p = by_id[&out[i].id];
@@ -214,6 +223,15 @@ pub fn plan(photos: &[Photo], o: &BatchOptions) -> Result<Vec<PlannedName>> {
         seen.insert(key.clone(), i);
         if new != p.filename && !leaving.contains(&key) && dst.exists() {
             out[i].problem = Some("A file with this name is already in the folder".into());
+            continue;
+        }
+        if new != p.filename {
+            if let Some(side) = find_sidecar(Path::new(&p.path)) {
+                let t = sidecar_target(&dst, &side);
+                if t.exists() && !same_place(&t, &side) && !batch_sides.contains(&t.to_string_lossy().to_lowercase()) {
+                    out[i].problem = Some(format!("Its sidecar would be named \"{}\", which is already in the folder", t.file_name().unwrap_or_default().to_string_lossy()));
+                }
+            }
         }
     }
     Ok(out)
@@ -267,34 +285,12 @@ struct Item {
     parked_side: Option<PathBuf>,
 }
 
-/// Is a "name.xmp" sidecar also the sidecar of a file that is staying put?
-fn sidecar_shared(src: &Path, side: &Path, moving: &HashSet<PathBuf>) -> bool {
-    let side_name = side.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-    let full = src.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-    if side_name == format!("{full}.xmp") {
-        return false; // "IMG_1.CR2.xmp" belongs to that one file.
-    }
-    let stem = src.file_stem().unwrap_or_default().to_string_lossy().to_lowercase();
-    let Some(dir) = src.parent() else { return false };
-    let Ok(rd) = std::fs::read_dir(dir) else { return false };
-    rd.flatten().map(|e| e.path()).any(|p| {
-        p != src
-            && !moving.contains(&p)
-            && p.file_stem().map(|s| s.to_string_lossy().to_lowercase()) == Some(stem.clone())
-            && metadata::is_supported(&indexer::ext_of(&p))
-    })
-}
-
-fn same_place(a: &Path, b: &Path) -> bool {
-    a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
-}
-
 /// Rename each photo in `items` (id, new file name) in its own folder.
 pub fn rename_many(state: &AppState, items: &[(i64, String)]) -> Result<RenameReport> {
     rename_in(&state.conn, items)
 }
 
-fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Result<RenameReport> {
+pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Result<RenameReport> {
     let mut rep = RenameReport::default();
     let photos = { db::get_photos(&conn.lock(), &items.iter().map(|(id, _)| *id).collect::<Vec<_>>())? };
     let by_id: HashMap<i64, Photo> = photos.into_iter().map(|p| (p.id, p)).collect();
@@ -342,6 +338,25 @@ fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Result<Rename
             (s, shared)
         });
     }
+    // The sidecar's new name must be free too: renaming "IMG_2.JPG" to "Fox.JPG" must not
+    // write over the "Fox.xmp" of a "Fox.CR2" that is staying as it is.
+    let moving_sides: HashSet<String> = work
+        .iter()
+        .filter_map(|w| w.side.as_ref().filter(|(_, shared)| !shared).map(|(s, _)| s.to_string_lossy().to_lowercase()))
+        .collect();
+    work.retain(|w| {
+        let Some((s, _)) = &w.side else { return true };
+        let t = sidecar_target(&w.dst, s);
+        if t.exists() && !same_place(&t, s) && !moving_sides.contains(&t.to_string_lossy().to_lowercase()) {
+            rep.failed.push((
+                w.photo.filename.clone(),
+                format!("its sidecar would be named \"{}\", and a file with that name is already in the folder", t.file_name().unwrap_or_default().to_string_lossy()),
+            ));
+            false
+        } else {
+            true
+        }
+    });
 
     // 2. Move aside, under a hidden temporary name, every file whose current name another
     //    photo in the batch is about to take (including a file that only changes case,
@@ -373,9 +388,28 @@ fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Result<Rename
     let mut renamed: Vec<(i64, PathBuf, String)> = vec![];
     for w in work.iter().filter(|w| !w.dst.as_os_str().is_empty()) {
         let from = w.parked.clone().unwrap_or_else(|| w.src.clone());
+        // Where the sidecar goes, if anywhere: (from, to, copy because it is shared).
+        let side_move = w.side.as_ref().and_then(|(s, shared)| {
+            let target = sidecar_target(&w.dst, s);
+            let from_side = w.parked_side.clone().unwrap_or_else(|| s.clone());
+            // A shared sidecar whose name only changes case is already "there" on drives
+            // that ignore case; copying it onto itself would destroy it.
+            if *shared && same_place(&target, s) && target.exists() {
+                None
+            } else if !from_side.exists() {
+                None // its pair partner in this batch took it already
+            } else {
+                Some((from_side, target, *shared))
+            }
+        });
         let res: Result<()> = (|| {
             if w.dst.exists() {
                 bail!("a file named \"{}\" is already in the folder", w.name);
+            }
+            if let Some((from_side, target, _)) = &side_move {
+                if target.exists() && !same_place(target, from_side) {
+                    bail!("a file named \"{}\" is already in the folder", target.file_name().unwrap_or_default().to_string_lossy());
+                }
             }
             std::fs::rename(&from, &w.dst).with_context(|| format!("could not rename {}", w.photo.filename))?;
             Ok(())
@@ -393,17 +427,16 @@ fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Result<Rename
             rep.failed.push((w.photo.filename.clone(), format!("{e:#}")));
             continue;
         }
-        if let Some((s, shared)) = &w.side {
-            let target = sidecar_target(&w.dst, s);
-            let from_side = w.parked_side.clone().unwrap_or_else(|| s.clone());
-            let r = if *shared { std::fs::copy(s, &target).map(|_| ()) } else { std::fs::rename(&from_side, &target) };
+        if let Some((from_side, target, shared)) = &side_move {
+            let r = if *shared { crate::fileops::copy_verified(from_side, target) } else { std::fs::rename(from_side, target).map_err(Into::into) };
             if let Err(e) = r {
-                log::warn!("renamed {} but not its sidecar: {e}", w.dst.display());
+                log::warn!("renamed {} but not its sidecar: {e:#}", w.dst.display());
             }
         }
         renamed.push((w.photo.id, w.dst.clone(), w.name.clone()));
         rep.done += 1;
         rep.undo.push((w.photo.id, w.photo.filename.clone()));
+        rep.renamed.push((w.photo.id, w.photo.filename.clone(), w.name.clone()));
         if let Some(par) = w.dst.parent() {
             if !touched.iter().any(|t| t == par) {
                 touched.push(par.to_path_buf());
@@ -631,5 +664,69 @@ mod tests {
         assert_eq!(names(&dir2), ["Fox.CR2", "Fox.JPG", "Fox.xmp"]);
         std::fs::remove_dir_all(&dir).ok();
         std::fs::remove_dir_all(&dir2).ok();
+    }
+
+    #[test]
+    fn never_overwrites_another_photos_sidecar() {
+        // Fox.CR2 has Fox.xmp. Renaming IMG_2.JPG (with IMG_2.xmp) to Fox.JPG would make
+        // its sidecar Fox.xmp, so it is refused and nothing changes.
+        let (dir, conn, ids) = setup(&["Fox.CR2", "Fox.xmp", "IMG_2.JPG", "IMG_2.xmp"]);
+        let r = rename_in(&conn, &[(ids[1], "Fox.JPG".into())]).unwrap();
+        assert_eq!((r.done, r.failed.len()), (0, 1));
+        assert_eq!(content(&dir, "Fox.xmp"), "Fox.xmp");
+        assert_eq!(names(&dir), ["Fox.CR2", "Fox.xmp", "IMG_2.JPG", "IMG_2.xmp"]);
+        // The preview says so too.
+        let photos = db::get_photos(&conn.lock(), &[ids[1]]).unwrap();
+        let o = BatchOptions { pattern: "Fox".into(), ..Default::default() };
+        assert!(plan(&photos, &o).unwrap()[0].problem.as_deref().unwrap().contains("sidecar"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn swapping_names_with_sidecars() {
+        let (dir, conn, ids) = setup(&["a.jpg", "a.xmp", "b.jpg", "b.xmp"]);
+        let r = rename_in(&conn, &[(ids[0], "b.jpg".into()), (ids[1], "a.jpg".into())]).unwrap();
+        assert_eq!(r.done, 2, "{:?}", r.failed);
+        assert_eq!(content(&dir, "b.jpg"), "a.jpg");
+        assert_eq!(content(&dir, "b.xmp"), "a.xmp");
+        assert_eq!(content(&dir, "a.xmp"), "b.xmp");
+        assert_eq!(names(&dir), ["a.jpg", "a.xmp", "b.jpg", "b.xmp"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn case_change_of_one_of_a_pair_keeps_the_shared_sidecar() {
+        let (dir, conn, ids) = setup(&["IMG_1.CR2", "IMG_1.JPG", "IMG_1.xmp"]);
+        let r = rename_in(&conn, &[(ids[1], "img_1.JPG".into())]).unwrap();
+        assert_eq!(r.done, 1, "{:?}", r.failed);
+        assert_eq!(content(&dir, "IMG_1.xmp"), "IMG_1.xmp", "the shared sidecar is intact");
+        assert!(dir.join("img_1.JPG").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_batch_where_some_fail_still_renames_the_rest_and_undo_restores_them() {
+        let (dir, conn, ids) = setup(&["1.jpg", "2.jpg", "3.jpg", "taken.jpg"]);
+        std::fs::remove_file(dir.join("2.jpg")).unwrap(); // drive hiccup: one file is missing
+        let r = rename_in(&conn, &[(ids[0], "A.jpg".into()), (ids[1], "B.jpg".into()), (ids[2], "taken.jpg".into())]).unwrap();
+        assert_eq!((r.done, r.failed.len()), (1, 2));
+        assert_eq!(names(&dir), ["3.jpg", "A.jpg", "taken.jpg"]);
+        assert_eq!(content(&dir, "taken.jpg"), "taken.jpg");
+        assert_eq!(catalogue(&conn, ids[1]).1, "2.jpg", "the failed ones keep their names in the catalogue");
+        let u = rename_in(&conn, &r.undo).unwrap();
+        assert_eq!(u.done, 1);
+        assert_eq!(names(&dir), ["1.jpg", "3.jpg", "taken.jpg"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn bad_names_change_nothing() {
+        let (dir, conn, ids) = setup(&["a.jpg"]);
+        for bad in ["", "x/y.jpg", "..", ".hidden.jpg", "trailing.jpg.", "a:b.jpg"] {
+            let r = rename_in(&conn, &[(ids[0], bad.into())]).unwrap();
+            assert_eq!(r.done, 0, "{bad:?} should be refused");
+        }
+        assert_eq!(names(&dir), ["a.jpg"]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

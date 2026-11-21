@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Search, LayoutGrid, List, GalleryHorizontal, Map as MapIcon, Info, Sparkles, Settings, ArrowDownWideNarrow, ArrowUpNarrowWide, FolderTree, X, Share2, Presentation } from "@lucide/svelte";
+  import { Search, LayoutGrid, List, GalleryHorizontal, Map as MapIcon, Info, Sparkles, Settings, ArrowDownWideNarrow, ArrowUpNarrowWide, FolderTree, X, Share2, Presentation, History } from "@lucide/svelte";
   import Stars from "./Stars.svelte";
   import IdentityPlate from "./IdentityPlate.svelte";
   import { app, loadPhotos, saveSetting, setView, scopeTitle, selection, selectedIds, slideshowSelectionOrView, togglePanel } from "../store.svelte";
@@ -81,6 +81,7 @@
     </div>
     <button class="ghost icon" disabled={app.photos.length === 0} onclick={slideshowSelectionOrView} title={selection.size > 1 ? `Slideshow of the ${selection.size} selected photos (P)` : "Slideshow of the photos in view (P)"} aria-label="Slideshow"><Presentation size={16} /></button>
     <button class="ghost icon" disabled={selection.size === 0} onclick={openShare} title={selection.size ? "Share the selected photos" : "Select photos to share"}><Share2 size={16} /></button>
+    <button class="ghost icon" onclick={() => (app.showHistory = true)} title="Edit history: undo moves, copies and renames (⌘Z / Ctrl+Z undoes the latest)" aria-label="Edit history"><History size={16} /></button>
     <button class="ghost icon" onclick={() => (app.showSettings = true)} title="Settings"><Settings size={16} /></button>
   </div>
 </header>

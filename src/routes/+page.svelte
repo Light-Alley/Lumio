@@ -22,6 +22,7 @@
   import { watchVideoThumbs } from "$lib/videoThumbs.svelte";
   import SmugMugDialog from "$lib/components/SmugMugDialog.svelte";
   import PendingMoves from "$lib/components/PendingMoves.svelte";
+  import HistoryPanel from "$lib/components/HistoryPanel.svelte";
   import ExportDialog from "$lib/components/ExportDialog.svelte";
   import RenameDialog from "$lib/components/RenameDialog.svelte";
   import Slideshow from "$lib/components/Slideshow.svelte";
@@ -60,6 +61,7 @@
 {#if app.slideshow}<Slideshow />{/if}
 <SmugMugDialog />
 <PendingMoves />
+<HistoryPanel />
 <ExportDialog />
 <RenameDialog />
 <ContextMenu />

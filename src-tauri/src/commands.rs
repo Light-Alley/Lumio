@@ -6,7 +6,7 @@ use crate::indexer::{self, Job};
 use crate::metadata::{self, Edit};
 use crate::openwith::{self, AppInfo};
 use crate::state::AppState;
-use crate::{ai, rename, share, watcher};
+use crate::{ai, history, rename, share, watcher};
 use rusqlite::params;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -195,6 +195,8 @@ pub async fn create_folder(state: S<'_>, parent: String, name: String) -> R<Stri
     blocking(move || {
         let p = fileops::create_folder(Path::new(&parent), &name)?;
         st.queue(Job::ScanFolder(p.clone()));
+        let label = format!("Created folder {}", name.trim());
+        history::record(&st.conn.lock(), &label, &history::Change::FolderCreate { path: p.clone() })?;
         Ok(p.to_string_lossy().to_string())
     })
     .await
@@ -203,7 +205,16 @@ pub async fn create_folder(state: S<'_>, parent: String, name: String) -> R<Stri
 #[tauri::command]
 pub async fn rename_folder(state: S<'_>, path: String, name: String) -> R<String> {
     let st = state.inner().clone();
-    let r = blocking(move || Ok(fileops::rename_folder(&st, Path::new(&path), &name)?.to_string_lossy().to_string())).await;
+    let r = blocking(move || {
+        let from = PathBuf::from(&path);
+        let to = fileops::rename_folder(&*st, &from, &name)?;
+        if to != from {
+            let label = format!("Renamed folder {} to {}", from.file_name().unwrap_or_default().to_string_lossy(), name.trim());
+            history::record(&st.conn.lock(), &label, &history::Change::FolderRename { from, to: to.clone() })?;
+        }
+        Ok(to.to_string_lossy().to_string())
+    })
+    .await;
     watcher::restart(&state);
     r
 }
@@ -211,13 +222,35 @@ pub async fn rename_folder(state: S<'_>, path: String, name: String) -> R<String
 #[tauri::command]
 pub async fn delete_folder(state: S<'_>, path: String, permanent: bool) -> R<()> {
     let st = state.inner().clone();
-    blocking(move || fileops::delete_folder(&st, Path::new(&path), permanent)).await
+    blocking(move || {
+        fileops::delete_folder(&*st, Path::new(&path), permanent)?;
+        let name = Path::new(&path).file_name().unwrap_or_default().to_string_lossy().to_string();
+        let label = if permanent { format!("Deleted folder {name} permanently") } else { format!("Moved folder {name} to the Trash") };
+        history::record(&st.conn.lock(), &label, &history::Change::Trash { count: 1, permanent })?;
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn move_folder(state: S<'_>, src: String, dest: String, copy: bool) -> R<OpReport> {
     let st = state.inner().clone();
-    blocking(move || fileops::move_folder(&st, Path::new(&src), Path::new(&dest), copy)).await
+    blocking(move || {
+        let from = PathBuf::from(&src);
+        let mut rep = fileops::move_folder(&*st, &from, Path::new(&dest), copy)?;
+        if let Some(to) = rep.folder.clone() {
+            let name = from.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let into = Path::new(&dest).file_name().unwrap_or_default().to_string_lossy().to_string();
+            let (label, change) = if copy {
+                (format!("Copied folder {name} into {into}"), history::Change::FolderCopy { to })
+            } else {
+                (format!("Moved folder {name} into {into}"), history::Change::FolderMove { from, to })
+            };
+            rep.history = Some(history::record(&st.conn.lock(), &label, &change)?);
+        }
+        Ok(rep)
+    })
+    .await
 }
 
 // ------------------------------------------------------------ photos
@@ -240,7 +273,28 @@ pub fn get_photos(state: S, ids: Vec<i64>) -> R<Vec<Photo>> {
 #[tauri::command]
 pub async fn move_photos(state: S<'_>, ids: Vec<i64>, dest: String, copy: bool) -> R<OpReport> {
     let st = state.inner().clone();
-    blocking(move || fileops::move_photos(&st, &ids, Path::new(&dest), copy)).await
+    blocking(move || {
+        let mut rep = fileops::move_photos(&*st, &ids, Path::new(&dest), copy)?;
+        history::record_move(&st.conn.lock(), &mut rep, copy, Path::new(&dest))?;
+        Ok(rep)
+    })
+    .await
+}
+
+/// The undo history, newest first.
+#[tauri::command]
+pub fn history_list(state: S) -> R<Vec<history::Entry>> {
+    history::list(&state.conn.lock(), 300).map_err(e)
+}
+
+/// Undo a change and everything after it (or just the latest change, without an id).
+#[tauri::command]
+pub async fn history_undo(state: S<'_>, id: Option<i64>) -> R<history::UndoReport> {
+    let st = state.inner().clone();
+    let r = blocking(move || history::undo(&*st, id)).await;
+    // Folders may have been renamed or moved back.
+    watcher::restart(&state);
+    r
 }
 
 /// Moves waiting for a drive to be connected.
@@ -298,13 +352,23 @@ pub async fn clear_offline_previews(state: S<'_>) -> R<()> {
 #[tauri::command]
 pub async fn delete_photos(state: S<'_>, ids: Vec<i64>, permanent: bool) -> R<OpReport> {
     let st = state.inner().clone();
-    blocking(move || fileops::delete_photos(&st, &ids, permanent)).await
+    blocking(move || {
+        let mut rep = fileops::delete_photos(&*st, &ids, permanent)?;
+        history::record_trash(&st.conn.lock(), &mut rep, permanent)?;
+        Ok(rep)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn rename_photo(state: S<'_>, id: i64, name: String) -> R<rename::RenameReport> {
     let st = state.inner().clone();
-    blocking(move || rename::rename_one(&st, id, &name)).await
+    blocking(move || {
+        let mut rep = rename::rename_one(&st, id, &name)?;
+        history::record_rename(&st.conn.lock(), &mut rep)?;
+        Ok(rep)
+    })
+    .await
 }
 
 /// Show what a batch rename would do, without changing anything.
@@ -325,7 +389,12 @@ pub async fn rename_preview(state: S<'_>, ids: Vec<i64>, opts: rename::BatchOpti
 #[tauri::command]
 pub async fn rename_photos(state: S<'_>, items: Vec<(i64, String)>) -> R<rename::RenameReport> {
     let st = state.inner().clone();
-    blocking(move || rename::rename_many(&st, &items)).await
+    blocking(move || {
+        let mut rep = rename::rename_many(&st, &items)?;
+        history::record_rename(&st.conn.lock(), &mut rep)?;
+        Ok(rep)
+    })
+    .await
 }
 
 /// Every keyword in the library with how many photos have it, most used first
