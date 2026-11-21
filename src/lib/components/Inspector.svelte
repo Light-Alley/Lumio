@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { MapPin, X, Save, Undo2, CloudOff, Map as MapIcon, AlertTriangle } from "@lucide/svelte";
+  import { MapPin, X, Save, Undo2, CloudOff, Map as MapIcon, AlertTriangle, Image as ImageIcon, ChartArea } from "@lucide/svelte";
   import Stars from "./Stars.svelte";
-  import { app, selection, rate, setLabel, applyEdit, rootOnline } from "../store.svelte";
+  import Histogram from "./Histogram.svelte";
+  import { app, selection, rate, setLabel, applyEdit, rootOnline, saveSetting } from "../store.svelte";
   import { api, thumbUrl, formatDate, formatBytes, formatExposure, LABELS, type Photo, type Edit } from "../api";
 
   let photos = $state<Photo[]>([]);
@@ -13,6 +14,8 @@
   let gpsText = $state("");
 
   const ids = $derived([...selection]);
+  /** What the top of the panel shows for one photo: the picture or its histogram (remembered). */
+  const showHist = $derived(app.settings.inspector_preview === "histogram");
   const one = $derived(photos.length === 1 ? photos[0] : null);
   const anyOffline = $derived(photos.some((p) => !rootOnline(p.root_id)));
 
@@ -108,7 +111,15 @@
   {:else}
     <div class="head">
       {#if one}
-        <div class="preview">{#if one.thumb}<img src={thumbUrl(one)} alt="" />{/if}</div>
+        <div class="mode" role="group" aria-label="Show photo or histogram">
+          <button class:on={!showHist} onclick={() => saveSetting("inspector_preview", "photo")} title="Show the photo"><ImageIcon size={13} /> Photo</button>
+          <button class:on={showHist} onclick={() => saveSetting("inspector_preview", "histogram")} title="Show the histogram"><ChartArea size={13} /> Histogram</button>
+        </div>
+        <div class="preview">
+          {#if showHist}
+            <Histogram id={one.id} version={`${one.mtime}-${one.thumb}`} />
+          {:else if one.thumb}<img src={thumbUrl(one)} alt="" />{/if}
+        </div>
         <div class="fname" title={one.path}>{one.filename}</div>
         <div class="faint small ell" title={one.folder}>{one.folder}</div>
       {:else}
@@ -214,6 +225,10 @@
   .tips { display: grid; gap: 8px; color: var(--text-2); margin-top: 16px; line-height: 1.5; }
   .head { padding: 14px 16px 10px; text-align: center; border-bottom: 1px solid var(--line); }
   .preview { height: 170px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
+  .mode { display: inline-flex; margin-bottom: 8px; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; }
+  .mode button { border: none; border-radius: 0; background: transparent; padding: 3px 9px; font-size: 11.5px; gap: 4px; color: var(--text-2); }
+  .mode button + button { border-left: 1px solid var(--line-2); }
+  .mode button.on { background: var(--accent-soft); color: var(--text); }
   .preview img { max-width: 100%; max-height: 100%; border-radius: 4px; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
   .stack { height: 130px; position: relative; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
   .stack img { position: absolute; max-width: 120px; max-height: 110px; border: 3px solid var(--bg-2); border-radius: 3px; box-shadow: 0 2px 8px rgba(0,0,0,.35); }

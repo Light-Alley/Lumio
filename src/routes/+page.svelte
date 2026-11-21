@@ -16,7 +16,9 @@
   import Toasts from "$lib/components/Toasts.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
   import Settings from "$lib/components/Settings.svelte";
-  import { app, init } from "$lib/store.svelte";
+  import SidebarResizer from "$lib/components/SidebarResizer.svelte";
+  import { ChevronLeft, ChevronRight } from "@lucide/svelte";
+  import { app, init, setPanel } from "$lib/store.svelte";
   import { watchVideoThumbs } from "$lib/videoThumbs.svelte";
   import SmugMugDialog from "$lib/components/SmugMugDialog.svelte";
   import PendingMoves from "$lib/components/PendingMoves.svelte";
@@ -34,6 +36,7 @@
   <Toolbar />
   <div class="body">
     <Sidebar />
+    <SidebarResizer />
     <div class="center">
       <TabBar />
       <main>
@@ -42,9 +45,12 @@
     </div>
     {#if app.panel}
       <aside class="panel">
-        <div class:hidden={app.panel !== "info"}><Inspector /></div>
-        <div class:hidden={app.panel !== "ai"}><ChatPanel /></div>
+        <button class="edge collapse" title="Hide this panel (I)" aria-label="Hide panel" onclick={() => setPanel(null)}><ChevronRight size={13} /></button>
+        <div class="pane" class:hidden={app.panel !== "info"}><Inspector /></div>
+        <div class="pane" class:hidden={app.panel !== "ai"}><ChatPanel /></div>
       </aside>
+    {:else}
+      <button class="edge expand" title="Show the info panel (I)" aria-label="Show info panel" onclick={() => setPanel("info")}><ChevronLeft size={13} /></button>
     {/if}
   </div>
   <StatusBar />
@@ -67,6 +73,14 @@
   .center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   main { flex: 1; min-height: 0; display: flex; min-width: 0; background: var(--bg); }
   .panel { width: 320px; flex-shrink: 0; border-left: 1px solid var(--line); background: var(--bg-2); position: relative; }
-  .panel > div { position: absolute; inset: 0; }
+  .pane { position: absolute; inset: 0; }
+  /* Small tab on the panel's left edge that hides it, and a slim strip that brings it back. */
+  .edge {
+    display: flex; align-items: center; justify-content: center; padding: 0; color: var(--text-3);
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 0;
+  }
+  .edge:hover { color: var(--text); background: var(--bg-3) !important; }
+  .collapse { position: absolute; z-index: 3; left: -12px; top: 50%; transform: translateY(-50%); width: 12px; height: 44px; border-right: none; border-radius: 6px 0 0 6px; }
+  .expand { width: 14px; flex-shrink: 0; border-top: none; border-bottom: none; border-right: none; }
   .hidden { display: none; }
 </style>
