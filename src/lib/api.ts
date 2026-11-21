@@ -37,8 +37,17 @@ export interface OfflineStats { saved: number; waiting: number; bytes: number; d
 export interface AppInfo { name: string; id: string; is_default: boolean }
 export interface Query {
   scope: string; folder?: string | null; recursive?: boolean; ids?: number[] | null; text?: string;
-  min_rating?: number; label?: string; sort?: string; desc?: boolean;
+  min_rating?: number; label?: string; sort?: string; desc?: boolean; collection?: number | null;
 }
+/** One condition of a smart collection; see `src/lib/collections.ts` for the fields. */
+export interface Rule { field: string; op: string; value: string; value2: string }
+/** `any`: a photo matches if any rule does; otherwise every rule must. */
+export interface RuleSet { any: boolean; rules: Rule[] }
+export interface Collection { id: number; name: string; rules: RuleSet; count: number }
+export interface DupMember { photo: Photo; keep: boolean; distance: number; online: boolean }
+export interface DupGroup { members: DupMember[] }
+export interface DupReport { groups: DupGroup[]; checked: number; skipped: number; extra_bytes: number; cancelled: boolean }
+export interface DupOptions { mode: "exact" | "similar"; distance: number; folder: string | null }
 export interface Edit {
   rating?: number; label?: string; title?: string; caption?: string; keywords?: string[];
   add_keywords?: string[]; remove_keywords?: string[]; creator?: string; copyright?: string;
@@ -98,6 +107,12 @@ export const api = {
   aiChat: (text: string) => invoke<ChatReply>("ai_chat", { text }),
   aiReset: () => invoke<void>("ai_reset"),
   geocode: (query: string) => invoke<Place[]>("geocode", { query }),
+  listCollections: () => invoke<Collection[]>("list_collections"),
+  saveCollection: (id: number | null, name: string, rules: RuleSet) => invoke<number>("save_collection", { id, name, rules }),
+  deleteCollection: (id: number) => invoke<void>("delete_collection", { id }),
+  countRules: (rules: RuleSet) => invoke<number>("count_rules", { rules }),
+  findDuplicates: (opts: DupOptions) => invoke<DupReport>("find_duplicates", { opts }),
+  cancelDuplicates: () => invoke<void>("cancel_duplicates"),
 };
 
 export const VIDEO_EXTS = ["mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv"];

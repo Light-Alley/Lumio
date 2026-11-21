@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { Plus, X, Folder, Images, Clock, Star, MapPin, MapPinOff, Sparkles } from "@lucide/svelte";
+  import { Plus, X, Folder, Images, Clock, Star, MapPin, MapPinOff, Sparkles, ListFilter } from "@lucide/svelte";
   import { app, switchTab, newTab, closeTab, moveTab, dropOnTab, scopeTitle, type Tab } from "../store.svelte";
   import { isPhotoDrag } from "../browse";
 
-  const ICONS = { all: Images, recent: Clock, rated: Star, geotagged: MapPin, nogps: MapPinOff, folder: Folder, ai: Sparkles };
+  const ICONS = { all: Images, recent: Clock, rated: Star, geotagged: MapPin, nogps: MapPinOff, folder: Folder, collection: ListFilter, ai: Sparkles };
 
   // Hovering a tab while dragging photos opens it, so you can drop into its folder or onto a
   // subfolder in the sidebar. Dropping straight onto the tab moves the photos into its folder.

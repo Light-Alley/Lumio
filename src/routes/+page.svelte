@@ -24,6 +24,8 @@
   import PendingMoves from "$lib/components/PendingMoves.svelte";
   import ExportDialog from "$lib/components/ExportDialog.svelte";
   import RenameDialog from "$lib/components/RenameDialog.svelte";
+  import CollectionDialog from "$lib/components/CollectionDialog.svelte";
+  import DuplicatesDialog from "$lib/components/DuplicatesDialog.svelte";
   import Slideshow from "$lib/components/Slideshow.svelte";
   import { watchFullscreen } from "$lib/fullscreen";
 
@@ -62,6 +64,8 @@
 <PendingMoves />
 <ExportDialog />
 <RenameDialog />
+<CollectionDialog />
+<DuplicatesDialog />
 <ContextMenu />
 <Settings />
 <Dialog />
