@@ -115,6 +115,12 @@
             <span><strong>XMP sidecar file</strong> (recommended). The RAW file is never modified. Lightroom, Bridge, Capture One and darktable read these.</span></label>
           <label class="radio"><input type="radio" name="raw" checked={app.settings.raw_write_mode === "embed"} onchange={() => saveSetting("raw_write_mode", "embed")} />
             <span><strong>Inside the RAW file.</strong> Keeps everything in one file but rewrites the original.</span></label>
+          <h3>JPEG, HEIC, TIFF and other photos</h3>
+          <p class="muted">Where should ratings, colour labels, keywords and other edits go for photos that aren't RAW (and for videos)?</p>
+          <label class="radio"><input type="radio" name="img" checked={(app.settings.image_write_mode ?? "embed") === "embed"} onchange={() => saveSetting("image_write_mode", "embed")} />
+            <span><strong>Inside the file</strong> (recommended). Lightroom, Capture One, Bridge, Photos and Windows Explorer all see the changes. ExifTool rewrites only the metadata, not the picture.</span></label>
+          <label class="radio"><input type="radio" name="img" checked={app.settings.image_write_mode === "sidecar"} onchange={() => saveSetting("image_write_mode", "sidecar")} />
+            <span><strong>XMP sidecar file</strong>, so Lumio never changes any original. Capture One and other apps that read sidecars pick these up, but Lightroom and Bridge ignore sidecars for JPEG files, so they won't see these edits.</span></label>
           <h3>Metadata engine</h3>
           {#if status}
             {#if status.exiftool}

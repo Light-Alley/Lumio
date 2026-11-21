@@ -227,7 +227,7 @@ pub const READ_TAGS: &[&str] = &[
     "Rating", "Label",
     "XMP-dc:Title", "ObjectName",
     "XMP-dc:Description", "Caption-Abstract", "ImageDescription",
-    "Subject", "Keywords",
+    "Subject", "Keywords", "HierarchicalSubject",
     "XMP-dc:Creator", "Artist", "By-line",
     "XMP-dc:Rights", "Copyright", "CopyrightNotice",
     "GPSLatitude", "GPSLongitude", "GPSAltitude",

@@ -318,6 +318,7 @@ pub fn run() {
             commands::rename_preview,
             commands::rename_photos,
             commands::update_metadata,
+            commands::keyword_list,
             commands::rotate_photos,
             commands::save_video_thumb,
             commands::stack_photos,

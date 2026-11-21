@@ -118,22 +118,55 @@ pub fn ext_of(p: &Path) -> String {
     p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase()
 }
 
+/// The XMP sidecar that belongs to `p`, if there is one.
+///
+/// "IMG_1.CR2.xmp" always belongs to that file. "IMG_1.xmp" is the RAW file's sidecar
+/// (Lightroom, Bridge and Capture One name them this way), so a JPEG shot alongside the
+/// RAW (IMG_1.JPG next to IMG_1.CR2) does not take it: otherwise the JPEG would show,
+/// and a move would carry off, the RAW file's rating and keywords.
 pub fn find_sidecar(p: &Path) -> Option<PathBuf> {
-    let a = p.with_extension("xmp");
-    if a.exists() {
-        return Some(a);
-    }
-    let b = p.with_extension("XMP");
-    if b.exists() {
-        return Some(b);
-    }
     let mut c = p.as_os_str().to_owned();
     c.push(".xmp");
-    let c = PathBuf::from(c);
-    if c.exists() {
-        return Some(c);
+    let full = PathBuf::from(c);
+    let owns_stem = metadata::is_raw(&ext_of(p)) || metadata::video_needs_sidecar(&ext_of(p));
+    if !owns_stem && full.exists() {
+        return Some(full);
+    }
+    for stem in [p.with_extension("xmp"), p.with_extension("XMP")] {
+        if stem.exists() && (owns_stem || !has_sibling(p, true)) {
+            return Some(stem);
+        }
+    }
+    if full.exists() {
+        return Some(full);
     }
     None
+}
+
+/// Where a new sidecar for `p` goes: "IMG_1.xmp", or "IMG_1.JPG.xmp" when another file
+/// shares the name (a RAW twin, or the video half of an iPhone Live Photo).
+pub fn sidecar_path(p: &Path) -> PathBuf {
+    if let Some(s) = find_sidecar(p) {
+        return s;
+    }
+    let owns_stem = metadata::is_raw(&ext_of(p)) || metadata::video_needs_sidecar(&ext_of(p));
+    if !owns_stem && (has_sibling(p, false) || p.with_extension("xmp").exists()) {
+        let mut c = p.as_os_str().to_owned();
+        c.push(".xmp");
+        return PathBuf::from(c);
+    }
+    p.with_extension("xmp")
+}
+
+/// Is there another photo or video with the same name next to `p`? With `owners_only`,
+/// count only RAW files (and videos that keep a sidecar), which own "name.xmp".
+fn has_sibling(p: &Path, owners_only: bool) -> bool {
+    let me = ext_of(p);
+    let exts = metadata::RAW_EXTS.iter().chain(metadata::VIDEO_EXTS.iter()).chain(metadata::IMAGE_EXTS.iter());
+    exts.filter(|e| **e != me).any(|e| {
+        (!owners_only || metadata::is_raw(e) || metadata::video_needs_sidecar(e))
+            && (p.with_extension(e).exists() || p.with_extension(e.to_ascii_uppercase()).exists())
+    })
 }
 
 fn stat(p: &Path) -> Option<(i64, i64)> {
@@ -640,5 +673,46 @@ pub fn normalize_src(s: &str) -> String {
         s.replace('/', "\\").to_lowercase()
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod sidecar_tests {
+    use super::*;
+
+    fn dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("lumio-sidecar-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn jpeg_does_not_take_its_raw_twins_sidecar() {
+        let d = dir("pair");
+        for f in ["IMG_1.CR2", "IMG_1.JPG", "IMG_1.xmp"] {
+            std::fs::write(d.join(f), b"x").unwrap();
+        }
+        assert_eq!(find_sidecar(&d.join("IMG_1.CR2")), Some(d.join("IMG_1.xmp")));
+        assert_eq!(find_sidecar(&d.join("IMG_1.JPG")), None);
+        assert_eq!(sidecar_path(&d.join("IMG_1.JPG")), d.join("IMG_1.JPG.xmp"));
+        std::fs::write(d.join("IMG_1.JPG.xmp"), b"x").unwrap();
+        assert_eq!(find_sidecar(&d.join("IMG_1.JPG")), Some(d.join("IMG_1.JPG.xmp")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn lone_jpeg_and_live_photo() {
+        let d = dir("lone");
+        std::fs::write(d.join("A.jpg"), b"x").unwrap();
+        assert_eq!(sidecar_path(&d.join("A.jpg")), d.join("A.xmp"));
+        std::fs::write(d.join("A.xmp"), b"x").unwrap();
+        assert_eq!(find_sidecar(&d.join("A.jpg")), Some(d.join("A.xmp")));
+        // A Live Photo: the photo and its video each get their own sidecar.
+        std::fs::write(d.join("B.heic"), b"x").unwrap();
+        std::fs::write(d.join("B.mov"), b"x").unwrap();
+        assert_eq!(sidecar_path(&d.join("B.heic")), d.join("B.heic.xmp"));
+        assert_eq!(sidecar_path(&d.join("B.mov")), d.join("B.mov.xmp"));
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

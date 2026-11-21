@@ -618,11 +618,12 @@ mod tests {
 
     #[test]
     fn shared_sidecar_stays_for_the_file_left_behind() {
-        // IMG_1.CR2 and IMG_1.JPG share IMG_1.xmp; renaming only the JPEG copies it.
+        // IMG_1.xmp is the RAW file's sidecar (Lightroom naming); renaming only the JPEG
+        // leaves it with the RAW file.
         let (dir, conn, ids) = setup(&["IMG_1.CR2", "IMG_1.JPG", "IMG_1.xmp"]);
         let r = rename_in(&conn, &[(ids[1], "Fox.JPG".into())]).unwrap();
         assert_eq!(r.done, 1);
-        assert_eq!(names(&dir), ["Fox.JPG", "Fox.xmp", "IMG_1.CR2", "IMG_1.xmp"]);
+        assert_eq!(names(&dir), ["Fox.JPG", "IMG_1.CR2", "IMG_1.xmp"]);
         // Renaming the pair together moves it.
         let (dir2, conn2, ids2) = setup(&["IMG_1.CR2", "IMG_1.JPG", "IMG_1.xmp"]);
         let r = rename_in(&conn2, &[(ids2[0], "Fox.CR2".into()), (ids2[1], "Fox.JPG".into())]).unwrap();

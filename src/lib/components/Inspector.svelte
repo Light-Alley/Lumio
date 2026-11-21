@@ -10,6 +10,28 @@
   let original = $state({ title: "", caption: "", creator: "", copyright: "", keywords: [] as string[] });
   let mixed = $state({ title: false, caption: false, creator: false, copyright: false });
   let kwInput = $state("");
+  /** Keywords already used in the library, most used first, for suggestions. */
+  let known = $state<string[]>([]);
+  let knownVersion = -1;
+  function loadKnown() {
+    if (knownVersion === app.folderVersion) return;
+    knownVersion = app.folderVersion;
+    api.keywordList().then((l) => (known = l.map(([k]) => k))).catch(() => {});
+  }
+  let kwFocus = $state(false);
+  /** Replace what is being typed with a suggested keyword. */
+  function pick(k: string) {
+    const parts = kwInput.split(/[,;]/);
+    parts[parts.length - 1] = k;
+    kwInput = parts.join(",");
+    addKeyword();
+  }
+  const suggestions = $derived.by(() => {
+    const q = kwInput.split(/[,;]/).pop()!.trim().toLowerCase();
+    if (!q) return [];
+    const have = new Set(form.keywords.map((k) => k.toLowerCase()));
+    return known.filter((k) => k.toLowerCase().startsWith(q) && !have.has(k.toLowerCase())).slice(0, 8);
+  });
   let saving = $state(false);
   let gpsText = $state("");
 
@@ -163,11 +185,20 @@
             class="kw"
             type="text"
             placeholder="Add keyword…"
+            title="Separate keywords with commas. Type Places > France > Paris for a keyword inside others, as in Lightroom."
+            onfocus={() => { loadKnown(); kwFocus = true; }}
             bind:value={kwInput}
-            onkeydown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addKeyword(); } else if (e.key === "Backspace" && !kwInput && form.keywords.length) form.keywords.pop(); }}
-            onblur={() => kwInput.trim() && addKeyword()}
+            onkeydown={(e) => { if (e.key === "Tab" && suggestions.length && !e.shiftKey) { e.preventDefault(); pick(suggestions[0]); } else if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addKeyword(); } else if (e.key === "Backspace" && !kwInput && form.keywords.length) form.keywords.pop(); }}
+            onblur={() => { kwFocus = false; if (kwInput.trim()) addKeyword(); }}
           />
         </div>
+        {#if kwFocus && suggestions.length}
+          <div class="suggest" role="listbox" aria-label="Keyword suggestions">
+            {#each suggestions as k (k)}
+              <button type="button" role="option" aria-selected="false" onmousedown={(e) => { e.preventDefault(); pick(k); }}>{k}</button>
+            {/each}
+          </div>
+        {/if}
       </div>
       <label class="field"><span>Creator</span>
         <input type="text" bind:value={form.creator} placeholder={mixed.creator && form.creator === original.creator ? "Multiple values" : ""} />
@@ -247,6 +278,9 @@
   .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg); min-height: 32px; }
   .chip { display: inline-flex; align-items: center; gap: 2px; background: var(--accent-soft); color: var(--text); border-radius: 10px; padding: 2px 4px 2px 8px; font-size: 12px; }
   .chip .x { background: none; border: none; padding: 1px; color: var(--text-2); }
+  .suggest { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .suggest button { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px dashed var(--line-2); background: transparent; color: var(--text-2); }
+  .suggest button:hover { border-style: solid; color: var(--text); }
   .kw { border: none !important; box-shadow: none !important; flex: 1; min-width: 90px; padding: 2px 4px !important; background: transparent !important; }
   .actions { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
   .gps { display: flex; gap: 6px; margin-bottom: 6px; }
