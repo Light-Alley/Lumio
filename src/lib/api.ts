@@ -80,6 +80,7 @@ export const api = {
   renamePreview: (ids: number[], opts: RenameOptions) => invoke<PlannedName[]>("rename_preview", { ids, opts }),
   renamePhotos: (items: [number, string][]) => invoke<RenameReport>("rename_photos", { items }),
   updateMetadata: (ids: number[], edit: Edit) => invoke<OpReport>("update_metadata", { ids, edit }),
+  keywordList: () => invoke<[string, number][]>("keyword_list"),
   rotatePhotos: (ids: number[], op: Turn) => invoke<OpReport>("rotate_photos", { ids, op }),
   saveVideoThumb: (id: number, jpeg: string, width: number | null, height: number | null, duration: number | null) =>
     invoke<void>("save_video_thumb", { id, jpeg, width, height, duration }),
@@ -149,7 +150,13 @@ export const LABELS = [
   { name: "Blue", color: "#3e63dd" },
   { name: "Purple", color: "#8e4ec6" },
 ];
-export const labelColor = (l: string | null | undefined) => LABELS.find((x) => x.name.toLowerCase() === (l ?? "").toLowerCase())?.color;
+/** Capture One also has orange and pink colour tags; Lumio shows them but doesn't set them. */
+const OTHER_LABELS = [
+  { name: "Orange", color: "#f76b15" },
+  { name: "Pink", color: "#e93d82" },
+];
+export const labelColor = (l: string | null | undefined) =>
+  [...LABELS, ...OTHER_LABELS].find((x) => x.name.toLowerCase() === (l ?? "").toLowerCase())?.color;
 
 export function formatDate(s: string | null | undefined): string {
   if (!s) return "";
