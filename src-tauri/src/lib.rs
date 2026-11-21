@@ -6,6 +6,7 @@ mod db;
 mod exiftool;
 mod fileops;
 mod histogram;
+mod history;
 mod indexer;
 mod logfile;
 mod metadata;
@@ -310,6 +311,8 @@ pub fn run() {
             commands::pending_moves,
             commands::cancel_pending_moves,
             commands::retry_pending_moves,
+            commands::history_list,
+            commands::history_undo,
             commands::histogram,
             commands::offline_preview_stats,
             commands::clear_offline_previews,

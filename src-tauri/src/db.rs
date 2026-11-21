@@ -66,6 +66,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // -1 = could not be made), and moves waiting for a drive to come back.
     add_column(conn, "photos", "preview", "INTEGER NOT NULL DEFAULT 0")?;
     crate::pending::migrate(conn)?;
+    crate::history::migrate(conn)?;
     // 0.3.2: HEIC/AVIF thumbnails made on macOS before this version ignored the photo's
     // orientation. Rebuild the ones that are not upright, once.
     if get_setting(conn, "fix_heic_thumbs").is_none() {
