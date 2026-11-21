@@ -1,6 +1,6 @@
 [package]
 name = "lumio"
-version = "1.0.0"
+version = "1.0.1"
 description = "Lumio – a lightweight, open-source photo browser and digital asset manager"
 authors = ["Light and Alley and Lumio contributors"]
 license = "MIT"
