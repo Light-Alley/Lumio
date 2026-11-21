@@ -189,10 +189,25 @@ pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
     Ok(out)
 }
 
+/// Folder commands only touch folders inside the library. `strictly` also refuses a
+/// library root itself (roots are removed from the library, never renamed, moved or
+/// trashed from Lumio). Paths with ".." are refused so they can't step outside a root.
+fn in_library(st: &AppState, path: &Path, strictly: bool) -> anyhow::Result<()> {
+    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        anyhow::bail!("\"{}\" is not a folder in your library.", path.display());
+    }
+    match db::root_for_path(&st.conn.lock(), path)? {
+        Some((_, root)) if !(strictly && root == path) => Ok(()),
+        Some(_) => anyhow::bail!("A library folder can't be changed here. Use Remove from library instead."),
+        None => anyhow::bail!("\"{}\" is not a folder in your library.", path.display()),
+    }
+}
+
 #[tauri::command]
 pub async fn create_folder(state: S<'_>, parent: String, name: String) -> R<String> {
     let st = state.inner().clone();
     blocking(move || {
+        in_library(&st, Path::new(&parent), false)?;
         let p = fileops::create_folder(Path::new(&parent), &name)?;
         st.queue(Job::ScanFolder(p.clone()));
         let label = format!("Created folder {}", name.trim());
@@ -207,6 +222,7 @@ pub async fn rename_folder(state: S<'_>, path: String, name: String) -> R<String
     let st = state.inner().clone();
     let r = blocking(move || {
         let from = PathBuf::from(&path);
+        in_library(&st, &from, true)?;
         let to = fileops::rename_folder(&*st, &from, &name)?;
         if to != from {
             let label = format!("Renamed folder {} to {}", from.file_name().unwrap_or_default().to_string_lossy(), name.trim());
@@ -223,6 +239,7 @@ pub async fn rename_folder(state: S<'_>, path: String, name: String) -> R<String
 pub async fn delete_folder(state: S<'_>, path: String, permanent: bool) -> R<()> {
     let st = state.inner().clone();
     blocking(move || {
+        in_library(&st, Path::new(&path), true)?;
         fileops::delete_folder(&*st, Path::new(&path), permanent)?;
         let name = Path::new(&path).file_name().unwrap_or_default().to_string_lossy().to_string();
         let label = if permanent { format!("Deleted folder {name} permanently") } else { format!("Moved folder {name} to the Trash") };
@@ -237,6 +254,8 @@ pub async fn move_folder(state: S<'_>, src: String, dest: String, copy: bool) ->
     let st = state.inner().clone();
     blocking(move || {
         let from = PathBuf::from(&src);
+        in_library(&st, &from, true)?;
+        in_library(&st, Path::new(&dest), false)?;
         let mut rep = fileops::move_folder(&*st, &from, Path::new(&dest), copy)?;
         if let Some(to) = rep.folder.clone() {
             let name = from.file_name().unwrap_or_default().to_string_lossy().to_string();

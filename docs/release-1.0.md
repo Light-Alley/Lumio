@@ -14,9 +14,9 @@ Lumio grew quickly through the 0.3.x betas. Version 1.0 is the point where it's 
 
 ### Features and safety (work in progress in separate pull requests)
 
-- [ ] File-safety tests and undo history merged
-- [ ] XMP ratings, labels and keywords merged, round-trip checked with at least one of Lightroom, Bridge, Capture One or darktable
-- [ ] Duplicate finding and smart collections merged
+- [x] File-safety tests and undo history merged
+- [ ] XMP ratings, labels and keywords merged (done), round-trip checked with at least one of Lightroom, Bridge, Capture One or darktable
+- [x] Duplicate finding and smart collections merged
 - [ ] No open issues labelled `bug` that can lose or damage photos
 
 ### Signing (needs Liju, see [code-signing.md](code-signing.md))
@@ -24,7 +24,7 @@ Lumio grew quickly through the 0.3.x betas. Version 1.0 is the point where it's 
 - [ ] Apple Developer Program membership active
 - [ ] `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` secrets added (and `APPLE_SIGNING_IDENTITY` if wanted)
 - [ ] A test run of **Build installers** shows "signing" and "notarising" in both macOS jobs, and `spctl -a -vvv -t install` says "Notarized Developer ID" on a downloaded build
-- [ ] Windows: Azure Artifact Signing secrets added, **or** a decision to ship 1.0 unsigned on Windows and apply to SignPath Foundation once public
+- [x] Decision (2026-11-21): ship 1.0 unsigned on macOS and Windows; revisit the Apple Developer Program and SignPath Foundation after launch
 - [ ] README "Installing" section updated to match (drop the macOS `xattr` workaround once notarised)
 
 ### Release candidate testing
@@ -42,7 +42,7 @@ Build `1.0.0-rc.1` with the workflow and test on real machines, with a **copy** 
 - [ ] Share menu, email, SmugMug upload (live account), web-ready export
 - [ ] AI finder with Claude and with Ollama
 - [ ] Upgrade path: open a 0.3.8 catalogue with 1.0 and check nothing is lost
-- [ ] Run `cargo audit` and `npm audit --omit=dev` and fix anything serious
+- [x] Run `cargo audit` and `npm audit --omit=dev` and fix anything serious
 
 ### Open-source readiness
 
