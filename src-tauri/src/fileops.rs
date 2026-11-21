@@ -722,8 +722,10 @@ pub(crate) mod testing {
             std::fs::create_dir_all(&p).unwrap();
             Tmp(p)
         }
+        /// `t.join("a/b.jpg")` with the platform's separator, so paths compare equal to
+        /// the ones Lumio builds (on Windows "a\\b.jpg", not "a/b.jpg").
         pub fn join(&self, s: &str) -> PathBuf {
-            self.0.join(s)
+            s.split('/').filter(|c| !c.is_empty()).fold(self.0.clone(), |p, c| p.join(c))
         }
     }
     impl Drop for Tmp {
@@ -782,7 +784,8 @@ pub(crate) mod testing {
 
     pub fn names(dir: &Path) -> Vec<String> {
         let mut v: Vec<String> = match std::fs::read_dir(dir) {
-            Ok(rd) => rd.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect(),
+            // Finder leaves a .DS_Store behind when it puts files in the Trash.
+            Ok(rd) => rd.flatten().map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n != ".DS_Store").collect(),
             Err(_) => vec![],
         };
         v.sort();
