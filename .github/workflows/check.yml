@@ -112,7 +112,7 @@ jobs:
       contents: read # read the lock files
       security-events: write # upload results to the Security tab
       actions: read # the reusable workflow reads its own run
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@32d3cd482bdadfb38b186c0ad1b031902d55d932 # v2.7.1
     with:
       scan-args: |-
         -r
