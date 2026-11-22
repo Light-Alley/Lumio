@@ -47,7 +47,7 @@ tokio = { version = "1", features = ["fs", "time", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = { version = "0.3", default-features = false }
 # Random numbers from the operating system (OAuth nonces, the video server's secret).
-getrandom = "0.3"
+getrandom = "0.4"
 # Checking web addresses (the AI server, SmugMug, GitHub release links).
 url = "2"
 
