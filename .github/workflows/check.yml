@@ -1,20 +1,38 @@
-# Quick check that the code compiles and the tests pass on all three systems.
-# Runs on every pull request; it builds no installers.
+# Checks every pull request (and main): the code compiles and the tests pass on all three
+# systems, formatting and lints are clean, dependencies have no known vulnerabilities, no
+# secrets are committed, and the workflows themselves are safe. It builds no installers.
 name: Check
 
 on:
   pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 1" # Mondays: new advisories for unchanged dependencies
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  check:
+  test:
+    name: Test (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
         platform: [macos-latest, windows-latest, ubuntu-22.04]
     runs-on: ${{ matrix.platform }}
+    env:
+      # ExifTool is fetched below, so its tests must run, not skip.
+      LUMIO_REQUIRE_EXIFTOOL: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Linux build dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -22,21 +40,103 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
-          cache: npm
+          package-manager-cache: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
 
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           workspaces: src-tauri -> target
 
       - run: npm ci
+      - name: ExifTool (checksum-verified)
+        run: node scripts/fetch-exiftool.mjs
+      - run: npm run verify:rules
       - run: npm run check
+      - run: npm test
       - run: npm run build
 
+      - name: Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets --locked -- -D warnings
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --locked
+
+  supply-chain:
+    name: Dependencies and secrets
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the secret scan reads the whole history
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: npm advisories
+        run: npm audit --audit-level=low
+      # Fails on any known vulnerability. Warnings (crates marked unmaintained, and one
+      # "unsound" notice in GTK 0.18) all come from Tauri's own Linux stack and have no
+      # upgrade yet; they are listed in the log so they are seen.
+      - name: Rust advisories
+        working-directory: src-tauri
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit
+      - name: Secrets in files and history (gitleaks)
+        env:
+          GITLEAKS_VERSION: 8.30.0
+        run: |
+          curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o checksums.txt "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz\$" checksums.txt | sed 's/ .*/  gitleaks.tgz/' | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+          ./gitleaks dir . --redact=100 --no-banner
+          ./gitleaks git . --redact=100 --no-banner --log-opts=--all
+
+  osv-scanner:
+    name: OSV-Scanner
+    permissions:
+      contents: read # read the lock files
+      security-events: write # upload results to the Security tab
+      actions: read # the reusable workflow reads its own run
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+    with:
+      scan-args: |-
+        -r
+        ./
+
+  workflows:
+    name: Workflow lint
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read # read the workflow files
+      security-events: write # zizmor uploads its findings
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          curl -sSfL -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o checksums.txt "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          grep " actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz\$" checksums.txt | sed 's/ .*/  actionlint.tgz/' | sha256sum -c -
+          tar -xzf actionlint.tgz actionlint
+          ./actionlint -no-color
+      - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          persona: auditor
