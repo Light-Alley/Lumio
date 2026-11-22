@@ -32,8 +32,8 @@ fn hidden_inside(roots: &[PathBuf], p: &Path) -> bool {
 pub fn restart(state: &Arc<AppState>) {
     let weak = Arc::downgrade(state);
     let roots: Vec<PathBuf> = {
-        let conn = state.conn.lock();
-        db::list_roots(&conn).map(|r| r.into_iter().filter(|r| r.online).map(|r| PathBuf::from(r.path)).collect()).unwrap_or_default()
+        let roots = db::roots(&state.conn.lock()).unwrap_or_default();
+        db::with_online(roots).into_iter().filter(|r| r.online).map(|r| PathBuf::from(r.path)).collect()
     };
     let watched = roots.clone();
     let debouncer = new_debouncer(Duration::from_millis(1500), None, move |res: DebounceEventResult| {

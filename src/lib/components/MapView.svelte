@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import L from "leaflet";
   import "leaflet/dist/leaflet.css";
   import "leaflet.markercluster/dist/MarkerCluster.css";
@@ -85,23 +85,38 @@
     if (ready) setTiles();
   });
 
-  // Rebuild markers when photos or selection change.
+  // Markers are made when the photos change; a selection change only redraws the
+  // markers whose state changed, not every marker and cluster.
+  let markers = new Map<number, { m: L.Marker; p: PhotoLite; on: boolean }>();
   $effect(() => {
     const list = geo;
-    const sel = new Set(selection);
     if (!ready || !cluster || !map) return;
+    const sel = untrack(() => new Set(selection));
     cluster.clearLayers();
-    const markers = list.map((p) => {
-      const m = L.marker([p.lat!, p.lon!], { icon: icon(p, sel.has(p.id)), photo: p } as L.MarkerOptions & { photo: PhotoLite });
+    markers = new Map();
+    const made = list.map((p) => {
+      const on = sel.has(p.id);
+      const m = L.marker([p.lat!, p.lon!], { icon: icon(p, on), photo: p } as L.MarkerOptions & { photo: PhotoLite });
       m.on("click", (e) => clickSelect(p.id, (e as L.LeafletMouseEvent).originalEvent));
       m.on("dblclick", () => openViewer(p.id));
       m.on("contextmenu", (e) => showMenu((e as L.LeafletMouseEvent).originalEvent, photoMenu(p)));
+      markers.set(p.id, { m, p, on });
       return m;
     });
-    cluster.addLayers(markers);
+    cluster.addLayers(made);
     if (!fitted && list.length) {
       fitted = true;
       map.fitBounds(L.latLngBounds(list.map((p) => [p.lat!, p.lon!] as [number, number])), { padding: [40, 40], maxZoom: 14 });
+    }
+  });
+  $effect(() => {
+    const sel = new Set(selection);
+    for (const entry of markers.values()) {
+      const on = sel.has(entry.p.id);
+      if (on !== entry.on) {
+        entry.on = on;
+        entry.m.setIcon(icon(entry.p, on));
+      }
     }
   });
 

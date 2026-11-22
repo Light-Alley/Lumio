@@ -440,26 +440,35 @@ pub fn photo_by_path(conn: &Connection, path: &str) -> Result<Option<(i64, i64, 
         .optional()?)
 }
 
+/// The library folders with whether each is connected now. This asks the drives, which
+/// can take seconds for a network drive that has gone away: where the catalogue lock is
+/// held for others, use [`roots`] under the lock and [`with_online`] after it.
 pub fn list_roots(conn: &Connection) -> Result<Vec<Root>> {
+    Ok(with_online(roots(conn)?))
+}
+
+/// The library folders from the catalogue alone (`online` is not filled in).
+pub fn roots(conn: &Connection) -> Result<Vec<Root>> {
     let mut stmt = conn.prepare(
         "SELECT r.id, r.path, r.name, (SELECT COUNT(*) FROM photos p WHERE p.root_id = r.id) FROM roots r ORDER BY r.name COLLATE NOCASE",
     )?;
     let rows = stmt.query_map([], |r| {
-        let path: String = r.get(1)?;
-        Ok(Root {
-            id: r.get(0)?,
-            online: Path::new(&path).is_dir(),
-            path,
-            name: r.get(2)?,
-            count: r.get(3)?,
-        })
+        Ok(Root { id: r.get(0)?, path: r.get(1)?, online: false, name: r.get(2)?, count: r.get(3)? })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// Fill in which library folders are connected (asks the drives; don't hold the lock).
+pub fn with_online(mut roots: Vec<Root>) -> Vec<Root> {
+    for r in &mut roots {
+        r.online = Path::new(&r.path).is_dir();
+    }
+    roots
+}
+
 /// Find the library root that contains `path`, if any.
 pub fn root_for_path(conn: &Connection, path: &Path) -> Result<Option<(i64, PathBuf)>> {
-    let roots = list_roots(conn)?;
+    let roots = roots(conn)?;
     let mut best: Option<(i64, PathBuf)> = None;
     for r in roots {
         let rp = PathBuf::from(&r.path);

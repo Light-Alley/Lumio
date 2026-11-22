@@ -334,7 +334,8 @@ pub fn run() {
                 std::thread::Builder::new().name("indexer".into()).spawn(move || indexer::run_worker(st, rx))?;
             }
             // Catch up on changes made while Lumio was closed.
-            for r in db::list_roots(&state.conn.lock())? {
+            let roots = db::roots(&state.conn.lock())?;
+            for r in db::with_online(roots) {
                 if r.online {
                     state.queue(indexer::Job::ScanRoot(r.id));
                 }

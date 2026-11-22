@@ -21,6 +21,7 @@
       .replace(/\n{3,}/g, "\n\n")
       .trim();
   }
+  const notes = $derived(updates.info ? plain(updates.info.notes) : "");
   const pct = $derived(updates.total ? Math.min(100, Math.round((updates.downloaded / updates.total) * 100)) : null);
 </script>
 
@@ -31,8 +32,8 @@
       onkeydown={(e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } }}>
       <h3>Lumio {u.latest} is available</h3>
       <p class="muted">You have version {u.current}.{#if u.published}{" "}Released {new Date(u.published).toLocaleDateString()}.{/if}</p>
-      {#if plain(u.notes)}
-        <div class="notes">{plain(u.notes)}</div>
+      {#if notes}
+        <div class="notes">{notes}</div>
       {/if}
       {#if updates.installing}
         <div class="progress" aria-live="polite">

@@ -29,7 +29,8 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> anyhow::Result<T> + Sen
 
 #[tauri::command]
 pub fn get_roots(state: S) -> R<Vec<Root>> {
-    db::list_roots(&state.conn.lock()).map_err(e)
+    let roots = db::roots(&state.conn.lock()).map_err(e)?;
+    Ok(db::with_online(roots))
 }
 
 #[tauri::command]
@@ -43,7 +44,7 @@ pub fn add_root(state: S, path: String) -> R<i64> {
         let conn = state.conn.lock();
         // A folder inside an existing library folder is already covered.
         let mut children = vec![];
-        for r in db::list_roots(&conn).map_err(e)? {
+        for r in db::roots(&conn).map_err(e)? {
             let rp = PathBuf::from(&r.path);
             if p.starts_with(&rp) {
                 return Err(format!("This folder is already in your library (inside \"{}\").", r.name));
@@ -96,7 +97,8 @@ pub fn rescan(state: S, root_id: Option<i64>, folder: Option<String>) -> R<()> {
     } else if let Some(id) = root_id {
         state.queue(Job::ScanRoot(id));
     } else {
-        for r in db::list_roots(&state.conn.lock()).map_err(e)? {
+        let roots = db::roots(&state.conn.lock()).map_err(e)?;
+        for r in roots {
             state.queue(Job::ScanRoot(r.id));
         }
     }

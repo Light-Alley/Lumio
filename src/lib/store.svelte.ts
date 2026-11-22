@@ -357,7 +357,8 @@ export function isClosedStack(p: PhotoLite) {
 
 /** The ids plus every hidden photo in closed stacks among them (so groups move together). */
 export function withStacks(ids: number[]): number[] {
-  const stacks = new Set(app.photos.filter((p) => ids.includes(p.id) && isClosedStack(p)).map((p) => p.stack_id));
+  const want = new Set(ids);
+  const stacks = new Set(app.photos.filter((p) => want.has(p.id) && isClosedStack(p)).map((p) => p.stack_id));
   if (!stacks.size) return ids;
   const out = new Set(ids);
   for (const p of app.allPhotos) if (p.stack_id != null && stacks.has(p.stack_id)) out.add(p.id);
@@ -446,10 +447,8 @@ function scheduleRefresh() {
   if (refreshTimer) return;
   refreshTimer = setTimeout(async () => {
     refreshTimer = null;
-    await loadRoots();
-    await loadPhotos();
-    await loadPending();
-    await loadCollections();
+    // Independent reloads, so they run side by side.
+    await Promise.all([loadRoots(), loadPhotos(), loadPending(), loadCollections()]);
     app.folderVersion++;
   }, 600);
 }
@@ -537,8 +536,9 @@ export async function removeRoot(root: Root) {
 export async function applyEdit(ids: number[], edit: Edit, quiet = false) {
   if (!ids.length) return;
   // Optimistic update for rating/label so the grid reacts immediately.
+  const want = new Set(ids);
   for (const p of app.photos) {
-    if (!ids.includes(p.id)) continue;
+    if (!want.has(p.id)) continue;
     if (edit.rating !== undefined) p.rating = edit.rating;
     if (edit.label !== undefined) p.label = edit.label || null;
     if (edit.gps) { p.lat = edit.gps[0]; p.lon = edit.gps[1]; }
@@ -646,7 +646,8 @@ export async function renamePhoto(p: PhotoLite) {
 /** Rename what is selected: one photo by typing a name, several with the batch rename window. */
 export function renameSelected(ids = selectedIds()) {
   if (!ids.length) return;
-  const offline = app.photos.some((p) => ids.includes(p.id) && !rootOnline(p.root_id));
+  const want = new Set(ids);
+  const offline = app.photos.some((p) => want.has(p.id) && !rootOnline(p.root_id));
   if (offline) { toast("Connect the drive these photos are on to rename them.", "info"); return; }
   if (ids.length === 1) {
     const p = app.photos.find((x) => x.id === ids[0]);

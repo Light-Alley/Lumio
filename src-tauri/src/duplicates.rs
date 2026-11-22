@@ -349,22 +349,82 @@ fn alike(a: &Candidate, b: &Candidate, max: u32) -> Option<u32> {
     Some(d)
 }
 
+/// For each usable photo (by position in `usable`), the later ones that look alike.
+///
+/// Fingerprints within `max` bits of each other agree exactly on at least one of `max + 1`
+/// slices of the 64 bits (if every slice differed, at least `max + 1` bits would). So
+/// only photos sharing a slice value are compared, which keeps large libraries near
+/// linear. With wide tolerances the slices are too short to narrow much, and every
+/// pair is compared instead (in parallel).
+fn neighbours(c: &[Candidate], usable: &[usize], max: u32) -> Vec<Vec<(usize, u32)>> {
+    let hash = |k: usize| c[usable[k]].dhash.unwrap_or(0) as u64;
+    if max >= 8 {
+        return usable
+            .par_iter()
+            .enumerate()
+            .map(|(k, &i)| {
+                if CANCEL.load(Ordering::Relaxed) {
+                    return vec![];
+                }
+                usable[k + 1..].iter().filter_map(|&j| alike(&c[i], &c[j], max).map(|d| (j, d))).collect()
+            })
+            .collect();
+    }
+    let bands = bands(max);
+    let slice = |h: u64, (start, width): (u32, u32)| (h >> start) & u64::MAX.checked_shr(64 - width).unwrap_or(0);
+    let buckets: Vec<HashMap<u64, Vec<usize>>> = bands
+        .iter()
+        .map(|&b| {
+            let mut m: HashMap<u64, Vec<usize>> = HashMap::new();
+            for k in 0..usable.len() {
+                m.entry(slice(hash(k), b)).or_default().push(k);
+            }
+            m
+        })
+        .collect();
+    (0..usable.len())
+        .into_par_iter()
+        .map(|k| {
+            if CANCEL.load(Ordering::Relaxed) {
+                return vec![];
+            }
+            let h = hash(k);
+            let mut out = vec![];
+            for (n, &b) in bands.iter().enumerate() {
+                for &l in buckets[n].get(&slice(h, b)).map(Vec::as_slice).unwrap_or(&[]) {
+                    // Each pair once: from its first photo, in the first slice it shares.
+                    if l <= k || bands[..n].iter().any(|&e| slice(h, e) == slice(hash(l), e)) {
+                        continue;
+                    }
+                    if let Some(d) = alike(&c[usable[k]], &c[usable[l]], max) {
+                        out.push((usable[l], d));
+                    }
+                }
+            }
+            out.sort_unstable();
+            out
+        })
+        .collect()
+}
+
+/// `max + 1` slices covering the 64 bits, as (first bit, width).
+fn bands(max: u32) -> Vec<(u32, u32)> {
+    let n = max + 1;
+    let mut out = vec![];
+    let mut start = 0;
+    for i in 0..n {
+        let width = 64 / n + u32::from(i < 64 % n);
+        out.push((start, width));
+        start += width;
+    }
+    out
+}
+
 /// Group look-alikes. Each group is one photo and everything close to *it*, so a long
 /// chain of slightly different photos never ends up as one huge group.
 fn group_alike(c: &[Candidate], max: u32) -> Vec<Vec<(usize, u32)>> {
     let usable: Vec<usize> = (0..c.len()).filter(|&i| c[i].dhash.is_some_and(|h| !too_plain(h as u64))).collect();
-    // Neighbours of each photo, worked out in parallel (55,000 photos is ~1.5 billion
-    // comparisons, about a second).
-    let near: Vec<Vec<(usize, u32)>> = usable
-        .par_iter()
-        .enumerate()
-        .map(|(k, &i)| {
-            if CANCEL.load(Ordering::Relaxed) {
-                return vec![];
-            }
-            usable[k + 1..].iter().filter_map(|&j| alike(&c[i], &c[j], max).map(|d| (j, d))).collect()
-        })
-        .collect();
+    let near = neighbours(c, &usable, max);
     let mut adj: HashMap<usize, Vec<(usize, u32)>> = HashMap::new();
     for (k, list) in near.into_iter().enumerate() {
         let i = usable[k];
@@ -514,9 +574,14 @@ pub fn find(state: &AppState, opts: &Options) -> Result<Report> {
                 .into_iter()
                 .zip(dist)
                 .enumerate()
-                .map(|(k, (p, distance))| Member { online: Path::new(&p.path).exists(), keep: k == keep, distance, photo: p })
+                .map(|(k, (p, distance))| Member { online: false, keep: k == keep, distance, photo: p })
                 .collect(),
         });
+    }
+    // Asking the drives can be slow (network drives), so it happens without the lock.
+    drop(conn);
+    for m in report.groups.iter_mut().flat_map(|g| g.members.iter_mut()) {
+        m.online = Path::new(&m.photo.path).exists();
     }
     Ok(report)
 }
@@ -563,6 +628,40 @@ mod tests {
             dhash: Some(dhash as i64),
             aspect: Some(aspect),
         }
+    }
+
+    #[test]
+    fn slicing_finds_exactly_what_comparing_every_pair_finds() {
+        let mut x: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        // Clusters of near copies (a few bits flipped) among unrelated pictures.
+        let mut c = vec![];
+        for g in 0..150 {
+            let base = next();
+            for m in 0..4 {
+                let mut h = base;
+                for _ in 0..(m * 2) {
+                    h ^= 1 << (next() % 64);
+                }
+                c.push(cand(c.len() as i64, &format!("/f{g}"), &format!("{m}.jpg"), h, 1.5));
+            }
+        }
+        let usable: Vec<usize> = (0..c.len()).filter(|&i| c[i].dhash.is_some_and(|h| !too_plain(h as u64))).collect();
+        for max in 0..8 {
+            let brute: Vec<Vec<(usize, u32)>> = usable
+                .iter()
+                .enumerate()
+                .map(|(k, &i)| usable[k + 1..].iter().filter_map(|&j| alike(&c[i], &c[j], max).map(|d| (j, d))).collect())
+                .collect();
+            assert_eq!(neighbours(&c, &usable, max), brute, "max {max}");
+        }
+        let total: u32 = bands(5).iter().map(|b| b.1).sum();
+        assert_eq!(total, 64);
     }
 
     fn picture(w: u32, h: u32, seed: u32) -> DynamicImage {

@@ -50,7 +50,8 @@
     if (!sel.length) { photos = []; return; }
     api.getPhotos(sel.slice(0, 2000)).then((ps) => {
       if (seq !== loadSeq) return;
-      const sameSet = ps.length === photos.length && ps.every((p) => photos.some((q) => q.id === p.id));
+      const had = new Set(photos.map((q) => q.id));
+      const sameSet = ps.length === photos.length && ps.every((p) => had.has(p.id));
       photos = ps;
       if (!sameSet || !dirty) resetForm();
     });
