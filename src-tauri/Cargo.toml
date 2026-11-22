@@ -35,7 +35,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 base64 = "0.22"
 # Dates and times (replaces the unmaintained chrono).
 jiff = "0.2"
-parking_lot = "0.12"
+parking_lot = "0.13"
 log = { version = "0.4", features = ["std"] }
 # Copying photos to the clipboard for pasting into WhatsApp, email or a website.
 arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
