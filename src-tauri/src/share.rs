@@ -175,7 +175,7 @@ fn count(files: &[PathBuf]) -> String {
 
 // ------------------------------------------------------------------ clipboard
 
-static CLIPBOARD: parking_lot::Mutex<Option<arboard::Clipboard>> = parking_lot::const_mutex(None);
+static CLIPBOARD: parking_lot::Mutex<Option<arboard::Clipboard>> = parking_lot::Mutex::new(None);
 
 #[derive(PartialEq)]
 pub enum Copied {
@@ -492,7 +492,7 @@ mod imp {
         AssocQueryStringW, IDataTransferManagerInterop, ASSOCF_IS_PROTOCOL, ASSOCSTR_FRIENDLYAPPNAME,
     };
 
-    static TOKEN: parking_lot::Mutex<Option<(isize, i64)>> = parking_lot::const_mutex(None);
+    static TOKEN: parking_lot::Mutex<Option<(isize, i64)>> = parking_lot::Mutex::new(None);
 
     /// Storage items, carried to the interface thread. Only this one type is marked Send
     /// (not any T): StorageFile objects are "agile" WinRT objects (they implement

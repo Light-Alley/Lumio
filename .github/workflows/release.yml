@@ -217,7 +217,7 @@ jobs:
           args: ${{ matrix.args }} ${{ env.SIGNING_ARGS }}
           # latest.json tells installed copies about the new version (only written when
           # the updater key is set, see above).
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
 
       - name: List the installers
         id: built

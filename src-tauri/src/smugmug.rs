@@ -20,7 +20,7 @@ use crate::webexport::{self, ExportOptions};
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
 use futures_util::StreamExt;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use parking_lot::Mutex;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
