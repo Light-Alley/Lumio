@@ -110,7 +110,8 @@ jobs:
           LUMIO_UPDATER_PUBKEY: ${{ vars.LUMIO_UPDATER_PUBKEY }}
         run: |
           put() { # name value -> $GITHUB_ENV (multi-line safe)
-            local d="EOF_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+            local d
+            d="EOF_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
             printf '%s<<%s\n%s\n%s\n' "$1" "$d" "$2" "$d" >> "$GITHUB_ENV"
           }
           echo "SIGNING_ARGS=" >> "$GITHUB_ENV"

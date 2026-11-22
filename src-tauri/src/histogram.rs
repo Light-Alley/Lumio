@@ -24,8 +24,7 @@ pub struct Histogram {
 pub fn from_rgb(pixels: &[u8]) -> Histogram {
     let (mut r, mut g, mut b, mut l) = (vec![0u32; 256], vec![0u32; 256], vec![0u32; 256], vec![0u32; 256]);
     let (mut lo, mut hi, mut n) = (0u32, 0u32, 0u32);
-    for px in pixels.chunks_exact(3) {
-        let (pr, pg, pb) = (px[0], px[1], px[2]);
+    for &[pr, pg, pb] in pixels.as_chunks::<3>().0 {
         r[pr as usize] += 1;
         g[pg as usize] += 1;
         b[pb as usize] += 1;

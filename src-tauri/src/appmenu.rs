@@ -468,6 +468,19 @@ pub fn show_log(state: tauri::State<'_, std::sync::Arc<crate::state::AppState>>)
     tauri_plugin_opener::reveal_item_in_dir(target).map_err(|e| e.to_string())
 }
 
+/// macOS adds its own "Show Tab Bar" and "Enter Full Screen" items to the View menu.
+/// Lumio has its own tabs and full-screen item, so turn those off.
+#[cfg(target_os = "macos")]
+pub fn mac_tidy() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSWindow;
+    use objc2_foundation::{NSString, NSUserDefaults};
+    if let Some(mtm) = MainThreadMarker::new() {
+        NSWindow::setAllowsAutomaticWindowTabbing(false, mtm);
+    }
+    NSUserDefaults::standardUserDefaults().setBool_forKey(false, &NSString::from_str("NSFullScreenMenuItemEverywhere"));
+}
+
 #[cfg(test)]
 mod tests {
     use super::label;
@@ -482,17 +495,4 @@ mod tests {
             assert_eq!(hinted, "Grid");
         }
     }
-}
-
-/// macOS adds its own "Show Tab Bar" and "Enter Full Screen" items to the View menu.
-/// Lumio has its own tabs and full-screen item, so turn those off.
-#[cfg(target_os = "macos")]
-pub fn mac_tidy() {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::NSWindow;
-    use objc2_foundation::{NSString, NSUserDefaults};
-    if let Some(mtm) = MainThreadMarker::new() {
-        NSWindow::setAllowsAutomaticWindowTabbing(false, mtm);
-    }
-    NSUserDefaults::standardUserDefaults().setBool_forKey(false, &NSString::from_str("NSFullScreenMenuItemEverywhere"));
 }
