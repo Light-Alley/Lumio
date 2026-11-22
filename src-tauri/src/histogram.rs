@@ -22,12 +22,7 @@ pub struct Histogram {
 
 /// Counts levels in an RGB8 buffer (3 bytes per pixel).
 pub fn from_rgb(pixels: &[u8]) -> Histogram {
-    let (mut r, mut g, mut b, mut l) = (
-        vec![0u32; 256],
-        vec![0u32; 256],
-        vec![0u32; 256],
-        vec![0u32; 256],
-    );
+    let (mut r, mut g, mut b, mut l) = (vec![0u32; 256], vec![0u32; 256], vec![0u32; 256], vec![0u32; 256]);
     let (mut lo, mut hi, mut n) = (0u32, 0u32, 0u32);
     for px in pixels.chunks_exact(3) {
         let (pr, pg, pb) = (px[0], px[1], px[2]);
@@ -46,21 +41,12 @@ pub fn from_rgb(pixels: &[u8]) -> Histogram {
         n += 1;
     }
     let share = |x: u32| if n == 0 { 0.0 } else { x as f32 / n as f32 };
-    Histogram {
-        r,
-        g,
-        b,
-        l,
-        shadows_clipped: share(lo),
-        highlights_clipped: share(hi),
-    }
+    Histogram { r, g, b, l, shadows_clipped: share(lo), highlights_clipped: share(hi) }
 }
 
 /// Reads an image file (JPEG from Lumio's own folders) and counts its levels.
 pub fn from_file(path: &Path) -> anyhow::Result<Histogram> {
-    let img = image::ImageReader::open(path)?
-        .with_guessed_format()?
-        .decode()?;
+    let img = image::ImageReader::open(path)?.with_guessed_format()?.decode()?;
     Ok(from_rgb(img.to_rgb8().as_raw()))
 }
 
@@ -99,9 +85,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("lumio-hist-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("t.jpg");
-        image::RgbImage::from_pixel(8, 8, image::Rgb([255, 255, 255]))
-            .save(&p)
-            .unwrap();
+        image::RgbImage::from_pixel(8, 8, image::Rgb([255, 255, 255])).save(&p).unwrap();
         let h = from_file(&p).unwrap();
         assert_eq!(h.l.iter().sum::<u32>(), 64);
         assert!(h.l[250..].iter().sum::<u32>() == 64);

@@ -148,7 +148,9 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
 
         // Keywords are stored as |a|b|c| so a whole keyword can be matched.
         ("keyword", "has") => format!("lower(ifnull(keywords,'')) LIKE {} ESCAPE '\\'", arg(args, keyword_like(v))),
-        ("keyword", "has_not") => format!("lower(ifnull(keywords,'')) NOT LIKE {} ESCAPE '\\'", arg(args, keyword_like(v))),
+        ("keyword", "has_not") => {
+            format!("lower(ifnull(keywords,'')) NOT LIKE {} ESCAPE '\\'", arg(args, keyword_like(v)))
+        }
         ("keyword", "any") => "ifnull(keywords,'') <> ''".into(),
         ("keyword", "none") => "ifnull(keywords,'') = ''".into(),
 
@@ -158,17 +160,28 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
             let hit = format!(
                 "(lower(filename) LIKE {a} ESCAPE '\\' OR lower(ifnull(title,'')) LIKE {a} ESCAPE '\\' OR lower(ifnull(caption,'')) LIKE {a} ESCAPE '\\' OR lower(ifnull(keywords,'')) LIKE {a} ESCAPE '\\' OR lower(ifnull(place,'')) LIKE {a} ESCAPE '\\')"
             );
-            if r.op == "contains" { hit } else { format!("NOT {hit}") }
+            if r.op == "contains" {
+                hit
+            } else {
+                format!("NOT {hit}")
+            }
         }
 
         ("filename", "contains") => format!("lower(filename) LIKE {} ESCAPE '\\'", arg(args, like(v))),
         ("filename", "not_contains") => format!("lower(filename) NOT LIKE {} ESCAPE '\\'", arg(args, like(v))),
-        ("filename", "starts") => format!("lower(filename) LIKE {} ESCAPE '\\'", arg(args, format!("{}%", crate::db::like_escape(&v.to_lowercase())).into())),
+        ("filename", "starts") => format!(
+            "lower(filename) LIKE {} ESCAPE '\\'",
+            arg(args, format!("{}%", crate::db::like_escape(&v.to_lowercase())).into())
+        ),
 
         // A folder and everything below it.
         ("folder", "in") | ("folder", "not_in") => {
             let clause = crate::db::folder_clause(v, true, args);
-            if r.op == "in" { clause } else { format!("NOT {clause}") }
+            if r.op == "in" {
+                clause
+            } else {
+                format!("NOT {clause}")
+            }
         }
 
         // When it was taken.
@@ -184,7 +197,9 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
             let (a, b) = if a <= b { (a, b) } else { (b, a) };
             format!("substr({DATE}, 1, 10) BETWEEN {} AND {}", arg(args, a.into()), arg(args, b.into()))
         }
-        ("taken", "last_days") => format!("{DATE} >= datetime('now', {})", arg(args, format!("-{} days", days(v)?).into())),
+        ("taken", "last_days") => {
+            format!("{DATE} >= datetime('now', {})", arg(args, format!("-{} days", days(v)?).into()))
+        }
         ("taken", "none") => "taken_at IS NULL".into(),
 
         // When Lumio first saw it.
@@ -194,8 +209,13 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
         }
 
         // Camera: make and model together, e.g. "Canon EOS R5".
-        ("camera", "contains") => format!("lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) LIKE {} ESCAPE '\\'", arg(args, like(v))),
-        ("camera", "not_contains") => format!("lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) NOT LIKE {} ESCAPE '\\'", arg(args, like(v))),
+        ("camera", "contains") => {
+            format!("lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) LIKE {} ESCAPE '\\'", arg(args, like(v)))
+        }
+        ("camera", "not_contains") => format!(
+            "lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) NOT LIKE {} ESCAPE '\\'",
+            arg(args, like(v))
+        ),
         ("camera", "none") => "ifnull(make,'') = '' AND ifnull(model,'') = ''".into(),
         ("lens", "contains") => format!("lower(ifnull(lens,'')) LIKE {} ESCAPE '\\'", arg(args, like(v))),
         ("lens", "none") => "ifnull(lens,'') = ''".into(),
@@ -279,7 +299,8 @@ pub fn save(conn: &Connection, id: Option<i64>, name: &str, rules: &RuleSet) -> 
     let json = serde_json::to_string(rules)?;
     match id {
         Some(id) => {
-            let n = conn.execute("UPDATE collections SET name = ?1, rules = ?2 WHERE id = ?3", params![name, json, id])?;
+            let n =
+                conn.execute("UPDATE collections SET name = ?1, rules = ?2 WHERE id = ?3", params![name, json, id])?;
             if n == 0 {
                 bail!("That collection no longer exists.");
             }
@@ -422,7 +443,8 @@ mod tests {
         let c = library();
         assert_eq!(names(&c, &all(vec![])).len(), 5);
         assert_eq!(names(&c, &all(vec![rule("camera", "contains", "  ")])).len(), 5);
-        let half = Rule { field: "taken".into(), op: "between".into(), value: "2024-01-01".into(), value2: String::new() };
+        let half =
+            Rule { field: "taken".into(), op: "between".into(), value: "2024-01-01".into(), value2: String::new() };
         assert_eq!(names(&c, &all(vec![half])).len(), 5);
     }
 
@@ -448,7 +470,12 @@ mod tests {
     #[test]
     fn dates() {
         let c = library();
-        let between = Rule { field: "taken".into(), op: "between".into(), value: "2024-06-30".into(), value2: "2024-01-01".into() };
+        let between = Rule {
+            field: "taken".into(),
+            op: "between".into(),
+            value: "2024-06-30".into(),
+            value2: "2024-01-01".into(),
+        };
         assert_eq!(names(&c, &all(vec![between])), ["a.jpg", "c.jpg"]);
         assert_eq!(names(&c, &all(vec![rule("taken", "month", "12")])), ["b.cr3"]);
         assert_eq!(names(&c, &all(vec![rule("taken", "none", "")])), ["d.mp4", "trips-notes.png"]);
@@ -500,7 +527,8 @@ mod tests {
         let id = save(&c, None, "Best", &set).unwrap();
         let l = list(&c).unwrap();
         assert_eq!((l[0].id, l[0].name.as_str(), l[0].count), (id, "Best", 2));
-        save(&c, Some(id), "Best of 2024", &all(vec![rule("rating", "gte", "5"), rule("taken", "year", "2024")])).unwrap();
+        save(&c, Some(id), "Best of 2024", &all(vec![rule("rating", "gte", "5"), rule("taken", "year", "2024")]))
+            .unwrap();
         assert_eq!(list(&c).unwrap()[0].count, 1);
         assert_eq!(get_rules(&c, id).unwrap().unwrap().rules.len(), 2);
         delete(&c, id).unwrap();

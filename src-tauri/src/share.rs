@@ -112,7 +112,8 @@ pub fn prepare(state: &AppState, ids: &[i64]) -> Result<Vec<PathBuf>> {
         let d = match &dir {
             Some(d) => d.clone(),
             None => {
-                let stamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+                let stamp =
+                    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
                 let d = root.join(stamp.to_string());
                 std::fs::create_dir_all(&d)?;
                 dir = Some(d.clone());
@@ -153,14 +154,16 @@ fn convert(state: &AppState, p: &Photo, small: bool, dir: &Path) -> Result<PathB
     } else {
         img
     };
-    let stem = Path::new(&p.filename).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "photo".into());
+    let stem =
+        Path::new(&p.filename).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "photo".into());
     let dest = unique(dir, &stem, "jpg");
     std::fs::write(&dest, thumbs::encode_jpeg(&img, 90)?)?;
     Ok(dest)
 }
 
 fn count(files: &[PathBuf]) -> String {
-    let videos = files.iter().filter(|f| metadata::is_video(f.extension().and_then(|e| e.to_str()).unwrap_or(""))).count();
+    let videos =
+        files.iter().filter(|f| metadata::is_video(f.extension().and_then(|e| e.to_str()).unwrap_or(""))).count();
     match (files.len(), videos) {
         (1, 1) => "The video".into(),
         (1, _) => "The photo".into(),
@@ -211,7 +214,11 @@ pub fn copy(files: &[PathBuf]) -> Result<Copied> {
 }
 
 fn paste_key() -> &'static str {
-    if cfg!(target_os = "macos") { "⌘V" } else { "Ctrl+V" }
+    if cfg!(target_os = "macos") {
+        "⌘V"
+    } else {
+        "Ctrl+V"
+    }
 }
 
 fn file_manager() -> &'static str {
@@ -238,8 +245,12 @@ pub fn copy_only(state: &AppState, ids: &[i64]) -> Result<Outcome> {
     let files = prepare(state, ids)?;
     let what = count(&files);
     match copy(&files)? {
-        Copied::Picture => Ok(done(format!("{what} is copied. Paste it with {} into a chat, email or post.", paste_key()))),
-        Copied::Files => Ok(done(format!("{what} copied. Paste them with {} into a chat, email or folder.", paste_key()))),
+        Copied::Picture => {
+            Ok(done(format!("{what} is copied. Paste it with {} into a chat, email or post.", paste_key())))
+        }
+        Copied::Files => {
+            Ok(done(format!("{what} copied. Paste them with {} into a chat, email or folder.", paste_key())))
+        }
     }
 }
 
@@ -308,19 +319,17 @@ fn url_escape(s: &str) -> String {
 pub fn whatsapp(state: &AppState, ids: &[i64], web: bool) -> Result<Outcome> {
     let files = prepare(state, ids)?;
     log::info!("share: WhatsApp{} with {} file(s)", if web { " Web" } else { "" }, files.len());
-    if !web {
-        if imp::whatsapp_installed() {
-            // The photo also goes on the clipboard, in case the app doesn't take the files.
-            let copied = copy(&files)?;
-            if imp::open_whatsapp_with(&files)? {
-                return Ok(done(format!(
-                    "{} is opening in WhatsApp. Choose a chat and press Send. (If it doesn't appear, open a chat and press {}.)",
-                    count(&files),
-                    paste_key()
-                )));
-            }
-            return Ok(done(pasted_hint("WhatsApp", copied, &files)));
+    if !web && imp::whatsapp_installed() {
+        // The photo also goes on the clipboard, in case the app doesn't take the files.
+        let copied = copy(&files)?;
+        if imp::open_whatsapp_with(&files)? {
+            return Ok(done(format!(
+                "{} is opening in WhatsApp. Choose a chat and press Send. (If it doesn't appear, open a chat and press {}.)",
+                count(&files),
+                paste_key()
+            )));
         }
+        return Ok(done(pasted_hint("WhatsApp", copied, &files)));
     }
     let copied = copy(&files)?;
     if copied == Copied::Files {
@@ -416,7 +425,8 @@ mod imp {
             let b = view.bounds();
             let y = if view.isFlipped() { y } else { b.size.height - y };
             let rect = NSRect::new(NSPoint::new(x, y), NSSize::new(1.0, 1.0));
-            let picker = unsafe { NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items(&files)) };
+            let picker =
+                unsafe { NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items(&files)) };
             picker.showRelativeToRect_ofView_preferredEdge(rect, view, NSRectEdge::MinY);
             PICKER.with(|p| *p.borrow_mut() = Some(picker));
             Ok(())
@@ -478,7 +488,9 @@ mod imp {
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED};
     use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
     use windows::Win32::System::Mapi::{MapiFileDescW, MapiMessageW};
-    use windows::Win32::UI::Shell::{AssocQueryStringW, IDataTransferManagerInterop, ASSOCF_IS_PROTOCOL, ASSOCSTR_FRIENDLYAPPNAME};
+    use windows::Win32::UI::Shell::{
+        AssocQueryStringW, IDataTransferManagerInterop, ASSOCF_IS_PROTOCOL, ASSOCSTR_FRIENDLYAPPNAME,
+    };
 
     static TOKEN: parking_lot::Mutex<Option<(isize, i64)>> = parking_lot::const_mutex(None);
 
@@ -546,11 +558,12 @@ mod imp {
                 }
             }
             let storage = AgileItems(storage.0);
-            let token = dtm.DataRequested(&TypedEventHandler::new(
-                move |_, args: &Option<DataRequestedEventArgs>| {
+            let token =
+                dtm.DataRequested(&TypedEventHandler::new(move |_, args: &Option<DataRequestedEventArgs>| {
                     let Some(args) = args else { return Ok(()) };
                     let data = args.Request()?.Data()?;
-                    let title = if count == 1 { "Photo from Lumio".to_string() } else { format!("{count} photos from Lumio") };
+                    let title =
+                        if count == 1 { "Photo from Lumio".to_string() } else { format!("{count} photos from Lumio") };
                     data.Properties()?.SetTitle(&HSTRING::from(title))?;
                     let list: IIterable<IStorageItem> = {
                         let s = &storage; // the whole wrapper, so the closure stays Send
@@ -558,8 +571,7 @@ mod imp {
                     };
                     data.SetStorageItemsReadOnly(&list)?;
                     Ok(())
-                },
-            ))?;
+                }))?;
             *TOKEN.lock() = Some((h, token.Value));
             interop.ShowShareUIForWindow(hwnd)?;
             Ok(())
@@ -583,12 +595,16 @@ mod imp {
             let r = (|| -> Result<()> {
                 let _com = ComGuard::sta();
                 unsafe {
-                    let lib = Library(LoadLibraryW(w!("MAPI32.DLL")).map_err(|_| anyhow!("no email program is set up"))?);
-                    let f = GetProcAddress(lib.0, windows::core::s!("MAPISendMailW")).ok_or_else(|| anyhow!("no MAPISendMailW"))?;
+                    let lib =
+                        Library(LoadLibraryW(w!("MAPI32.DLL")).map_err(|_| anyhow!("no email program is set up"))?);
+                    let f = GetProcAddress(lib.0, windows::core::s!("MAPISendMailW"))
+                        .ok_or_else(|| anyhow!("no MAPISendMailW"))?;
                     let send: SendMailW = std::mem::transmute(f);
                     let mut paths: Vec<Vec<u16>> = files.iter().map(|f| wide(&f.to_string_lossy())).collect();
-                    let mut names: Vec<Vec<u16>> =
-                        files.iter().map(|f| wide(&f.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default())).collect();
+                    let mut names: Vec<Vec<u16>> = files
+                        .iter()
+                        .map(|f| wide(&f.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()))
+                        .collect();
                     let mut descs: Vec<MapiFileDescW> = paths
                         .iter_mut()
                         .zip(names.iter_mut())
@@ -632,7 +648,15 @@ mod imp {
         let mut buf = [0u16; 260];
         let mut len = buf.len() as u32;
         unsafe {
-            AssocQueryStringW(ASSOCF_IS_PROTOCOL, ASSOCSTR_FRIENDLYAPPNAME, w!("whatsapp"), PCWSTR::null(), PWSTR(buf.as_mut_ptr()), &mut len).is_ok()
+            AssocQueryStringW(
+                ASSOCF_IS_PROTOCOL,
+                ASSOCSTR_FRIENDLYAPPNAME,
+                w!("whatsapp"),
+                PCWSTR::null(),
+                PWSTR(buf.as_mut_ptr()),
+                &mut len,
+            )
+            .is_ok()
         }
     }
 

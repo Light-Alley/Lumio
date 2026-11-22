@@ -121,10 +121,7 @@ pub async fn check_for_updates(app: AppHandle) -> Result<UpdateInfo, String> {
         return Err("No published Lumio release was found on GitHub yet.".into());
     }
     if !status.is_success() {
-        return Err(format!(
-            "GitHub didn't answer the update check (HTTP {}). Try again later.",
-            status.as_u16()
-        ));
+        return Err(format!("GitHub didn't answer the update check (HTTP {}). Try again later.", status.as_u16()));
     }
     let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
     from_release(&v, &current, install_supported(&app)).ok_or_else(|| "GitHub's answer had no version number.".into())
@@ -168,9 +165,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn open_project_page(url: Option<String>) -> Result<(), String> {
     // Only ever open Lumio's own GitHub pages from here (release notes, guide, issues).
-    let url = url
-        .filter(|u| is_project_page(u))
-        .unwrap_or_else(|| format!("{REPO_URL}/releases/latest"));
+    let url = url.filter(|u| is_project_page(u)).unwrap_or_else(|| format!("{REPO_URL}/releases/latest"));
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 

@@ -107,7 +107,12 @@ impl ExifTool {
     /// `resource_dir` is the Tauri resource directory, which may contain a bundled
     /// `exiftool/` folder.
     pub fn new(resource_dir: Option<PathBuf>) -> Self {
-        Self { program: locate(resource_dir), proc: Mutex::new(None), seq: AtomicU64::new(1), scratch: std::env::temp_dir() }
+        Self {
+            program: locate(resource_dir),
+            proc: Mutex::new(None),
+            seq: AtomicU64::new(1),
+            scratch: std::env::temp_dir(),
+        }
     }
 
     /// Use `dir` (Lumio's own cache folder) for temporary files.
@@ -293,8 +298,7 @@ impl ExifTool {
 
     /// Write tags. `assignments` are ExifTool arguments such as `-XMP:Rating=3`.
     pub fn write(&self, file: &Path, assignments: &[String]) -> Result<()> {
-        let mut args: Vec<String> =
-            vec!["-overwrite_original".into(), "-codedcharacterset=utf8".into(), "-m".into()];
+        let mut args: Vec<String> = vec!["-overwrite_original".into(), "-codedcharacterset=utf8".into(), "-m".into()];
         args.extend(assignments.iter().cloned());
         args.push(path_arg(file)?);
         let out = self.run(&args)?;
@@ -315,11 +319,9 @@ impl ExifTool {
         }
         let args = vec!["-o".to_string(), fmt_path_arg(&out)?, path_arg(file)?];
         self.run(&args)?;
-        if !direct && out.exists() {
-            if std::fs::rename(&out, xmp).is_err() {
-                std::fs::copy(&out, xmp)?;
-                let _ = std::fs::remove_file(&out);
-            }
+        if !direct && out.exists() && std::fs::rename(&out, xmp).is_err() {
+            std::fs::copy(&out, xmp)?;
+            let _ = std::fs::remove_file(&out);
         }
         if !xmp.exists() {
             bail!("could not create sidecar {}", xmp.display());
@@ -379,18 +381,52 @@ impl Drop for ExifTool {
 }
 
 pub const READ_TAGS: &[&str] = &[
-    "ImageWidth", "ImageHeight", "ExifImageWidth", "ExifImageHeight", "Orientation",
-    "DateTimeOriginal", "CreateDate", "DateCreated", "ModifyDate",
-    "Rating", "Label",
-    "XMP-dc:Title", "ObjectName",
-    "XMP-dc:Description", "Caption-Abstract", "ImageDescription",
-    "Subject", "Keywords", "HierarchicalSubject",
-    "XMP-dc:Creator", "Artist", "By-line",
-    "XMP-dc:Rights", "Copyright", "CopyrightNotice",
-    "GPSLatitude", "GPSLongitude", "GPSAltitude",
-    "City", "State", "Country", "Location", "Sub-location", "Province-State", "Country-PrimaryLocationName",
-    "Make", "Model", "LensModel", "Lens", "LensID", "ISO", "FNumber", "ExposureTime", "FocalLength",
-    "Duration", "Rotation",
+    "ImageWidth",
+    "ImageHeight",
+    "ExifImageWidth",
+    "ExifImageHeight",
+    "Orientation",
+    "DateTimeOriginal",
+    "CreateDate",
+    "DateCreated",
+    "ModifyDate",
+    "Rating",
+    "Label",
+    "XMP-dc:Title",
+    "ObjectName",
+    "XMP-dc:Description",
+    "Caption-Abstract",
+    "ImageDescription",
+    "Subject",
+    "Keywords",
+    "HierarchicalSubject",
+    "XMP-dc:Creator",
+    "Artist",
+    "By-line",
+    "XMP-dc:Rights",
+    "Copyright",
+    "CopyrightNotice",
+    "GPSLatitude",
+    "GPSLongitude",
+    "GPSAltitude",
+    "City",
+    "State",
+    "Country",
+    "Location",
+    "Sub-location",
+    "Province-State",
+    "Country-PrimaryLocationName",
+    "Make",
+    "Model",
+    "LensModel",
+    "Lens",
+    "LensID",
+    "ISO",
+    "FNumber",
+    "ExposureTime",
+    "FocalLength",
+    "Duration",
+    "Rotation",
 ];
 
 fn locate(resource_dir: Option<PathBuf>) -> Option<(PathBuf, Vec<String>)> {
@@ -443,7 +479,10 @@ pub fn test_tool() -> Option<ExifTool> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
     let et = ExifTool::new(Some(dir)).with_scratch(std::env::temp_dir());
     if !et.available() {
-        assert!(std::env::var_os("LUMIO_REQUIRE_EXIFTOOL").is_none(), "ExifTool is required (run npm run fetch-exiftool)");
+        assert!(
+            std::env::var_os("LUMIO_REQUIRE_EXIFTOOL").is_none(),
+            "ExifTool is required (run npm run fetch-exiftool)"
+        );
         eprintln!("ExifTool not installed; skipping");
         return None;
     }
@@ -507,7 +546,6 @@ mod tests {
         let plain = dir.path().join("plain.jpg");
         assert_eq!(et.plain(&plain).unwrap().path(), plain.as_path());
     }
-
 
     #[test]
     fn awkward_values_and_paths_round_trip_through_exiftool() {

@@ -141,7 +141,9 @@ fn serve_video(path: &std::path::Path, ext: &str, range: Option<&str>, cors: Opt
     if wanted.is_none() && len <= VIDEO_CHUNK {
         let mut body = Vec::with_capacity(len as usize);
         return match f.read_to_end(&mut body) {
-            Ok(_) => base().status(StatusCode::OK).header(header::CONTENT_LENGTH, body.len()).body(body).unwrap_or_default(),
+            Ok(_) => {
+                base().status(StatusCode::OK).header(header::CONTENT_LENGTH, body.len()).body(body).unwrap_or_default()
+            }
             Err(_) => not_found(cors),
         };
     }
@@ -217,7 +219,9 @@ fn video_base(base: tauri::State<'_, VideoBase>) -> Option<String> {
 
 fn clean_previews(dir: &std::path::Path) {
     // A clock set before 1970 + 14 days has no cutoff (and must not panic).
-    let Some(cutoff) = std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(14 * 24 * 3600)) else { return };
+    let Some(cutoff) = std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(14 * 24 * 3600)) else {
+        return;
+    };
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.flatten() {
             if e.metadata().and_then(|m| m.modified()).map(|t| t < cutoff).unwrap_or(false) {
@@ -267,7 +271,8 @@ pub fn run() {
             let cors = cors_origin(&request);
             asset_pool().spawn(move || {
                 let c = cors.as_deref();
-                responder.respond(id.map(|id| serve_photo(&state, id, range.as_deref(), c)).unwrap_or_else(|| not_found(c)));
+                responder
+                    .respond(id.map(|id| serve_photo(&state, id, range.as_deref(), c)).unwrap_or_else(|| not_found(c)));
             });
         })
         .setup(|app| {

@@ -3,19 +3,17 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-pub const IMAGE_EXTS: &[&str] = &[
-    "jpg", "jpeg", "jpe", "png", "webp", "gif", "bmp", "tif", "tiff", "heic", "heif", "avif",
-];
+pub const IMAGE_EXTS: &[&str] =
+    &["jpg", "jpeg", "jpe", "png", "webp", "gif", "bmp", "tif", "tiff", "heic", "heif", "avif"];
 pub const RAW_EXTS: &[&str] = &[
-    "dng", "cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "srw",
-    "x3f", "3fr", "iiq", "erf", "mef", "mos", "kdc", "dcr", "rwl",
+    "dng", "cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "srw", "x3f", "3fr",
+    "iiq", "erf", "mef", "mos", "kdc", "dcr", "rwl",
 ];
 
 /// Video files. Lumio catalogues them like photos and plays them in the webview's own
 /// player, so which ones actually play depends on the system (see docs/video.md).
-pub const VIDEO_EXTS: &[&str] = &[
-    "mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv",
-];
+pub const VIDEO_EXTS: &[&str] =
+    &["mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv"];
 
 pub fn is_supported(ext: &str) -> bool {
     let e = ext.to_ascii_lowercase();
@@ -191,12 +189,22 @@ pub fn normalize_date(d: &str) -> Option<String> {
     }
     let date = d.get(..10)?.replace(':', "-");
     let b = date.as_bytes();
-    let shape = b.len() == 10 && b[4] == b'-' && b[7] == b'-' && b.iter().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit());
+    let shape = b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b.iter().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit());
     if !shape {
         return None;
     }
     let time = match d.get(11..19) {
-        Some(t) if t.len() == 8 && t.bytes().enumerate().all(|(i, c)| if i == 2 || i == 5 { c == b':' } else { c.is_ascii_digit() }) => t.to_string(),
+        Some(t)
+            if t.len() == 8
+                && t.bytes()
+                    .enumerate()
+                    .all(|(i, c)| if i == 2 || i == 5 { c == b':' } else { c.is_ascii_digit() }) =>
+        {
+            t.to_string()
+        }
         _ => "00:00:00".into(),
     };
     Some(format!("{date}T{time}"))
@@ -364,7 +372,8 @@ pub fn plan_keywords(wanted: &[String], removed: &[String], old_hier: &[String])
     for h in old_hier {
         let parts: Vec<String> = split_path(h).iter().map(|s| s.to_string()).collect();
         let Some(leaf) = parts.last() else { continue };
-        let leaf_wanted = has_ci(&flat, leaf) || new_paths.iter().any(|p| p.last().is_some_and(|l| l.eq_ignore_ascii_case(leaf)));
+        let leaf_wanted =
+            has_ci(&flat, leaf) || new_paths.iter().any(|p| p.last().is_some_and(|l| l.eq_ignore_ascii_case(leaf)));
         if leaf_wanted && !parts.iter().any(|p| has_ci(removed, p)) {
             push_ci(&mut hierarchy, &parts.join("|"));
             kept.push(parts);
@@ -377,7 +386,8 @@ pub fn plan_keywords(wanted: &[String], removed: &[String], old_hier: &[String])
     }
     // Parents of dropped paths that nothing else still needs.
     let needed = |k: &str| kept.iter().chain(new_paths.iter()).any(|p| has_ci(p, k));
-    let orphan = |k: &str| !needed(k) && dropped.iter().any(|p| p[..p.len() - 1].iter().any(|x| x.eq_ignore_ascii_case(k)));
+    let orphan =
+        |k: &str| !needed(k) && dropped.iter().any(|p| p[..p.len() - 1].iter().any(|x| x.eq_ignore_ascii_case(k)));
     let mut subject: Vec<String> = vec![];
     for k in &flat {
         if !orphan(k) {
@@ -775,10 +785,19 @@ mod exiftool_tests {
         let f = tmp.path().join("place.jpg");
         image::RgbImage::new(8, 8).save(&f).unwrap();
         let set: Vec<String> = [
-            "-GPSLatitude=64.1", "-GPSLatitudeRef=N", "-GPSLongitude=21.9", "-GPSLongitudeRef=W",
-            "-IPTC:City=Reykjavik", "-IPTC:Province-State=Capital", "-IPTC:Country-PrimaryLocationName=Iceland",
-            "-IPTC:Sub-location=Harbour", "-XMP-photoshop:City=Reykjavik", "-XMP-photoshop:State=Capital",
-            "-XMP-photoshop:Country=Iceland", "-XMP-iptcCore:Location=Harbour", "-XMP-iptcCore:CountryCode=IS",
+            "-GPSLatitude=64.1",
+            "-GPSLatitudeRef=N",
+            "-GPSLongitude=21.9",
+            "-GPSLongitudeRef=W",
+            "-IPTC:City=Reykjavik",
+            "-IPTC:Province-State=Capital",
+            "-IPTC:Country-PrimaryLocationName=Iceland",
+            "-IPTC:Sub-location=Harbour",
+            "-XMP-photoshop:City=Reykjavik",
+            "-XMP-photoshop:State=Capital",
+            "-XMP-photoshop:Country=Iceland",
+            "-XMP-iptcCore:Location=Harbour",
+            "-XMP-iptcCore:CountryCode=IS",
             "-XMP-dc:Title=Keep me",
         ]
         .iter()
@@ -790,7 +809,17 @@ mod exiftool_tests {
         et.write(&f, &strip_location_args()).unwrap();
         let after = et.read_json(std::slice::from_ref(&f)).unwrap();
         let o = after[0].as_object().unwrap();
-        for k in ["GPSLatitude", "GPSLongitude", "City", "State", "Country", "Location", "Sub-location", "Province-State", "Country-PrimaryLocationName"] {
+        for k in [
+            "GPSLatitude",
+            "GPSLongitude",
+            "City",
+            "State",
+            "Country",
+            "Location",
+            "Sub-location",
+            "Province-State",
+            "Country-PrimaryLocationName",
+        ] {
             assert!(!o.contains_key(k), "{k} survived: {:?}", o.get(k));
         }
         assert_eq!(o["Title"].as_str(), Some("Keep me"));
@@ -810,7 +839,8 @@ mod exiftool_tests {
         assert_eq!(m.hier_keywords, vec!["Places|France|Paris".to_string()]);
 
         // Take "Paris" off, add a path, change rating and clear the label.
-        let wanted: Vec<String> = ["Places", "France", "Holiday", "People|Family"].iter().map(|s| s.to_string()).collect();
+        let wanted: Vec<String> =
+            ["Places", "France", "Holiday", "People|Family"].iter().map(|s| s.to_string()).collect();
         let plan = plan_keywords(&wanted, &["Paris".to_string()], &m.hier_keywords);
         let edit = Edit { rating: Some(2), label: Some(String::new()), ..Default::default() };
         et.write(&side, &write_args(&edit, Some((&plan, true)), true)).unwrap();

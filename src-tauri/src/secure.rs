@@ -83,7 +83,10 @@ mod tests {
 
     #[test]
     fn urls_lose_their_query() {
-        assert_eq!(redact_url("https://api.smugmug.com/api/v2/x?oauth_token=abc&x=1"), "https://api.smugmug.com/api/v2/x?…");
+        assert_eq!(
+            redact_url("https://api.smugmug.com/api/v2/x?oauth_token=abc&x=1"),
+            "https://api.smugmug.com/api/v2/x?…"
+        );
         assert_eq!(redact_url("https://u:p@h.example/a"), "https://h.example/a");
         assert_eq!(redact_url("not a url?token=1"), "not a url");
     }

@@ -14,8 +14,8 @@ use parking_lot::Mutex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use tauri::menu::{
-    AboutMetadataBuilder, CheckMenuItem, CheckMenuItemBuilder, IsMenuItem, Menu, MenuItem, MenuItemBuilder, PredefinedMenuItem, Submenu,
-    SubmenuBuilder,
+    AboutMetadataBuilder, CheckMenuItem, CheckMenuItemBuilder, IsMenuItem, Menu, MenuItem, MenuItemBuilder,
+    PredefinedMenuItem, Submenu, SubmenuBuilder,
 };
 use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 
@@ -58,7 +58,13 @@ impl Ctx<'_> {
         Ok(it)
     }
 
-    fn check(&mut self, id: &str, text: &str, accel: Option<&str>, hint: Option<&str>) -> tauri::Result<CheckMenuItem<Wry>> {
+    fn check(
+        &mut self,
+        id: &str,
+        text: &str,
+        accel: Option<&str>,
+        hint: Option<&str>,
+    ) -> tauri::Result<CheckMenuItem<Wry>> {
         let label = label(text, accel, hint);
         let mut b = CheckMenuItemBuilder::with_id(id, label).checked(false);
         if let Some(a) = accel {
@@ -89,10 +95,7 @@ fn sub(app: &AppHandle, text: &str, items: &[&dyn IsMenuItem<Wry>]) -> tauri::Re
 
 /// Build the menu bar and set it on the app.
 pub fn install(app: &AppHandle) -> tauri::Result<()> {
-    let mut c = Ctx {
-        app,
-        items: MenuItems::default(),
-    };
+    let mut c = Ctx { app, items: MenuItems::default() };
     let s = || sep(app);
     let version = app.package_info().version.to_string();
 
@@ -225,15 +228,11 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     let sort_menu = sub(app, "Sort By", &sort_refs)?;
     let bigger = c.item("thumbs_bigger", "Larger Thumbnails", Some("CmdOrCtrl+="), None)?;
     let smaller = c.item("thumbs_smaller", "Smaller Thumbnails", Some("CmdOrCtrl+-"), None)?;
-    let bg_items: Vec<CheckMenuItem<Wry>> = [
-        ("bg_black", "Black"),
-        ("bg_grey", "Grey"),
-        ("bg_lightgrey", "Light Grey"),
-        ("bg_white", "White"),
-    ]
-    .iter()
-    .map(|(id, t)| c.check(id, t, None, None))
-    .collect::<tauri::Result<_>>()?;
+    let bg_items: Vec<CheckMenuItem<Wry>> =
+        [("bg_black", "Black"), ("bg_grey", "Grey"), ("bg_lightgrey", "Light Grey"), ("bg_white", "White")]
+            .iter()
+            .map(|(id, t)| c.check(id, t, None, None))
+            .collect::<tauri::Result<_>>()?;
     let bg_refs: Vec<&dyn IsMenuItem<Wry>> = bg_items.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
     let bg_menu = sub(app, "Viewer Background", &bg_refs)?;
     let th_dark = c.check("theme_dark", "Dark", None, None)?;
@@ -309,11 +308,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         if !cfg!(target_os = "linux") {
             v.push(c.item(
                 "share_sheet",
-                if MAC {
-                    "Share… (AirDrop, Messages, Mail)"
-                } else {
-                    "Share… (Windows share)"
-                },
+                if MAC { "Share… (AirDrop, Messages, Mail)" } else { "Share… (Windows share)" },
                 None,
                 None,
             )?);
@@ -329,12 +324,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     let reread = c.item("reread", "Re-read Metadata and Thumbnail", None, None)?;
     // A plain Delete key would also fire while typing in a text box, so only the Mac's
     // Cmd+Backspace is a menu shortcut; elsewhere the web view handles Delete.
-    let trash = c.item(
-        "trash",
-        "Move to Trash",
-        if MAC { Some("Cmd+Backspace") } else { None },
-        Some("Del"),
-    )?;
+    let trash = c.item("trash", "Move to Trash", if MAC { Some("Cmd+Backspace") } else { None }, Some("Del"))?;
     let photo_menu = sub(
         app,
         "Photo",
@@ -391,14 +381,8 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     let notes = c.item("help_releases", "Release Notes", None, None)?;
     let issue = c.item("help_issue", "Report a Problem or Suggest an Idea…", None, None)?;
     let log = c.item("help_log", "Show Lumio's Log File", None, None)?;
-    let mut help: Vec<Box<dyn IsMenuItem<Wry>>> = vec![
-        Box::new(guide),
-        Box::new(shortcuts),
-        Box::new(notes),
-        Box::new(s()?),
-        Box::new(issue),
-        Box::new(log),
-    ];
+    let mut help: Vec<Box<dyn IsMenuItem<Wry>>> =
+        vec![Box::new(guide), Box::new(shortcuts), Box::new(notes), Box::new(s()?), Box::new(issue), Box::new(log)];
     if !MAC {
         help.push(Box::new(s()?));
         help.push(Box::new(check_updates.clone()));

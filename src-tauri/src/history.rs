@@ -38,17 +38,36 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Change {
-    Move { items: Vec<Moved> },
+    Move {
+        items: Vec<Moved>,
+    },
     /// (copy, original) for every file a copy made.
-    Copy { files: Vec<(PathBuf, PathBuf)> },
+    Copy {
+        files: Vec<(PathBuf, PathBuf)>,
+    },
     /// (photo id, old name, new name).
-    Rename { items: Vec<(i64, String, String)> },
-    FolderRename { from: PathBuf, to: PathBuf },
-    FolderMove { from: PathBuf, to: PathBuf },
-    FolderCopy { to: PathBuf },
-    FolderCreate { path: PathBuf },
+    Rename {
+        items: Vec<(i64, String, String)>,
+    },
+    FolderRename {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    FolderMove {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    FolderCopy {
+        to: PathBuf,
+    },
+    FolderCreate {
+        path: PathBuf,
+    },
     /// Kept so the history is complete; restoring is done from the system Trash.
-    Trash { count: usize, permanent: bool },
+    Trash {
+        count: usize,
+        permanent: bool,
+    },
 }
 
 impl Change {
@@ -79,7 +98,11 @@ fn file_name(p: &Path) -> String {
 }
 
 fn photos(n: usize) -> String {
-    if n == 1 { "1 photo".into() } else { format!("{n} photos") }
+    if n == 1 {
+        "1 photo".into()
+    } else {
+        format!("{n} photos")
+    }
 }
 
 /// Remember a change. Returns its history id.
@@ -99,7 +122,8 @@ pub fn record_move(conn: &Connection, rep: &mut OpReport, copy: bool, dest: &Pat
     let to = file_name(dest);
     if copy && !rep.copies.is_empty() {
         let n = rep.done;
-        rep.history = Some(record(conn, &format!("Copied {} to {to}", photos(n)), &Change::Copy { files: rep.copies.clone() })?);
+        rep.history =
+            Some(record(conn, &format!("Copied {} to {to}", photos(n)), &Change::Copy { files: rep.copies.clone() })?);
     } else if !copy && !rep.moved.is_empty() {
         let n = rep.moved.len();
         let label = if n == 1 {
@@ -126,7 +150,11 @@ pub fn record_trash(conn: &Connection, rep: &mut OpReport, permanent: bool) -> R
     if rep.done == 0 {
         return Ok(());
     }
-    let label = if permanent { format!("Deleted {} permanently", photos(rep.done)) } else { format!("Moved {} to the Trash", photos(rep.done)) };
+    let label = if permanent {
+        format!("Deleted {} permanently", photos(rep.done))
+    } else {
+        format!("Moved {} to the Trash", photos(rep.done))
+    };
     rep.history = Some(record(conn, &label, &Change::Trash { count: rep.done, permanent })?);
     Ok(())
 }
@@ -134,7 +162,8 @@ pub fn record_trash(conn: &Connection, rep: &mut OpReport, permanent: bool) -> R
 // ------------------------------------------------------------------ listing
 
 pub fn list(conn: &Connection, limit: i64) -> Result<Vec<Entry>> {
-    let mut st = conn.prepare("SELECT id, at, label, change, undone_at, note FROM history ORDER BY id DESC LIMIT ?1")?;
+    let mut st =
+        conn.prepare("SELECT id, at, label, change, undone_at, note FROM history ORDER BY id DESC LIMIT ?1")?;
     let rows = st.query_map([limit], |r| {
         let change: String = r.get(3)?;
         let undone: Option<i64> = r.get(4)?;
@@ -170,11 +199,9 @@ pub struct UndoReport {
 /// The newest change that can still be undone.
 pub fn latest(conn: &Connection) -> Result<Option<i64>> {
     let mut st = conn.prepare("SELECT id, change FROM history WHERE undone_at IS NULL ORDER BY id DESC")?;
-    let rows: Vec<(i64, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
-    Ok(rows
-        .into_iter()
-        .find(|(_, c)| serde_json::from_str::<Change>(c).is_ok_and(|c| c.undoable()))
-        .map(|(id, _)| id))
+    let rows: Vec<(i64, String)> =
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+    Ok(rows.into_iter().find(|(_, c)| serde_json::from_str::<Change>(c).is_ok_and(|c| c.undoable())).map(|(id, _)| id))
 }
 
 /// Undo the change `id` and every change made after it, newest first. Without an id,
@@ -189,11 +216,13 @@ pub fn undo<H: Host + ?Sized>(h: &H, id: Option<i64>) -> Result<UndoReport> {
     };
     let steps: Vec<(i64, String, String)> = {
         let conn = h.conn().lock();
-        let exists: Option<i64> = conn.query_row("SELECT id FROM history WHERE id = ?1", [target], |r| r.get(0)).optional()?;
+        let exists: Option<i64> =
+            conn.query_row("SELECT id FROM history WHERE id = ?1", [target], |r| r.get(0)).optional()?;
         if exists.is_none() {
             bail!("That change is no longer in the history.");
         }
-        let mut st = conn.prepare("SELECT id, label, change FROM history WHERE id >= ?1 AND undone_at IS NULL ORDER BY id DESC")?;
+        let mut st = conn
+            .prepare("SELECT id, label, change FROM history WHERE id >= ?1 AND undone_at IS NULL ORDER BY id DESC")?;
         let rows = st.query_map([target], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
@@ -214,7 +243,9 @@ pub fn undo<H: Host + ?Sized>(h: &H, id: Option<i64>) -> Result<UndoReport> {
         rep.done += done;
         rep.steps += 1;
         rep.label = Some(label);
-        h.conn().lock().execute("UPDATE history SET undone_at = ?1, note = ?2 WHERE id = ?3", params![now(), note, id])?;
+        h.conn()
+            .lock()
+            .execute("UPDATE history SET undone_at = ?1, note = ?2 WHERE id = ?3", params![now(), note, id])?;
     }
     Ok(rep)
 }
@@ -262,7 +293,10 @@ fn undo_one<H: Host + ?Sized>(h: &H, change: &Change, rep: &mut UndoReport) -> R
                 return Ok(0);
             }
             if from.exists() {
-                rep.failed.push((file_name(to), format!("there is a folder named \"{}\" in {} again", file_name(from), parent.display())));
+                rep.failed.push((
+                    file_name(to),
+                    format!("there is a folder named \"{}\" in {} again", file_name(from), parent.display()),
+                ));
                 return Ok(0);
             }
             match fileops::move_folder(h, to, parent, false) {
@@ -292,7 +326,12 @@ fn undo_one<H: Host + ?Sized>(h: &H, change: &Change, rep: &mut UndoReport) -> R
                     Ok(1)
                 }
                 Err(e) => {
-                    rep.failed.push((file_name(to), format!("the copy could not be moved to the Trash ({e}); delete it yourself if you don't want it")));
+                    rep.failed.push((
+                        file_name(to),
+                        format!(
+                            "the copy could not be moved to the Trash ({e}); delete it yourself if you don't want it"
+                        ),
+                    ));
                     Ok(0)
                 }
             }
@@ -374,7 +413,11 @@ fn undo_copy<H: Host + ?Sized>(h: &H, files: &[(PathBuf, PathBuf)], rep: &mut Un
             Err(_) => match fileops::same_content(copy, original) {
                 Ok(true) => std::fs::remove_file(copy).is_ok(),
                 _ => {
-                    rep.failed.push((file_name(copy), "the drive has no Trash and the copy is no longer the same as the original, so it was kept".into()));
+                    rep.failed.push((
+                        file_name(copy),
+                        "the drive has no Trash and the copy is no longer the same as the original, so it was kept"
+                            .into(),
+                    ));
                     false
                 }
             },
@@ -533,7 +576,9 @@ mod tests {
         let b = h.file(r, &t.join("b.jpg"), None);
         let c = h.file(r, &t.join("c.jpg"), None);
         h.file(r, &t.join("c.xmp"), None);
-        let mut rr = rename::rename_in(&h.conn, &[(a, "b.jpg".into()), (b, "a.jpg".into()), (c, "Sunset 001.jpg".into())]).unwrap();
+        let mut rr =
+            rename::rename_in(&h.conn, &[(a, "b.jpg".into()), (b, "a.jpg".into()), (c, "Sunset 001.jpg".into())])
+                .unwrap();
         record_rename(&h.conn.lock(), &mut rr).unwrap();
         assert_eq!(entries(&h)[0].label, "Renamed 3 photos");
         undo(&h, None).unwrap();

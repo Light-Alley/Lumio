@@ -67,7 +67,11 @@ pub fn restart(state: &Arc<AppState>) {
                         }
                     }
                 } else if metadata::is_supported(&ext) {
-                    if p.exists() { files.push(p.clone()) } else { removed.push(p.clone()) }
+                    if p.exists() {
+                        files.push(p.clone())
+                    } else {
+                        removed.push(p.clone())
+                    }
                 } else if p.is_dir() {
                     if matches!(ev.kind, EventKind::Create(_) | EventKind::Modify(notify::event::ModifyKind::Name(_))) {
                         folders.push(p.clone());
@@ -80,13 +84,22 @@ pub fn restart(state: &Arc<AppState>) {
                 }
             }
         }
-        if !removed.is_empty() { state.queue(Job::Removed(removed)); }
-        for f in folders { state.queue(Job::ScanFolder(f)); }
-        if !files.is_empty() { state.queue(Job::Files(files)); }
+        if !removed.is_empty() {
+            state.queue(Job::Removed(removed));
+        }
+        for f in folders {
+            state.queue(Job::ScanFolder(f));
+        }
+        if !files.is_empty() {
+            state.queue(Job::Files(files));
+        }
     });
     let mut debouncer = match debouncer {
         Ok(d) => d,
-        Err(e) => { log::warn!("file watcher unavailable: {e}"); return; }
+        Err(e) => {
+            log::warn!("file watcher unavailable: {e}");
+            return;
+        }
     };
     for r in roots {
         if let Err(e) = debouncer.watch(&r, RecursiveMode::Recursive) {

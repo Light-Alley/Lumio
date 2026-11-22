@@ -172,7 +172,11 @@ pub async fn chat(state: Arc<AppState>, user_text: String) -> Result<ChatReply> 
         let old = std::mem::take(&mut c.messages);
         c.messages = trim_history(strip_old_images(old), MAX_HISTORY);
     }
-    let r = if s.provider == "openai" { chat_openai(&state, &s, user_text).await } else { chat_anthropic(&state, &s, user_text).await };
+    let r = if s.provider == "openai" {
+        chat_openai(&state, &s, user_text).await
+    } else {
+        chat_anthropic(&state, &s, user_text).await
+    };
     emit_status(&state, "");
     r
 }
@@ -238,7 +242,9 @@ pub fn check_base_url(raw: &str) -> Result<reqwest::Url> {
     let link_local = match &host {
         url::Host::Ipv4(ip) => ip.is_link_local() || ip.is_unspecified() || ip.is_broadcast(),
         url::Host::Ipv6(ip) => (ip.segments()[0] & 0xffc0) == 0xfe80 || ip.is_unspecified(),
-        url::Host::Domain(d) => d.eq_ignore_ascii_case("metadata.google.internal") || d.eq_ignore_ascii_case("metadata"),
+        url::Host::Domain(d) => {
+            d.eq_ignore_ascii_case("metadata.google.internal") || d.eq_ignore_ascii_case("metadata")
+        }
     };
     if link_local {
         bail!("That address can't be used for an AI server.");
@@ -255,7 +261,13 @@ pub fn check_base_url(raw: &str) -> Result<reqwest::Url> {
 
 /// Runs a tool off the async threads: searching the catalogue and reading thumbnails is
 /// blocking database and disk work.
-async fn tool(state: &Arc<AppState>, name: &str, input: &Value, reply: &mut ChatReply, allow_images: bool) -> (Vec<Value>, bool) {
+async fn tool(
+    state: &Arc<AppState>,
+    name: &str,
+    input: &Value,
+    reply: &mut ChatReply,
+    allow_images: bool,
+) -> (Vec<Value>, bool) {
     let (st, name, input) = (state.clone(), name.to_string(), input.clone());
     let res = tauri::async_runtime::spawn_blocking(move || {
         let mut r = ChatReply::default();
@@ -275,7 +287,13 @@ async fn tool(state: &Arc<AppState>, name: &str, input: &Value, reply: &mut Chat
     }
 }
 
-fn run_tool(state: &AppState, name: &str, input: &Value, reply: &mut ChatReply, allow_images: bool) -> (Vec<Value>, bool) {
+fn run_tool(
+    state: &AppState,
+    name: &str,
+    input: &Value,
+    reply: &mut ChatReply,
+    allow_images: bool,
+) -> (Vec<Value>, bool) {
     // Returns Anthropic-style content blocks for the tool result, plus an error flag.
     let r: Result<Vec<Value>> = (|| match name {
         "library_overview" => {
@@ -291,7 +309,10 @@ fn run_tool(state: &AppState, name: &str, input: &Value, reply: &mut ChatReply, 
                 bail!("Viewing thumbnails is turned off in Settings. Rely on metadata.");
             }
             emit_status(state, "Looking at photos…");
-            let ids: Vec<i64> = input["ids"].as_array().map(|a| a.iter().filter_map(|v| v.as_i64()).take(16).collect()).unwrap_or_default();
+            let ids: Vec<i64> = input["ids"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_i64()).take(16).collect())
+                .unwrap_or_default();
             let mut blocks = vec![];
             for id in ids {
                 let p = crate::thumbs::thumb_path(&state.thumbs_dir, id);
@@ -305,7 +326,8 @@ fn run_tool(state: &AppState, name: &str, input: &Value, reply: &mut ChatReply, 
             Ok(blocks)
         }
         "show_results" => {
-            let ids: Vec<i64> = input["ids"].as_array().map(|a| a.iter().filter_map(|v| v.as_i64()).collect()).unwrap_or_default();
+            let ids: Vec<i64> =
+                input["ids"].as_array().map(|a| a.iter().filter_map(|v| v.as_i64()).collect()).unwrap_or_default();
             reply.result_ids = Some(ids.clone());
             reply.result_title = input["title"].as_str().map(String::from);
             Ok(vec![json!({"type": "text", "text": format!("Showing {} photos to the user.", ids.len())})])
@@ -340,9 +362,12 @@ fn overview(state: &AppState) -> Result<Value> {
         }
     }
     let mut kw: Vec<(String, i64)> = kw.into_iter().collect();
-    kw.sort_by(|a, b| b.1.cmp(&a.1));
+    kw.sort_by_key(|k| std::cmp::Reverse(k.1));
     kw.truncate(80);
-    let roots: Vec<Value> = db::list_roots(&conn)?.into_iter().map(|r| json!({"path": r.path, "photos": r.count, "online": r.online})).collect();
+    let roots: Vec<Value> = db::list_roots(&conn)?
+        .into_iter()
+        .map(|r| json!({"path": r.path, "photos": r.count, "online": r.online}))
+        .collect();
     Ok(json!({
         "total_photos": total,
         "date_range": [dmin, dmax],
@@ -434,7 +459,9 @@ fn search(state: &AppState, i: &Value) -> Result<Value> {
         Some(false) => wh.push("lat IS NULL".into()),
         None => {}
     }
-    let near = i.get("near").and_then(|n| Some((n["lat"].as_f64()?, n["lon"].as_f64()?, n["radius_km"].as_f64().unwrap_or(25.0))));
+    let near = i
+        .get("near")
+        .and_then(|n| Some((n["lat"].as_f64()?, n["lon"].as_f64()?, n["radius_km"].as_f64().unwrap_or(25.0))));
     if let Some((lat, lon, r)) = near {
         let dlat = r / 111.0;
         let dlon = r / (111.0 * lat.to_radians().cos().abs().max(0.01));
@@ -456,7 +483,8 @@ fn search(state: &AppState, i: &Value) -> Result<Value> {
         // The box above is only a pre-filter; the exact distance needs every candidate.
         let sql = format!("SELECT {} FROM photos {where_sql} ORDER BY {order}", db::PHOTO_COLS);
         let mut st = conn.prepare(&sql)?;
-        let mut rows: Vec<db::Photo> = st.query_map(params_from_iter(args.iter()), db::photo_from_row)?.filter_map(|r| r.ok()).collect();
+        let mut rows: Vec<db::Photo> =
+            st.query_map(params_from_iter(args.iter()), db::photo_from_row)?.filter_map(|r| r.ok()).collect();
         rows.retain(|p| match (p.lat, p.lon) {
             (Some(a), Some(b)) => haversine_km((lat, lon), (a, b)) <= r,
             _ => false,
@@ -465,10 +493,14 @@ fn search(state: &AppState, i: &Value) -> Result<Value> {
         (rows, total)
     } else {
         // Without a distance, SQLite counts and limits, so only `limit` rows are read.
-        let total: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM photos {where_sql}"), params_from_iter(args.iter()), |r| r.get(0))?;
+        let total: i64 =
+            conn.query_row(&format!("SELECT COUNT(*) FROM photos {where_sql}"), params_from_iter(args.iter()), |r| {
+                r.get(0)
+            })?;
         let sql = format!("SELECT {} FROM photos {where_sql} ORDER BY {order} LIMIT {limit}", db::PHOTO_COLS);
         let mut st = conn.prepare(&sql)?;
-        let rows: Vec<db::Photo> = st.query_map(params_from_iter(args.iter()), db::photo_from_row)?.filter_map(|r| r.ok()).collect();
+        let rows: Vec<db::Photo> =
+            st.query_map(params_from_iter(args.iter()), db::photo_from_row)?.filter_map(|r| r.ok()).collect();
         (rows, total as usize)
     };
     drop(conn);
@@ -478,16 +510,36 @@ fn search(state: &AppState, i: &Value) -> Result<Value> {
         .map(|p| {
             let mut o = json!({"id": p.id, "file": p.filename, "folder": p.folder});
             let m = o.as_object_mut().unwrap();
-            if let Some(v) = p.taken_at { m.insert("date".into(), v.into()); }
-            if p.rating > 0 { m.insert("rating".into(), p.rating.into()); }
-            if let Some(v) = p.label { m.insert("label".into(), v.into()); }
-            if let Some(v) = p.title { m.insert("title".into(), v.into()); }
-            if let Some(v) = p.caption { m.insert("caption".into(), v.chars().take(200).collect::<String>().into()); }
-            if !p.keywords.is_empty() { m.insert("keywords".into(), p.keywords.into()); }
-            if let Some(v) = p.model { m.insert("camera".into(), v.into()); }
-            if let Some(v) = p.lens { m.insert("lens".into(), v.into()); }
-            if let (Some(a), Some(b)) = (p.lat, p.lon) { m.insert("gps".into(), json!([(a * 1e4).round() / 1e4, (b * 1e4).round() / 1e4])); }
-            if let Some(v) = p.place { m.insert("place".into(), v.into()); }
+            if let Some(v) = p.taken_at {
+                m.insert("date".into(), v.into());
+            }
+            if p.rating > 0 {
+                m.insert("rating".into(), p.rating.into());
+            }
+            if let Some(v) = p.label {
+                m.insert("label".into(), v.into());
+            }
+            if let Some(v) = p.title {
+                m.insert("title".into(), v.into());
+            }
+            if let Some(v) = p.caption {
+                m.insert("caption".into(), v.chars().take(200).collect::<String>().into());
+            }
+            if !p.keywords.is_empty() {
+                m.insert("keywords".into(), p.keywords.into());
+            }
+            if let Some(v) = p.model {
+                m.insert("camera".into(), v.into());
+            }
+            if let Some(v) = p.lens {
+                m.insert("lens".into(), v.into());
+            }
+            if let (Some(a), Some(b)) = (p.lat, p.lon) {
+                m.insert("gps".into(), json!([(a * 1e4).round() / 1e4, (b * 1e4).round() / 1e4]));
+            }
+            if let Some(v) = p.place {
+                m.insert("place".into(), v.into());
+            }
             o
         })
         .collect();
@@ -540,7 +592,13 @@ async fn chat_anthropic(state: &Arc<AppState>, s: &AiSettings, user_text: String
         let stop = v["stop_reason"].as_str().unwrap_or("");
         let text: String = content
             .as_array()
-            .map(|a| a.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"))
+            .map(|a| {
+                a.iter()
+                    .filter(|b| b["type"] == "text")
+                    .filter_map(|b| b["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
             .unwrap_or_default();
         if stop == "refusal" {
             reply.text = "Sorry, I can't help with that request.".into();
@@ -553,10 +611,13 @@ async fn chat_anthropic(state: &Arc<AppState>, s: &AiSettings, user_text: String
             break;
         }
         let mut results = vec![];
-        let uses: Vec<Value> = content.as_array().into_iter().flatten().filter(|b| b["type"] == "tool_use").cloned().collect();
+        let uses: Vec<Value> =
+            content.as_array().into_iter().flatten().filter(|b| b["type"] == "tool_use").cloned().collect();
         for b in uses {
-            let (blocks, is_error) = tool(state, b["name"].as_str().unwrap_or(""), &b["input"], &mut reply, s.allow_images).await;
-            results.push(json!({"type": "tool_result", "tool_use_id": b["id"], "content": blocks, "is_error": is_error}));
+            let (blocks, is_error) =
+                tool(state, b["name"].as_str().unwrap_or(""), &b["input"], &mut reply, s.allow_images).await;
+            results
+                .push(json!({"type": "tool_result", "tool_use_id": b["id"], "content": blocks, "is_error": is_error}));
         }
         messages.push(json!({"role": "user", "content": results}));
         if !text.is_empty() {
@@ -625,7 +686,11 @@ async fn chat_openai(state: &Arc<AppState>, s: &AiSettings, user_text: String) -
         let resp = req.send().await.map_err(|e| anyhow!("Could not reach {url}: {e}"))?;
         let (status, v) = json_reply(resp, "The AI server").await?;
         if !status.is_success() {
-            bail!("AI server error ({}): {}", status.as_u16(), v["error"]["message"].as_str().unwrap_or(&v.to_string()));
+            bail!(
+                "AI server error ({}): {}",
+                status.as_u16(),
+                v["error"]["message"].as_str().unwrap_or(&v.to_string())
+            );
         }
         let msg = v["choices"][0]["message"].clone();
         messages.push(msg.clone());
@@ -689,7 +754,13 @@ mod tests {
 
     #[test]
     fn ai_server_addresses() {
-        for ok in ["http://localhost:11434/v1", "http://127.0.0.1:1234/v1", "http://[::1]:8080", "https://api.openai.com/v1", "https://ai.example.org"] {
+        for ok in [
+            "http://localhost:11434/v1",
+            "http://127.0.0.1:1234/v1",
+            "http://[::1]:8080",
+            "https://api.openai.com/v1",
+            "https://ai.example.org",
+        ] {
             assert!(check_base_url(ok).is_ok(), "{ok}");
         }
         for bad in [
@@ -719,7 +790,12 @@ mod tests {
         let t = trim_history(m, 7);
         assert!(t.len() <= 7);
         assert!(is_question(&t[0]), "must start at a question");
-        let sys = vec![json!({"role": "system", "content": "s"}), json!({"role": "user", "content": "x"}), json!({"role": "assistant", "content": "y"}), json!({"role": "user", "content": "z"})];
+        let sys = vec![
+            json!({"role": "system", "content": "s"}),
+            json!({"role": "user", "content": "x"}),
+            json!({"role": "assistant", "content": "y"}),
+            json!({"role": "user", "content": "z"}),
+        ];
         let t = trim_history(sys, 2);
         assert_eq!(t[0]["role"], "system");
         assert_eq!(t.last().unwrap()["content"], "z");
@@ -727,7 +803,9 @@ mod tests {
 
     #[test]
     fn old_images_become_notes() {
-        let m = vec![json!({"role": "user", "content": [{"type": "tool_result", "content": [{"type": "image", "source": {}}]}]})];
+        let m = vec![
+            json!({"role": "user", "content": [{"type": "tool_result", "content": [{"type": "image", "source": {}}]}]}),
+        ];
         let out = strip_old_images(m);
         assert_eq!(out[0]["content"][0]["content"][0]["type"], "text");
     }

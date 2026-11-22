@@ -1,0 +1,3 @@
+# Lumio keeps fairly wide lines; `cargo fmt --check` runs in CI.
+max_width = 120
+use_small_heuristics = "Max"

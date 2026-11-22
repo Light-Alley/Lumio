@@ -72,7 +72,8 @@ pub fn render_jpeg(state: &AppState, p: &Photo, opts: &ExportOptions, dest: &Pat
             .map(|s| s.to_string())
             .collect();
         args.push(exiftool::fmt_path_arg(source.path())?);
-        for a in ["-all:all", "--Orientation", "--ThumbnailImage", "--PreviewImage", "--JpgFromRaw", "--MakerNotes:all"] {
+        for a in ["-all:all", "--Orientation", "--ThumbnailImage", "--PreviewImage", "--JpgFromRaw", "--MakerNotes:all"]
+        {
             args.push(a.into());
         }
         // Titles, captions and keywords edited in Lumio may only be in an XMP sidecar.
@@ -116,9 +117,14 @@ pub fn export(state: &AppState, ids: &[i64], folder: &Path, opts: &ExportOptions
     let (videos, photos): (Vec<Photo>, Vec<Photo>) = photos.into_iter().partition(|p| metadata::is_video(&p.ext));
     let total = photos.len();
     let done = AtomicUsize::new(0);
-    let mut report = ExportReport { skipped_videos: videos.len(), folder: folder.to_string_lossy().into_owned(), ..Default::default() };
+    let mut report = ExportReport {
+        skipped_videos: videos.len(),
+        folder: folder.to_string_lossy().into_owned(),
+        ..Default::default()
+    };
     let emit = |n: usize, name: &str| {
-        let _ = state.app.emit("web-export-progress", serde_json::json!({ "done": n, "total": total, "current": name }));
+        let _ =
+            state.app.emit("web-export-progress", serde_json::json!({ "done": n, "total": total, "current": name }));
     };
     emit(0, "");
     // One at a time keeps memory low for large RAW files and gives unique names safely.
@@ -127,7 +133,10 @@ pub fn export(state: &AppState, ids: &[i64], folder: &Path, opts: &ExportOptions
             report.cancelled = true;
             break;
         }
-        let stem = Path::new(&p.filename).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| format!("photo-{}", p.id));
+        let stem = Path::new(&p.filename)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("photo-{}", p.id));
         let dest = free_name(folder, &stem);
         match render_jpeg(state, p, opts, &dest) {
             Ok(()) => report.done += 1,
@@ -149,7 +158,12 @@ pub mod cmd {
     use tauri::State;
 
     #[tauri::command]
-    pub async fn web_export(state: State<'_, Arc<AppState>>, ids: Vec<i64>, folder: String, opts: ExportOptions) -> Result<ExportReport, String> {
+    pub async fn web_export(
+        state: State<'_, Arc<AppState>>,
+        ids: Vec<i64>,
+        folder: String,
+        opts: ExportOptions,
+    ) -> Result<ExportReport, String> {
         let st = state.inner().clone();
         tauri::async_runtime::spawn_blocking(move || export(&st, &ids, Path::new(&folder), &opts))
             .await

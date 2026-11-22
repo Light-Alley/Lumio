@@ -33,12 +33,7 @@ impl log::Log for FileLog {
         if !self.enabled(r.metadata()) {
             return;
         }
-        let line = format!(
-            "{} {:<5} {}\n",
-            jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S"),
-            r.level(),
-            r.args()
-        );
+        let line = format!("{} {:<5} {}\n", jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S"), r.level(), r.args());
         if cfg!(debug_assertions) {
             eprint!("{line}");
         }

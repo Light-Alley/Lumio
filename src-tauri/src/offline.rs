@@ -176,7 +176,12 @@ pub fn backfill_chunk(state: &AppState, conn: &Connection) -> Result<bool> {
     let (left, _) = counts(conn, &rp)?;
     let _ = state.app.emit(
         "index-progress",
-        indexer::Progress { active: true, done: 0, total: 0, message: format!("Saving previews for offline viewing ({} to go)", left) },
+        indexer::Progress {
+            active: true,
+            done: 0,
+            total: 0,
+            message: format!("Saving previews for offline viewing ({} to go)", left),
+        },
     );
     let size = rp.policy.size;
     let results: Vec<(i64, Result<(), bool>)> = todo

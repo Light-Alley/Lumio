@@ -138,7 +138,8 @@ pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
         let conn = state.conn.lock();
         let mut args = vec![];
         let clause = db::folder_clause(&base, true, &mut args);
-        let mut st = conn.prepare(&format!("SELECT folder, COUNT(*) FROM photos WHERE {clause} GROUP BY folder")).map_err(e)?;
+        let mut st =
+            conn.prepare(&format!("SELECT folder, COUNT(*) FROM photos WHERE {clause} GROUP BY folder")).map_err(e)?;
         let rows = st
             .query_map(rusqlite::params_from_iter(args.iter()), |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
             .map_err(e)?;
@@ -167,7 +168,11 @@ pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
                 }
                 let name = ent.file_name().to_string_lossy().to_string();
                 let has_children = std::fs::read_dir(&p)
-                    .map(|rd| rd.flatten().any(|c| c.file_type().map(|t| t.is_dir()).unwrap_or(false) && !indexer::is_hidden(&c.path())))
+                    .map(|rd| {
+                        rd.flatten().any(|c| {
+                            c.file_type().map(|t| t.is_dir()).unwrap_or(false) && !indexer::is_hidden(&c.path())
+                        })
+                    })
                     .unwrap_or(false);
                 out.push(FolderNode {
                     count: counts.get(&name).copied().unwrap_or(0),
@@ -189,7 +194,7 @@ pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
             });
         }
     }
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     Ok(out)
 }
 
@@ -255,7 +260,8 @@ pub async fn rename_folder(state: S<'_>, path: String, name: String) -> R<String
         in_library(&st, &from, true)?;
         let to = fileops::rename_folder(&*st, &from, &name)?;
         if to != from {
-            let label = format!("Renamed folder {} to {}", from.file_name().unwrap_or_default().to_string_lossy(), name.trim());
+            let label =
+                format!("Renamed folder {} to {}", from.file_name().unwrap_or_default().to_string_lossy(), name.trim());
             history::record(&st.conn.lock(), &label, &history::Change::FolderRename { from, to: to.clone() })?;
         }
         Ok(to.to_string_lossy().to_string())
@@ -272,7 +278,11 @@ pub async fn delete_folder(state: S<'_>, path: String, permanent: bool) -> R<()>
         in_library(&st, Path::new(&path), true)?;
         fileops::delete_folder(&*st, Path::new(&path), permanent)?;
         let name = Path::new(&path).file_name().unwrap_or_default().to_string_lossy().to_string();
-        let label = if permanent { format!("Deleted folder {name} permanently") } else { format!("Moved folder {name} to the Trash") };
+        let label = if permanent {
+            format!("Deleted folder {name} permanently")
+        } else {
+            format!("Moved folder {name} to the Trash")
+        };
         history::record(&st.conn.lock(), &label, &history::Change::Trash { count: 1, permanent })?;
         Ok(())
     })
@@ -499,7 +509,8 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
             let path = PathBuf::from(&p.path);
             // Work out the keyword list the photo ends up with, and what was taken off.
             let keyword_change: Option<(Vec<String>, Vec<String>)> = if let Some(k) = &edit.keywords {
-                let removed = p.keywords.iter().filter(|x| !k.iter().any(|y| y.eq_ignore_ascii_case(x))).cloned().collect();
+                let removed =
+                    p.keywords.iter().filter(|x| !k.iter().any(|y| y.eq_ignore_ascii_case(x))).cloned().collect();
                 Some((k.clone(), removed))
             } else if edit.add_keywords.is_some() || edit.remove_keywords.is_some() {
                 let mut k = p.keywords.clone();
@@ -555,13 +566,30 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
                     rep.done += 1;
                     let conn = st.conn.lock();
                     // The same 0 to 5 range the file was given.
-                    if let Some(r) = edit.rating { conn.execute("UPDATE photos SET rating=?1 WHERE id=?2", params![r.clamp(0, 5), p.id])?; }
-                    if let Some(v) = &edit.label { conn.execute("UPDATE photos SET label=?1 WHERE id=?2", params![nz(v), p.id])?; }
-                    if let Some(v) = &edit.title { conn.execute("UPDATE photos SET title=?1 WHERE id=?2", params![nz(v), p.id])?; }
-                    if let Some(v) = &edit.caption { conn.execute("UPDATE photos SET caption=?1 WHERE id=?2", params![nz(v), p.id])?; }
-                    if let Some(v) = &edit.creator { conn.execute("UPDATE photos SET creator=?1 WHERE id=?2", params![nz(v), p.id])?; }
-                    if let Some(v) = &edit.copyright { conn.execute("UPDATE photos SET copyright=?1 WHERE id=?2", params![nz(v), p.id])?; }
-                    if let Some(k) = &plan { conn.execute("UPDATE photos SET keywords=?1 WHERE id=?2", params![db::encode_keywords(&k.subject), p.id])?; }
+                    if let Some(r) = edit.rating {
+                        conn.execute("UPDATE photos SET rating=?1 WHERE id=?2", params![r.clamp(0, 5), p.id])?;
+                    }
+                    if let Some(v) = &edit.label {
+                        conn.execute("UPDATE photos SET label=?1 WHERE id=?2", params![nz(v), p.id])?;
+                    }
+                    if let Some(v) = &edit.title {
+                        conn.execute("UPDATE photos SET title=?1 WHERE id=?2", params![nz(v), p.id])?;
+                    }
+                    if let Some(v) = &edit.caption {
+                        conn.execute("UPDATE photos SET caption=?1 WHERE id=?2", params![nz(v), p.id])?;
+                    }
+                    if let Some(v) = &edit.creator {
+                        conn.execute("UPDATE photos SET creator=?1 WHERE id=?2", params![nz(v), p.id])?;
+                    }
+                    if let Some(v) = &edit.copyright {
+                        conn.execute("UPDATE photos SET copyright=?1 WHERE id=?2", params![nz(v), p.id])?;
+                    }
+                    if let Some(k) = &plan {
+                        conn.execute(
+                            "UPDATE photos SET keywords=?1 WHERE id=?2",
+                            params![db::encode_keywords(&k.subject), p.id],
+                        )?;
+                    }
                     if let Some(g) = &edit.gps_change() {
                         let (la, lo) = g.map(|(a, b)| (Some(a), Some(b))).unwrap_or((None, None));
                         conn.execute("UPDATE photos SET lat=?1, lon=?2 WHERE id=?3", params![la, lo, p.id])?;
@@ -637,8 +665,14 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
                     let preview = size.map(|s| (pdest.as_path(), s));
                     match crate::thumbs::make_thumb(&path, &p.ext, Some(new_o), &dest, preview, &st.et, &st.tmp_dir) {
                         Ok(made) => {
-                            let pv = match made.preview { Some(false) => 0, _ => p.preview };
-                            st.conn.lock().execute("UPDATE photos SET thumb = 1, preview = ?2 WHERE id = ?1", params![p.id, pv])?;
+                            let pv = match made.preview {
+                                Some(false) => 0,
+                                _ => p.preview,
+                            };
+                            st.conn.lock().execute(
+                                "UPDATE photos SET thumb = 1, preview = ?2 WHERE id = ?1",
+                                params![p.id, pv],
+                            )?;
                         }
                         Err(err) => log::warn!("thumbnail after rotate failed for {}: {err:#}", path.display()),
                     }
@@ -658,7 +692,14 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
 /// the system could not make a thumbnail for. Also fills in the size and length if the
 /// file's metadata did not have them.
 #[tauri::command]
-pub async fn save_video_thumb(state: S<'_>, id: i64, jpeg: String, width: Option<i64>, height: Option<i64>, duration: Option<f64>) -> R<()> {
+pub async fn save_video_thumb(
+    state: S<'_>,
+    id: i64,
+    jpeg: String,
+    width: Option<i64>,
+    height: Option<i64>,
+    duration: Option<f64>,
+) -> R<()> {
     use base64::Engine;
     let st = state.inner().clone();
     blocking(move || {
@@ -690,9 +731,7 @@ pub fn stack_photos(state: S, ids: Vec<i64>, top: Option<i64>) -> R<i64> {
     let conn = state.conn.lock();
     let tx = conn.unchecked_transaction().map_err(e)?;
     let list = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
-    let sid: i64 = tx
-        .query_row("SELECT coalesce(MAX(stack_id), 0) + 1 FROM photos", [], |r| r.get(0))
-        .map_err(e)?;
+    let sid: i64 = tx.query_row("SELECT coalesce(MAX(stack_id), 0) + 1 FROM photos", [], |r| r.get(0)).map_err(e)?;
     let top = top.filter(|t| ids.contains(t)).unwrap_or(ids[0]);
     tx.execute(
         &format!(
@@ -737,7 +776,11 @@ pub fn set_stack_top(state: S, id: i64) -> R<()> {
 
 fn nz(s: &str) -> Option<String> {
     let t = s.trim();
-    if t.is_empty() { None } else { Some(t.to_string()) }
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
 }
 
 // ------------------------------------------------------------ open with

@@ -100,9 +100,8 @@ pub fn tidy_stacks(conn: &Connection) -> Result<()> {
 }
 
 fn add_column(conn: &Connection, table: &str, col: &str, decl: &str) -> Result<()> {
-    let exists: bool = conn
-        .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"))?
-        .exists([col])?;
+    let exists: bool =
+        conn.prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"))?.exists([col])?;
     if !exists {
         conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {col} {decl};"))?;
     }
@@ -201,11 +200,7 @@ pub fn photo_from_row(r: &Row) -> rusqlite::Result<Photo> {
 
 /// Keywords are stored as `|kw1|kw2|` so that `LIKE '%|kw|%'` finds exact keywords.
 pub fn encode_keywords(k: &[String]) -> Option<String> {
-    let clean: Vec<String> = k
-        .iter()
-        .map(|s| s.trim().replace('|', "/"))
-        .filter(|s| !s.is_empty())
-        .collect();
+    let clean: Vec<String> = k.iter().map(|s| s.trim().replace('|', "/")).filter(|s| !s.is_empty()).collect();
     if clean.is_empty() {
         None
     } else {
@@ -214,8 +209,7 @@ pub fn encode_keywords(k: &[String]) -> Option<String> {
 }
 
 pub fn decode_keywords(s: Option<&str>) -> Vec<String> {
-    s.map(|s| s.split('|').filter(|x| !x.is_empty()).map(String::from).collect())
-        .unwrap_or_default()
+    s.map(|s| s.split('|').filter(|x| !x.is_empty()).map(String::from).collect()).unwrap_or_default()
 }
 
 /// A lighter record for the grid and the map.
@@ -416,9 +410,7 @@ pub fn query_photos(conn: &Connection, q: &Query) -> Result<Vec<PhotoLite>> {
 }
 
 pub fn get_photo(conn: &Connection, id: i64) -> Result<Option<Photo>> {
-    Ok(conn
-        .query_row(&format!("SELECT {PHOTO_COLS} FROM photos WHERE id = ?1"), [id], photo_from_row)
-        .optional()?)
+    Ok(conn.query_row(&format!("SELECT {PHOTO_COLS} FROM photos WHERE id = ?1"), [id], photo_from_row).optional()?)
 }
 
 pub fn get_photos(conn: &Connection, ids: &[i64]) -> Result<Vec<Photo>> {
@@ -426,8 +418,7 @@ pub fn get_photos(conn: &Connection, ids: &[i64]) -> Result<Vec<Photo>> {
         return Ok(vec![]);
     }
     let list: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
-    let mut stmt =
-        conn.prepare(&format!("SELECT {PHOTO_COLS} FROM photos WHERE id IN ({})", list.join(",")))?;
+    let mut stmt = conn.prepare(&format!("SELECT {PHOTO_COLS} FROM photos WHERE id IN ({})", list.join(",")))?;
     let rows = stmt.query_map([], photo_from_row)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
@@ -472,7 +463,7 @@ pub fn root_for_path(conn: &Connection, path: &Path) -> Result<Option<(i64, Path
     let mut best: Option<(i64, PathBuf)> = None;
     for r in roots {
         let rp = PathBuf::from(&r.path);
-        if path.starts_with(&rp) && best.as_ref().map_or(true, |(_, b)| rp.as_os_str().len() > b.as_os_str().len()) {
+        if path.starts_with(&rp) && best.as_ref().is_none_or(|(_, b)| rp.as_os_str().len() > b.as_os_str().len()) {
             best = Some((r.id, rp));
         }
     }
@@ -480,10 +471,7 @@ pub fn root_for_path(conn: &Connection, path: &Path) -> Result<Option<(i64, Path
 }
 
 pub fn get_setting(conn: &Connection, key: &str) -> Option<String> {
-    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0))
-        .optional()
-        .ok()
-        .flatten()
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional().ok().flatten()
 }
 
 pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
@@ -530,8 +518,11 @@ mod tests {
     fn lib() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         migrate(&conn).unwrap();
-        conn.execute("INSERT INTO roots (id, path, name, added_at) VALUES (1, ?1, 'p', 0)", [format!("{SEP}photos")]).unwrap();
-        for (folder, name) in [("trip", "a.jpg"), ("trip", "b.jpg"), ("trip{S}day 2", "c.jpg"), ("trip 2", "d.jpg"), ("trips", "e.jpg")] {
+        conn.execute("INSERT INTO roots (id, path, name, added_at) VALUES (1, ?1, 'p', 0)", [format!("{SEP}photos")])
+            .unwrap();
+        for (folder, name) in
+            [("trip", "a.jpg"), ("trip", "b.jpg"), ("trip{S}day 2", "c.jpg"), ("trip 2", "d.jpg"), ("trips", "e.jpg")]
+        {
             let folder = format!("{SEP}photos{SEP}{}", folder.replace("{S}", &SEP.to_string()));
             conn.execute(
                 "INSERT INTO photos (root_id, path, folder, filename, ext) VALUES (1, ?1, ?2, ?3, 'jpg')",

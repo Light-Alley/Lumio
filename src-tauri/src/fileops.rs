@@ -131,7 +131,9 @@ pub fn inside_root(root: &Path, path: &Path) -> Result<()> {
         match std::fs::canonicalize(&probe) {
             Ok(c) => break rest.iter().rev().fold(c, |acc, n| acc.join(n)),
             Err(_) => {
-                let (Some(name), Some(parent)) = (probe.file_name().map(|n| n.to_os_string()), probe.parent().map(Path::to_path_buf)) else {
+                let (Some(name), Some(parent)) =
+                    (probe.file_name().map(|n| n.to_os_string()), probe.parent().map(Path::to_path_buf))
+                else {
                     bail!("\"{}\" is not a folder in your library.", path.display());
                 };
                 rest.push(name);
@@ -182,7 +184,12 @@ pub fn unique_target(dir: &Path, name: &str) -> PathBuf {
 
 /// The first of "name", "name (2)", "name (3)"... in `dir` that `taken` says is free, for the
 /// photo and, when it has one, for its sidecar under the matching name.
-pub(crate) fn free_name(dir: &Path, name: &str, sidecar: Option<&Path>, mut taken: impl FnMut(&Path) -> bool) -> PathBuf {
+pub(crate) fn free_name(
+    dir: &Path,
+    name: &str,
+    sidecar: Option<&Path>,
+    mut taken: impl FnMut(&Path) -> bool,
+) -> PathBuf {
     for i in 1.. {
         let c = dir.join(numbered(name, i));
         if taken(&c) {
@@ -414,9 +421,14 @@ struct Dest {
 
 /// Move (or copy) each photo to its own folder, optionally under a given name (Undo uses
 /// that to put photos back exactly where they were).
-pub fn move_photos_to<H: Host + ?Sized>(h: &H, items: &[(i64, PathBuf, Option<String>)], copy: bool) -> Result<OpReport> {
+pub fn move_photos_to<H: Host + ?Sized>(
+    h: &H,
+    items: &[(i64, PathBuf, Option<String>)],
+    copy: bool,
+) -> Result<OpReport> {
     let ids: Vec<i64> = items.iter().map(|(id, _, _)| *id).collect();
-    let photos: HashMap<i64, db::Photo> = { db::get_photos(&h.conn().lock(), &ids)?.into_iter().map(|p| (p.id, p)).collect() };
+    let photos: HashMap<i64, db::Photo> =
+        { db::get_photos(&h.conn().lock(), &ids)?.into_iter().map(|p| (p.id, p)).collect() };
 
     // Check each destination once.
     let mut dests: HashMap<PathBuf, Dest> = HashMap::new();
@@ -471,8 +483,8 @@ pub fn move_photos_to<H: Host + ?Sized>(h: &H, items: &[(i64, PathBuf, Option<St
             let queue = {
                 let conn = h.conn().lock();
                 let waiting = crate::pending::source_of(&conn, p.id)?.is_some();
-                let src_away = !src.exists()
-                    && db::root_for_path(&conn, &src)?.map_or(true, |(_, root)| !indexer::reachable(&root));
+                let src_away =
+                    !src.exists() && db::root_for_path(&conn, &src)?.is_none_or(|(_, root)| !indexer::reachable(&root));
                 match (&d.root, d.away || src_away || waiting) {
                     (Some((root_id, _)), true) => Some(crate::pending::queue_move(&conn, p, dest, &name, *root_id)),
                     _ => None,
@@ -481,7 +493,12 @@ pub fn move_photos_to<H: Host + ?Sized>(h: &H, items: &[(i64, PathBuf, Option<St
             match queue {
                 Some(Ok(to)) => {
                     rep.queued += 1;
-                    rep.moved.push(Moved { id: p.id, from: p.path.clone(), to: to.to_string_lossy().to_string(), in_library: true });
+                    rep.moved.push(Moved {
+                        id: p.id,
+                        from: p.path.clone(),
+                        to: to.to_string_lossy().to_string(),
+                        in_library: true,
+                    });
                     continue;
                 }
                 Some(Err(e)) => {
@@ -536,10 +553,20 @@ pub fn move_photos_to<H: Host + ?Sized>(h: &H, items: &[(i64, PathBuf, Option<St
                         "UPDATE photos SET path = ?1, folder = ?2, filename = ?3, root_id = ?4 WHERE id = ?5",
                         params![dst.to_string_lossy(), dest.to_string_lossy(), filename, root_id, p.id],
                     )?;
-                    rep.moved.push(Moved { id: p.id, from: p.path.clone(), to: dst.to_string_lossy().to_string(), in_library: true });
+                    rep.moved.push(Moved {
+                        id: p.id,
+                        from: p.path.clone(),
+                        to: dst.to_string_lossy().to_string(),
+                        in_library: true,
+                    });
                 } else {
                     h.forget(&conn, &[p.id])?;
-                    rep.moved.push(Moved { id: p.id, from: p.path.clone(), to: dst.to_string_lossy().to_string(), in_library: false });
+                    rep.moved.push(Moved {
+                        id: p.id,
+                        from: p.path.clone(),
+                        to: dst.to_string_lossy().to_string(),
+                        in_library: false,
+                    });
                 }
             }
             Err(e) => rep.failed.push((p.filename.clone(), format!("{e:#}"))),
@@ -587,7 +614,8 @@ fn rewrite_pending(conn: &Connection, old: &str, new: &str) -> Result<()> {
     let sep = std::path::MAIN_SEPARATOR;
     let prefix = format!("{}{sep}", old.trim_end_matches(['/', '\\']));
     let mut st = conn.prepare("SELECT photo_id, src FROM pending_moves")?;
-    let rows: Vec<(i64, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+    let rows: Vec<(i64, String)> =
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
     for (id, src) in rows {
         if let Some(rest) = src.strip_prefix(&prefix) {
             let np = format!("{}{sep}{rest}", new.trim_end_matches(['/', '\\']));
@@ -826,7 +854,8 @@ pub(crate) mod testing {
     impl TestHost {
         pub fn root(&self, path: &Path) -> i64 {
             let c = self.conn.lock();
-            c.execute("INSERT INTO roots (path, name, added_at) VALUES (?1, 'r', 0)", [path.to_string_lossy()]).unwrap();
+            c.execute("INSERT INTO roots (path, name, added_at) VALUES (?1, 'r', 0)", [path.to_string_lossy()])
+                .unwrap();
             c.last_insert_rowid()
         }
         /// Write a file (its content is its own name unless given) and catalogue it unless it's a sidecar.
@@ -868,7 +897,9 @@ pub(crate) mod testing {
     pub fn names(dir: &Path) -> Vec<String> {
         let mut v: Vec<String> = match std::fs::read_dir(dir) {
             // Finder leaves a .DS_Store behind when it puts files in the Trash.
-            Ok(rd) => rd.flatten().map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n != ".DS_Store").collect(),
+            Ok(rd) => {
+                rd.flatten().map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n != ".DS_Store").collect()
+            }
             Err(_) => vec![],
         };
         v.sort();
@@ -960,7 +991,11 @@ mod tests {
 
     #[cfg(unix)]
     fn nix_is_root() -> bool {
-        std::process::Command::new("id").arg("-u").output().map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0").unwrap_or(false)
+        std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
+            .unwrap_or(false)
     }
 
     #[test]
@@ -1235,9 +1270,16 @@ mod tests {
         let dst = rename_folder(&h, &t.join("a/Trip"), "Iceland").unwrap();
         assert_eq!(dst, t.join("a/Iceland"));
         assert_eq!(h.path_of(keep).unwrap(), t.join("a/Iceland/IMG_2.jpg").to_string_lossy());
-        assert_eq!(h.path_of(lookalike).unwrap(), t.join("a/Trip 2/IMG_3.jpg").to_string_lossy(), "a folder whose name only starts the same is left alone");
+        assert_eq!(
+            h.path_of(lookalike).unwrap(),
+            t.join("a/Trip 2/IMG_3.jpg").to_string_lossy(),
+            "a folder whose name only starts the same is left alone"
+        );
         // The waiting move now starts from the renamed folder, so it still works.
-        assert_eq!(crate::pending::source_of(&h.conn.lock(), id).unwrap().unwrap(), t.join("a/Iceland/IMG_1.jpg").to_string_lossy());
+        assert_eq!(
+            crate::pending::source_of(&h.conn.lock(), id).unwrap().unwrap(),
+            t.join("a/Iceland/IMG_1.jpg").to_string_lossy()
+        );
         std::fs::create_dir_all(t.join("b")).unwrap();
         assert_eq!(crate::pending::apply_in(&h.conn.lock()).unwrap().done, 1);
         assert!(t.join("b/Out/IMG_1.jpg").exists());

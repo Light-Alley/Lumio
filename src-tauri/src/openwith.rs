@@ -71,7 +71,7 @@ mod imp {
     use anyhow::Result;
     use core_foundation::array::{CFArray, CFArrayRef};
     use core_foundation::base::TCFType;
-    use core_foundation::url::{CFURL, CFURLRef};
+    use core_foundation::url::{CFURLRef, CFURL};
     use std::path::{Path, PathBuf};
 
     #[link(name = "CoreServices", kind = "framework")]
@@ -90,7 +90,11 @@ mod imp {
         let mut out = vec![];
         let default: Option<PathBuf> = unsafe {
             let r = LSCopyDefaultApplicationURLForURL(url.as_concrete_TypeRef(), ROLES_ALL, std::ptr::null_mut());
-            if r.is_null() { None } else { CFURL::wrap_under_create_rule(r).to_path() }
+            if r.is_null() {
+                None
+            } else {
+                CFURL::wrap_under_create_rule(r).to_path()
+            }
         };
         unsafe {
             let arr = LSCopyApplicationURLsForURL(url.as_concrete_TypeRef(), ROLES_ALL);
@@ -245,7 +249,12 @@ mod imp {
             "mts" | "m2ts" => "video/mp2t",
             "3gp" => "video/3gpp",
             "wmv" => "video/x-ms-wmv",
-            _ if crate::metadata::is_video(&file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase()) => "video/*",
+            _ if crate::metadata::is_video(
+                &file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase(),
+            ) =>
+            {
+                "video/*"
+            }
             _ => "image/x-raw",
         }
     }
@@ -306,14 +315,22 @@ mod imp {
             if !in_entry {
                 continue;
             }
-            if let Some(v) = line.strip_prefix("Name=") { name.get_or_insert(v.to_string()); }
-            if let Some(v) = line.strip_prefix("Exec=") { exec = Some(v.to_string()); }
+            if let Some(v) = line.strip_prefix("Name=") {
+                name.get_or_insert(v.to_string());
+            }
+            if let Some(v) = line.strip_prefix("Exec=") {
+                exec = Some(v.to_string());
+            }
             if let Some(v) = line.strip_prefix("MimeType=") {
                 mimes = v.split(';').filter(|s| !s.is_empty()).map(String::from).collect();
             }
-            if line == "NoDisplay=true" || line == "Hidden=true" { hidden = true; }
+            if line == "NoDisplay=true" || line == "Hidden=true" {
+                hidden = true;
+            }
         }
-        if hidden { return None; }
+        if hidden {
+            return None;
+        }
         Some(Desktop { name: name?, exec: exec?, mimes })
     }
 
@@ -325,9 +342,13 @@ mod imp {
             let Ok(rd) = std::fs::read_dir(&dir) else { continue };
             for e in rd.flatten() {
                 let p = e.path();
-                if p.extension().and_then(|x| x.to_str()) != Some("desktop") { continue; }
+                if p.extension().and_then(|x| x.to_str()) != Some("desktop") {
+                    continue;
+                }
                 let fname = p.file_name().unwrap().to_string_lossy().to_string();
-                if !seen.insert(fname) { continue; }
+                if !seen.insert(fname) {
+                    continue;
+                }
                 if let Some(d) = parse(&p) {
                     if d.mimes.iter().any(|m| m == mime || m == family(mime)) {
                         out.push(AppInfo { name: d.name, id: p.to_string_lossy().to_string(), is_default: false });
@@ -350,12 +371,17 @@ mod imp {
             let mut used = false;
             for w in words {
                 match w.as_str() {
-                    "%f" | "%F" | "%u" | "%U" => { args.push(f.clone()); used = true; }
+                    "%f" | "%F" | "%u" | "%U" => {
+                        args.push(f.clone());
+                        used = true;
+                    }
                     "%i" | "%c" | "%k" => {}
                     _ => args.push(w.replace("%%", "%")),
                 }
             }
-            if !used { args.push(f); }
+            if !used {
+                args.push(f);
+            }
             let (prog, rest) = args.split_first().ok_or_else(|| anyhow!("empty Exec line"))?;
             std::process::Command::new(prog).args(rest).spawn()?;
         } else {

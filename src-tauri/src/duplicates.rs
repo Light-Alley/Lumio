@@ -238,7 +238,7 @@ fn find_exact(c: &mut [Candidate], progress: &(dyn Fn(usize, usize, &str) + Sync
         .par_iter()
         .map(|&i| {
             let n = done.fetch_add(1, Ordering::Relaxed);
-            if n % 25 == 0 {
+            if n.is_multiple_of(25) {
                 progress(n, total, "Comparing files");
             }
             if CANCEL.load(Ordering::Relaxed) {
@@ -262,7 +262,8 @@ fn find_exact(c: &mut [Candidate], progress: &(dyn Fn(usize, usize, &str) + Sync
         c[i].quick = q;
     }
     // Same size and same quick fingerprint: read those in full.
-    let maybe: Vec<usize> = groups_by(&online, |i| c[i].quick.clone().map(|q| (c[i].size, q))).into_iter().flatten().collect();
+    let maybe: Vec<usize> =
+        groups_by(&online, |i| c[i].quick.clone().map(|q| (c[i].size, q))).into_iter().flatten().collect();
     let total = maybe.len();
     done.store(0, Ordering::Relaxed);
     let full: Vec<(usize, Option<String>)> = maybe
@@ -455,7 +456,12 @@ fn group_alike(c: &[Candidate], max: u32) -> Vec<Vec<(usize, u32)>> {
     out
 }
 
-fn find_alike(state: &AppState, c: &mut [Candidate], max: u32, progress: &(dyn Fn(usize, usize, &str) + Sync)) -> (Vec<Vec<(usize, u32)>>, usize) {
+fn find_alike(
+    state: &AppState,
+    c: &mut [Candidate],
+    max: u32,
+    progress: &(dyn Fn(usize, usize, &str) + Sync),
+) -> (Vec<Vec<(usize, u32)>>, usize) {
     let total = c.len();
     let done = AtomicUsize::new(0);
     let missing = AtomicUsize::new(0);
@@ -463,7 +469,7 @@ fn find_alike(state: &AppState, c: &mut [Candidate], max: u32, progress: &(dyn F
         .par_iter()
         .map(|x| {
             let n = done.fetch_add(1, Ordering::Relaxed);
-            if n % 100 == 0 {
+            if n.is_multiple_of(100) {
                 progress(n, total, "Reading thumbnails");
             }
             if CANCEL.load(Ordering::Relaxed) {
@@ -532,7 +538,9 @@ pub fn find(state: &AppState, opts: &Options) -> Result<Report> {
     let similar = opts.mode == "similar";
     let max = opts.distance.min(16);
     let emit = |done: usize, total: usize, message: &str| {
-        let _ = state.app.emit("duplicates-progress", serde_json::json!({ "done": done, "total": total, "message": message }));
+        let _ = state
+            .app
+            .emit("duplicates-progress", serde_json::json!({ "done": done, "total": total, "message": message }));
     };
     emit(0, 0, "Looking through the catalogue");
     let mut c = candidates(&state.conn.lock(), opts, similar)?;
@@ -656,7 +664,9 @@ mod tests {
             let brute: Vec<Vec<(usize, u32)>> = usable
                 .iter()
                 .enumerate()
-                .map(|(k, &i)| usable[k + 1..].iter().filter_map(|&j| alike(&c[i], &c[j], max).map(|d| (j, d))).collect())
+                .map(|(k, &i)| {
+                    usable[k + 1..].iter().filter_map(|&j| alike(&c[i], &c[j], max).map(|d| (j, d))).collect()
+                })
                 .collect();
             assert_eq!(neighbours(&c, &usable, max), brute, "max {max}");
         }
@@ -690,10 +700,10 @@ mod tests {
         let base: u64 = 0x5a5a_5a5a_0f0f_3c3c;
         let c = vec![
             cand(1, "/a", "IMG_1.CR3", base, 1.5),
-            cand(2, "/a", "IMG_1.JPG", base, 1.5),            // its RAW + JPEG partner: not a duplicate
+            cand(2, "/a", "IMG_1.JPG", base, 1.5), // its RAW + JPEG partner: not a duplicate
             cand(3, "/b", "IMG_1 export.jpg", base ^ 0b11, 1.5), // 2 bits away: a look-alike
             cand(4, "/c", "far.jpg", base ^ 0b1111_1100, 1.5), // 6 from 1, 4 from 3
-            cand(5, "/d", "portrait.jpg", base, 0.66),         // same hash, other shape
+            cand(5, "/d", "portrait.jpg", base, 0.66), // same hash, other shape
         ];
         let g = group_alike(&c, 4);
         assert_eq!(g.len(), 1);

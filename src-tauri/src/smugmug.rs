@@ -21,13 +21,13 @@ use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
 use futures_util::StreamExt;
 use hmac::{Hmac, Mac};
-use std::collections::HashSet;
 use parking_lot::Mutex;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::Sha1;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -67,9 +67,7 @@ impl Creds {
 }
 
 fn load() -> Creds {
-    crate::keys::get(KEY_NAME)
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    crate::keys::get(KEY_NAME).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
 
 fn save(c: &Creds) -> Result<()> {
@@ -122,7 +120,12 @@ pub struct Status {
 
 pub fn status() -> Status {
     let c = load();
-    Status { has_app_key: !c.key.is_empty() && !c.secret.is_empty(), connected: c.connected(), nickname: c.nickname, apply_url: APPLY_URL }
+    Status {
+        has_app_key: !c.key.is_empty() && !c.secret.is_empty(),
+        connected: c.connected(),
+        nickname: c.nickname,
+        apply_url: APPLY_URL,
+    }
 }
 
 /// Save the user's own API key and secret. Changing them signs out.
@@ -195,7 +198,13 @@ fn sign(
     format!("OAuth {fields}")
 }
 
-fn auth(method: &str, url: &reqwest::Url, c: &Creds, token: Option<(&str, &str)>, extra: &[(&str, &str)]) -> Result<String> {
+fn auth(
+    method: &str,
+    url: &reqwest::Url,
+    c: &Creds,
+    token: Option<(&str, &str)>,
+    extra: &[(&str, &str)],
+) -> Result<String> {
     let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
     Ok(sign(method, url, (&c.key, &c.secret), token, extra, ts, &nonce()?))
 }
@@ -238,7 +247,11 @@ pub async fn begin_sign_in() -> Result<String> {
     };
     *PENDING.lock() = Some((t.clone(), s));
     let mut auth_url = reqwest::Url::parse(AUTHORIZE_URL)?;
-    auth_url.query_pairs_mut().append_pair("oauth_token", &t).append_pair("Access", "Full").append_pair("Permissions", "Add");
+    auth_url
+        .query_pairs_mut()
+        .append_pair("oauth_token", &t)
+        .append_pair("Access", "Full")
+        .append_pair("Permissions", "Add");
     remember(auth_url.as_str());
     Ok(auth_url.to_string())
 }
@@ -307,14 +320,26 @@ async fn api(c: &Creds, method: &str, path: &str, query: &[(&str, &str)], body: 
     let code = resp.status();
     let text = resp.text().await?;
     if code.as_u16() == 401 {
-        log::info!("SmugMug 401 for {}: {}", crate::secure::redact_url(url.as_str()), crate::secure::redact_body(&text));
+        log::info!(
+            "SmugMug 401 for {}: {}",
+            crate::secure::redact_url(url.as_str()),
+            crate::secure::redact_body(&text)
+        );
         bail!("SmugMug no longer accepts Lumio's sign-in. Please sign out and sign in again.");
     }
     let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if !code.is_success() {
-        log::info!("SmugMug {code} for {}: {}", crate::secure::redact_url(url.as_str()), crate::secure::redact_body(&text));
+        log::info!(
+            "SmugMug {code} for {}: {}",
+            crate::secure::redact_url(url.as_str()),
+            crate::secure::redact_body(&text)
+        );
         let msg = v["Message"].as_str().unwrap_or("").to_string();
-        bail!("SmugMug said: {} ({})", if msg.is_empty() { code.canonical_reason().unwrap_or("error") } else { &msg }, code.as_u16());
+        bail!(
+            "SmugMug said: {} ({})",
+            if msg.is_empty() { code.canonical_reason().unwrap_or("error") } else { &msg },
+            code.as_u16()
+        );
     }
     Ok(v["Response"].clone())
 }
@@ -332,7 +357,8 @@ async fn auth_user(c: &Creds) -> Result<AuthUser> {
     if nickname.is_empty() {
         bail!("SmugMug didn't say which account this is.");
     }
-    let uri = |k: &str| u["Uris"][k].as_str().map(String::from).or_else(|| u["Uris"][k]["Uri"].as_str().map(String::from));
+    let uri =
+        |k: &str| u["Uris"][k].as_str().map(String::from).or_else(|| u["Uris"][k]["Uri"].as_str().map(String::from));
     Ok(AuthUser { node: uri("Node"), albums: uri("UserAlbums"), nickname })
 }
 
@@ -435,8 +461,13 @@ pub async fn create_album(name: &str, privacy: &str) -> Result<Album> {
         match api(&c, "POST", &children, &[], Some(body)).await {
             Ok(r) => {
                 let n = &r["Node"];
-                let album_uri = n["Uris"]["Album"].as_str().map(String::from).or_else(|| n["Uris"]["Album"]["Uri"].as_str().map(String::from));
-                let Some(uri) = album_uri else { bail!("SmugMug created the gallery but didn't say where it is. Please pick it from the list.") };
+                let album_uri = n["Uris"]["Album"]
+                    .as_str()
+                    .map(String::from)
+                    .or_else(|| n["Uris"]["Album"]["Uri"].as_str().map(String::from));
+                let Some(uri) = album_uri else {
+                    bail!("SmugMug created the gallery but didn't say where it is. Please pick it from the list.")
+                };
                 remember(n["WebUri"].as_str().unwrap_or_default());
                 return Ok(Album {
                     name: name.into(),
@@ -452,7 +483,8 @@ pub async fn create_album(name: &str, privacy: &str) -> Result<Album> {
                 // A gallery with the same web address already exists: try the next one.
                 let m = e.to_string();
                 last_err = e;
-                if !(m.contains("409") || m.to_lowercase().contains("urlname") || m.to_lowercase().contains("already")) {
+                if !(m.contains("409") || m.to_lowercase().contains("urlname") || m.to_lowercase().contains("already"))
+                {
                     break;
                 }
             }
@@ -527,11 +559,20 @@ fn prepare(state: &AppState, p: &Photo, opts: &UploadOptions) -> Result<Prepared
     let ext = p.ext.to_ascii_lowercase();
     let web = opts.size == "web" && !metadata::is_video(&ext);
     if !web && (metadata::is_video(&ext) || SEND_AS_IS.contains(&ext.as_str())) {
-        return Ok(Prepared { file: src.to_path_buf(), name: p.filename.clone(), ctype: content_type(&ext), temp: false });
+        return Ok(Prepared {
+            file: src.to_path_buf(),
+            name: p.filename.clone(),
+            ctype: content_type(&ext),
+            temp: false,
+        });
     }
     let stem = src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| format!("photo-{}", p.id));
     let tmp = state.tmp_dir.join(format!("smugmug-{}-{}.jpg", p.id, crate::secure::random_hex(8)?));
-    let eo = ExportOptions { long_edge: if web { opts.long_edge.or(Some(3000)) } else { None }, quality: if web { 88 } else { 95 }, strip_location: false };
+    let eo = ExportOptions {
+        long_edge: if web { opts.long_edge.or(Some(3000)) } else { None },
+        quality: if web { 88 } else { 95 },
+        strip_location: false,
+    };
     webexport::render_jpeg(state, p, &eo, &tmp)?;
     Ok(Prepared { file: tmp, name: format!("{stem}.jpg"), ctype: "image/jpeg", temp: true })
 }
@@ -597,14 +638,21 @@ async fn upload_one(
         return Ok(());
     }
     log::info!("SmugMug upload of {} failed: {code} {}", p.filename, crate::secure::redact_body(&text));
-    let msg = v["message"].as_str().or(v["Message"].as_str()).unwrap_or(code.canonical_reason().unwrap_or("upload failed"));
+    let msg =
+        v["message"].as_str().or(v["Message"].as_str()).unwrap_or(code.canonical_reason().unwrap_or("upload failed"));
     if code.as_u16() == 401 {
         bail!("SmugMug no longer accepts Lumio's sign-in; please sign in again");
     }
     Err(anyhow!("{msg}"))
 }
 
-pub async fn upload(state_arc: Arc<AppState>, ids: Vec<i64>, album_uri: String, web_uri: String, opts: UploadOptions) -> Result<UploadReport> {
+pub async fn upload(
+    state_arc: Arc<AppState>,
+    ids: Vec<i64>,
+    album_uri: String,
+    web_uri: String,
+    opts: UploadOptions,
+) -> Result<UploadReport> {
     CANCEL.store(false, Ordering::Relaxed);
     if !album_uri.starts_with("/api/v2/album/") || album_uri.contains(['\r', '\n']) {
         bail!("Please pick a gallery from the list.");
@@ -633,19 +681,20 @@ pub async fn upload(state_arc: Arc<AppState>, ids: Vec<i64>, album_uri: String, 
         let pc = p.clone();
         let o = opts.clone();
         // Decoding and resizing are CPU work; keep them off the async threads.
-        let prepared = tauri::async_runtime::spawn_blocking(move || {
-            prepare(&st, &pc, &o)
-        })
-        .await
-        .map_err(|e| anyhow!("{e}"))
-        .and_then(|r| r);
+        let prepared = tauri::async_runtime::spawn_blocking(move || prepare(&st, &pc, &o))
+            .await
+            .map_err(|e| anyhow!("{e}"))
+            .and_then(|r| r);
         let result = match prepared {
             Ok(f) => {
                 let mut r = upload_one(&c, &album_uri, p, &f, &emit).await;
                 // One retry for network hiccups and SmugMug being busy.
                 if let Err(e) = &r {
                     let m = e.to_string();
-                    if !CANCEL.load(Ordering::Relaxed) && !m.contains("sign in") && (m.contains("interrupted") || m.contains("Too Many") || m.contains("Service Unavailable")) {
+                    if !CANCEL.load(Ordering::Relaxed)
+                        && !m.contains("sign in")
+                        && (m.contains("interrupted") || m.contains("Too Many") || m.contains("Service Unavailable"))
+                    {
                         tokio::time::sleep(Duration::from_secs(3)).await;
                         r = upload_one(&c, &album_uri, p, &f, &emit).await;
                     }
@@ -673,7 +722,9 @@ pub async fn upload(state_arc: Arc<AppState>, ids: Vec<i64>, album_uri: String, 
             }
         }
     }
-    let _ = state.app.emit("smugmug-progress", json!({ "done": total, "total": total, "current": "", "bytes": 0, "size": 0 }));
+    let _ = state
+        .app
+        .emit("smugmug-progress", json!({ "done": total, "total": total, "current": "", "bytes": 0, "size": 0 }));
     Ok(report)
 }
 
@@ -732,7 +783,13 @@ pub mod cmd {
     }
 
     #[tauri::command]
-    pub async fn smugmug_upload(state: S<'_>, ids: Vec<i64>, album_uri: String, web_uri: String, opts: UploadOptions) -> R<UploadReport> {
+    pub async fn smugmug_upload(
+        state: S<'_>,
+        ids: Vec<i64>,
+        album_uri: String,
+        web_uri: String,
+        opts: UploadOptions,
+    ) -> R<UploadReport> {
         upload(state.inner().clone(), ids, album_uri, web_uri, opts).await.map_err(e)
     }
 

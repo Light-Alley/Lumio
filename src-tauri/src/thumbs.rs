@@ -38,7 +38,11 @@ fn decode_preview(bytes: Vec<u8>, photo_orientation: Option<i64>) -> Result<Dyna
     let mut decoder = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?.into_decoder()?;
     let own = decoder.orientation().unwrap_or(Orientation::NoTransforms);
     let mut img = DynamicImage::from_decoder(decoder)?;
-    img.apply_orientation(if own == Orientation::NoTransforms { orientation_from_exif(photo_orientation) } else { own });
+    img.apply_orientation(if own == Orientation::NoTransforms {
+        orientation_from_exif(photo_orientation)
+    } else {
+        own
+    });
     Ok(img)
 }
 
@@ -69,7 +73,14 @@ fn orientation_from_exif(o: Option<i64>) -> Orientation {
 /// `want` is the long side the caller needs; RAW files use their embedded JPEG when
 /// it is at least that big, which is far quicker than a full RAW decode (and on a
 /// network drive reads much less of the file).
-pub fn load_image(path: &Path, ext: &str, orientation: Option<i64>, want: u32, et: &ExifTool, tmp: &Path) -> Result<DynamicImage> {
+pub fn load_image(
+    path: &Path,
+    ext: &str,
+    orientation: Option<i64>,
+    want: u32,
+    et: &ExifTool,
+    tmp: &Path,
+) -> Result<DynamicImage> {
     let raw = metadata::is_raw(ext);
     let e = ext.to_ascii_lowercase();
     if !raw && !matches!(e.as_str(), "heic" | "heif" | "avif") {
@@ -203,7 +214,15 @@ pub fn make_thumb(
 }
 
 /// Make just the offline preview (for photos indexed before previews were kept).
-pub fn make_offline_preview(src: &Path, ext: &str, orientation: Option<i64>, dest: &Path, size: u32, et: &ExifTool, tmp: &Path) -> Result<()> {
+pub fn make_offline_preview(
+    src: &Path,
+    ext: &str,
+    orientation: Option<i64>,
+    dest: &Path,
+    size: u32,
+    et: &ExifTool,
+    tmp: &Path,
+) -> Result<()> {
     let img = load_image(src, ext, orientation, size, et, tmp)?;
     write_preview(&img, dest, size)
 }
@@ -312,9 +331,8 @@ mod tests {
         let mut enc = JpegEncoder::new_with_quality(&mut buf, 80);
         if let Some(o) = orientation {
             // Big-endian TIFF header, one IFD entry: Orientation (0x0112), SHORT, 1, o.
-            let exif = vec![
-                0x4D, 0x4D, 0x00, 0x2A, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, o, 0, 0, 0, 0, 0, 0,
-            ];
+            let exif =
+                vec![0x4D, 0x4D, 0x00, 0x2A, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, o, 0, 0, 0, 0, 0, 0];
             enc.set_exif_metadata(exif).unwrap();
         }
         enc.write_image(img.as_raw(), 20, 10, image::ExtendedColorType::Rgb8).unwrap();

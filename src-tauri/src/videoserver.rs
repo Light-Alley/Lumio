@@ -117,7 +117,9 @@ fn read_request(r: &mut impl BufRead, secret: &str) -> Option<Request> {
                 range = Some(v.to_owned());
             } else if k.eq_ignore_ascii_case("origin") {
                 origin = Some(v.to_owned());
-            } else if (k.eq_ignore_ascii_case("content-length") && v != "0") || k.eq_ignore_ascii_case("transfer-encoding") {
+            } else if (k.eq_ignore_ascii_case("content-length") && v != "0")
+                || k.eq_ignore_ascii_case("transfer-encoding")
+            {
                 has_body = true;
             }
         }
@@ -125,7 +127,9 @@ fn read_request(r: &mut impl BufRead, secret: &str) -> Option<Request> {
     let path = target.split(['?', '#']).next().unwrap_or("");
     let mut segs = path.trim_start_matches('/').splitn(2, '/');
     let id = match (segs.next(), segs.next()) {
-        (Some(s), Some(id)) if crate::secure::constant_time_eq(s.as_bytes(), secret.as_bytes()) => id.trim_end_matches('/').parse().ok(),
+        (Some(s), Some(id)) if crate::secure::constant_time_eq(s.as_bytes(), secret.as_bytes()) => {
+            id.trim_end_matches('/').parse().ok()
+        }
         _ => None,
     };
     let head = method.eq_ignore_ascii_case("HEAD");
@@ -145,7 +149,8 @@ fn handle(stream: TcpStream, state: &AppState, secret: &str) {
         if !req.method_ok || req.has_body {
             // Not something a player sends; answer and close rather than guess where the
             // next request starts.
-            let _ = send_head(&mut out, "405 Method Not Allowed", "text/plain", 0, None, None).and_then(|_| out.flush());
+            let _ =
+                send_head(&mut out, "405 Method Not Allowed", "text/plain", 0, None, None).and_then(|_| out.flush());
             return;
         }
         let video = req.id.and_then(|id| {
@@ -156,7 +161,9 @@ fn handle(stream: TcpStream, state: &AppState, secret: &str) {
             Some((at, p.ext))
         });
         let sent = match video {
-            Some((path, ext)) => send_video(&mut out, std::path::Path::new(&path), &ext, req.range.as_deref(), req.head, cors),
+            Some((path, ext)) => {
+                send_video(&mut out, std::path::Path::new(&path), &ext, req.range.as_deref(), req.head, cors)
+            }
             None => send_head(&mut out, "404 Not Found", "text/plain", 0, None, cors).and_then(|_| out.flush()),
         };
         if sent.is_err() {
@@ -165,7 +172,14 @@ fn handle(stream: TcpStream, state: &AppState, secret: &str) {
     }
 }
 
-fn send_head(w: &mut impl Write, status: &str, mime: &str, len: u64, range: Option<String>, cors: Option<&str>) -> std::io::Result<()> {
+fn send_head(
+    w: &mut impl Write,
+    status: &str,
+    mime: &str,
+    len: u64,
+    range: Option<String>,
+    cors: Option<&str>,
+) -> std::io::Result<()> {
     write!(w, "HTTP/1.1 {status}\r\ncontent-type: {mime}\r\ncontent-length: {len}\r\naccept-ranges: bytes\r\n")?;
     if let Some(r) = range {
         write!(w, "content-range: {r}\r\n")?;
@@ -180,7 +194,14 @@ fn send_head(w: &mut impl Write, status: &str, mime: &str, len: u64, range: Opti
 
 /// Send the whole video (200) or the asked-for part (206), streamed from disk so a long
 /// film on a network drive is never read into memory whole.
-fn send_video(w: &mut impl Write, path: &std::path::Path, ext: &str, range: Option<&str>, head_only: bool, cors: Option<&str>) -> std::io::Result<()> {
+fn send_video(
+    w: &mut impl Write,
+    path: &std::path::Path,
+    ext: &str,
+    range: Option<&str>,
+    head_only: bool,
+    cors: Option<&str>,
+) -> std::io::Result<()> {
     use std::io::{Read, Seek, SeekFrom};
     let mime = metadata::video_mime(ext);
     let Ok(mut f) = std::fs::File::open(path) else {
@@ -222,10 +243,19 @@ mod tests {
 
     #[test]
     fn reads_id_and_range() {
-        let r = parse("GET /s3cret/42?m=1-1 HTTP/1.1\r\nHost: x\r\nRange: bytes=0-\r\nOrigin: tauri://localhost\r\n\r\n").unwrap();
+        let r =
+            parse("GET /s3cret/42?m=1-1 HTTP/1.1\r\nHost: x\r\nRange: bytes=0-\r\nOrigin: tauri://localhost\r\n\r\n")
+                .unwrap();
         assert_eq!(
             r,
-            Request { method_ok: true, head: false, id: Some(42), range: Some("bytes=0-".into()), origin: Some("tauri://localhost".into()), has_body: false }
+            Request {
+                method_ok: true,
+                head: false,
+                id: Some(42),
+                range: Some("bytes=0-".into()),
+                origin: Some("tauri://localhost".into()),
+                has_body: false
+            }
         );
     }
 

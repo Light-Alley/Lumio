@@ -64,7 +64,12 @@ impl std::error::Error for Offline {}
 /// Can the folder still be listed? Network drives and sync clients (pCloud, Dropbox, SMB)
 /// stop answering when the computer sleeps or the connection drops.
 pub fn reachable(dir: &Path) -> bool {
-    std::fs::read_dir(dir).map(|mut rd| { let _ = rd.next(); true }).unwrap_or(false)
+    std::fs::read_dir(dir)
+        .map(|mut rd| {
+            let _ = rd.next();
+            true
+        })
+        .unwrap_or(false)
 }
 
 /// Can we actually read the start of the file?
@@ -109,7 +114,10 @@ pub fn is_hidden(p: &Path) -> bool {
         .map(|n| {
             n.starts_with('.')
                 || n.starts_with("._")
-                || matches!(n, "$RECYCLE.BIN" | "System Volume Information" | "@eaDir" | "#recycle" | "#snapshot" | "node_modules")
+                || matches!(
+                    n,
+                    "$RECYCLE.BIN" | "System Volume Information" | "@eaDir" | "#recycle" | "#snapshot" | "node_modules"
+                )
         })
         .unwrap_or(false)
 }
@@ -258,12 +266,8 @@ fn stat(p: &Path) -> Option<(i64, i64)> {
     if !m.is_file() {
         return None;
     }
-    let mtime = m
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+    let mtime =
+        m.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
     Some((m.len() as i64, mtime))
 }
 
@@ -292,7 +296,10 @@ pub fn run_worker(state: Arc<AppState>, rx: Receiver<Job>) {
         };
         let mins = [1u64, 2, 5, 10, 15][(n - 1).min(4)];
         log::warn!("{off}; indexing paused, retrying in {mins} min");
-        let msg = format!("{} isn't reachable. Lumio will carry on when it's back (next try in {mins} min).", off.root.display());
+        let msg = format!(
+            "{} isn't reachable. Lumio will carry on when it's back (next try in {mins} min).",
+            off.root.display()
+        );
         emit_progress(&state, false, 0, 0, &msg);
         *notice.lock() = msg;
         if pending.lock().insert(off.root_id) {
@@ -403,10 +410,7 @@ fn dedup(v: Vec<PathBuf>) -> Vec<PathBuf> {
 }
 
 fn emit_progress(state: &AppState, active: bool, done: usize, total: usize, msg: &str) {
-    let _ = state.app.emit(
-        "index-progress",
-        Progress { active, done, total, message: msg.to_string() },
-    );
+    let _ = state.app.emit("index-progress", Progress { active, done, total, message: msg.to_string() });
 }
 
 fn handle_removed(state: &AppState, conn: &Connection, paths: &[PathBuf]) -> Result<()> {
@@ -457,10 +461,7 @@ fn scan_root(state: &AppState, conn: &Connection, root_id: i64) -> Result<()> {
         return Ok(()); // offline: keep catalogue as is
     }
     scan_dir(state, conn, &p, root_id)?;
-    conn.execute(
-        "UPDATE roots SET last_scan = ?1 WHERE id = ?2",
-        params![crate::db::now_ms(), root_id],
-    )?;
+    conn.execute("UPDATE roots SET last_scan = ?1 WHERE id = ?2", params![crate::db::now_ms(), root_id])?;
     Ok(())
 }
 
@@ -518,7 +519,11 @@ fn scan_dir(state: &AppState, conn: &Connection, dir: &Path, _root_id: i64) -> R
     };
     if !gone.is_empty() {
         if walk_errors > 0 {
-            log::warn!("{} photos below {} not found, but some folders could not be read; keeping them", gone.len(), dir.display());
+            log::warn!(
+                "{} photos below {} not found, but some folders could not be read; keeping them",
+                gone.len(),
+                dir.display()
+            );
         } else {
             delete_ids(state, conn, &gone)?;
         }
@@ -541,10 +546,7 @@ const TELL_EVERY: Duration = Duration::from_secs(3);
 
 /// Index the given files (skipping ones whose size and mtime are unchanged unless `force`).
 pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, force: bool) -> Result<()> {
-    let roots: Vec<(i64, PathBuf)> = db::roots(conn)?
-        .into_iter()
-        .map(|r| (r.id, PathBuf::from(r.path)))
-        .collect();
+    let roots: Vec<(i64, PathBuf)> = db::roots(conn)?.into_iter().map(|r| (r.id, PathBuf::from(r.path))).collect();
     // Files waiting to be moved are already in the catalogue at their new place.
     let moving = crate::pending::sources(conn)?;
     let previews = crate::offline::RootPolicy::load(conn)?;
@@ -572,7 +574,9 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
         if let Some((_, s, m)) = existing {
             if !force && s == size && m == mtime {
                 let (thumb, tries): (i64, i64) = conn
-                    .query_row("SELECT thumb, thumb_tries FROM photos WHERE path = ?1", [&ps], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .query_row("SELECT thumb, thumb_tries FROM photos WHERE path = ?1", [&ps], |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })
                     .unwrap_or((1, 0));
                 if thumb != 0 || tries >= MAX_THUMB_TRIES {
                     continue;
@@ -609,7 +613,10 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
                 Ok(vals) => {
                     for v in vals {
                         if let Some(err) = v.get("Error").and_then(|s| s.as_str()) {
-                            log::warn!("exiftool: {}: {err}", v.get("SourceFile").and_then(|s| s.as_str()).unwrap_or("?"));
+                            log::warn!(
+                                "exiftool: {}: {err}",
+                                v.get("SourceFile").and_then(|s| s.as_str()).unwrap_or("?")
+                            );
                             continue;
                         }
                         if let Some(src) = v.get("SourceFile").and_then(|s| s.as_str()) {
@@ -653,7 +660,9 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
                 if got.is_none() {
                     if let Some(id) = c.existing {
                         // Keep what we already know; just try the thumbnail again.
-                        let o: Option<i64> = tx.query_row("SELECT orientation FROM photos WHERE id = ?1", [id], |r| r.get(0)).unwrap_or(None);
+                        let o: Option<i64> = tx
+                            .query_row("SELECT orientation FROM photos WHERE id = ?1", [id], |r| r.get(0))
+                            .unwrap_or(None);
                         ids.push((id, c.path.clone(), c.ext.clone(), o, c.root_id));
                         continue;
                     }
@@ -702,7 +711,11 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
                     Ok(made) => (*id, Ok(made), size),
                     Err(e) => {
                         let ok = readable(path);
-                        log::warn!("thumbnail failed for {}: {e:#}{}", path.display(), if ok { "" } else { " (file not readable)" });
+                        log::warn!(
+                            "thumbnail failed for {}: {e:#}{}",
+                            path.display(),
+                            if ok { "" } else { " (file not readable)" }
+                        );
                         (*id, Err(ok), size)
                     }
                 }
@@ -781,7 +794,21 @@ mod sidecar_tests {
     #[test]
     fn the_folder_listing_finds_the_same_sidecars() {
         let d = dir("listing");
-        for f in ["IMG_1.CR2", "IMG_1.JPG", "IMG_1.xmp", "A.jpg", "A.xmp", "B.heic", "B.mov", "B.mov.xmp", "C.JPG", "C.JPG.xmp", "D.dng", "D.XMP", "2024.07 Iceland.jpg"] {
+        for f in [
+            "IMG_1.CR2",
+            "IMG_1.JPG",
+            "IMG_1.xmp",
+            "A.jpg",
+            "A.xmp",
+            "B.heic",
+            "B.mov",
+            "B.mov.xmp",
+            "C.JPG",
+            "C.JPG.xmp",
+            "D.dng",
+            "D.XMP",
+            "2024.07 Iceland.jpg",
+        ] {
             std::fs::write(d.join(f), b"x").unwrap();
         }
         let mut names = DirNames::default();
