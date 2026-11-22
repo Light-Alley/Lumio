@@ -88,7 +88,20 @@ fn type_sql(kind: &str) -> Result<String> {
 }
 
 fn num(s: &str) -> Result<f64> {
-    s.trim().parse::<f64>().map_err(|_| anyhow::anyhow!("\"{s}\" is not a number"))
+    let n = s.trim().parse::<f64>().map_err(|_| anyhow::anyhow!("\"{s}\" is not a number"))?;
+    if !n.is_finite() {
+        bail!("\"{s}\" is not a number");
+    }
+    Ok(n)
+}
+
+/// A number of days for "in the last N days", 0 to 100 years.
+fn days(s: &str) -> Result<i64> {
+    let n = num(s)?;
+    if !(0.0..=36500.0).contains(&n) {
+        bail!("\"{s}\" days is out of range (0 to 36500)");
+    }
+    Ok(n as i64)
 }
 
 /// A `YYYY-MM-DD` date, checked so bad input can't match by accident.
@@ -101,7 +114,12 @@ fn day(s: &str) -> Result<String> {
 }
 
 fn like(s: &str) -> Value {
-    format!("%{}%", s.trim().to_lowercase()).into()
+    crate::db::like_contains(s.trim()).into()
+}
+
+/// The `|keyword|` pattern for an exact keyword.
+fn keyword_like(s: &str) -> Value {
+    format!("%|{}|%", crate::db::like_escape(&s.to_lowercase())).into()
 }
 
 /// The SQL condition for one rule, adding its values to `args`. `None` means the rule
@@ -129,8 +147,8 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
         ("label", "none") => "ifnull(label,'') = ''".into(),
 
         // Keywords are stored as |a|b|c| so a whole keyword can be matched.
-        ("keyword", "has") => format!("lower(ifnull(keywords,'')) LIKE {}", arg(args, format!("%|{}|%", v.to_lowercase()).into())),
-        ("keyword", "has_not") => format!("lower(ifnull(keywords,'')) NOT LIKE {}", arg(args, format!("%|{}|%", v.to_lowercase()).into())),
+        ("keyword", "has") => format!("lower(ifnull(keywords,'')) LIKE {} ESCAPE '\\'", arg(args, keyword_like(v))),
+        ("keyword", "has_not") => format!("lower(ifnull(keywords,'')) NOT LIKE {} ESCAPE '\\'", arg(args, keyword_like(v))),
         ("keyword", "any") => "ifnull(keywords,'') <> ''".into(),
         ("keyword", "none") => "ifnull(keywords,'') = ''".into(),
 
@@ -138,14 +156,14 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
         ("text", "contains") | ("text", "not_contains") => {
             let a = arg(args, like(v));
             let hit = format!(
-                "(lower(filename) LIKE {a} OR lower(ifnull(title,'')) LIKE {a} OR lower(ifnull(caption,'')) LIKE {a} OR lower(ifnull(keywords,'')) LIKE {a} OR lower(ifnull(place,'')) LIKE {a})"
+                "(lower(filename) LIKE {a} ESCAPE '\\' OR lower(ifnull(title,'')) LIKE {a} ESCAPE '\\' OR lower(ifnull(caption,'')) LIKE {a} ESCAPE '\\' OR lower(ifnull(keywords,'')) LIKE {a} ESCAPE '\\' OR lower(ifnull(place,'')) LIKE {a} ESCAPE '\\')"
             );
             if r.op == "contains" { hit } else { format!("NOT {hit}") }
         }
 
-        ("filename", "contains") => format!("lower(filename) LIKE {}", arg(args, like(v))),
-        ("filename", "not_contains") => format!("lower(filename) NOT LIKE {}", arg(args, like(v))),
-        ("filename", "starts") => format!("lower(filename) LIKE {}", arg(args, format!("{}%", v.to_lowercase()).into())),
+        ("filename", "contains") => format!("lower(filename) LIKE {} ESCAPE '\\'", arg(args, like(v))),
+        ("filename", "not_contains") => format!("lower(filename) NOT LIKE {} ESCAPE '\\'", arg(args, like(v))),
+        ("filename", "starts") => format!("lower(filename) LIKE {} ESCAPE '\\'", arg(args, format!("{}%", crate::db::like_escape(&v.to_lowercase())).into())),
 
         // A folder and everything below it.
         ("folder", "in") | ("folder", "not_in") => {
@@ -166,20 +184,20 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
             let (a, b) = if a <= b { (a, b) } else { (b, a) };
             format!("substr({DATE}, 1, 10) BETWEEN {} AND {}", arg(args, a.into()), arg(args, b.into()))
         }
-        ("taken", "last_days") => format!("{DATE} >= datetime('now', {})", arg(args, format!("-{} days", num(v)? as i64).into())),
+        ("taken", "last_days") => format!("{DATE} >= datetime('now', {})", arg(args, format!("-{} days", days(v)?).into())),
         ("taken", "none") => "taken_at IS NULL".into(),
 
         // When Lumio first saw it.
         ("added", "last_days") => {
-            let cutoff = chrono::Utc::now().timestamp_millis() - (num(v)? as i64) * 24 * 3600 * 1000;
+            let cutoff = chrono::Utc::now().timestamp_millis().saturating_sub(days(v)? * 24 * 3600 * 1000);
             format!("indexed_at >= {}", arg(args, cutoff.into()))
         }
 
         // Camera: make and model together, e.g. "Canon EOS R5".
-        ("camera", "contains") => format!("lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) LIKE {}", arg(args, like(v))),
-        ("camera", "not_contains") => format!("lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) NOT LIKE {}", arg(args, like(v))),
+        ("camera", "contains") => format!("lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) LIKE {} ESCAPE '\\'", arg(args, like(v))),
+        ("camera", "not_contains") => format!("lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) NOT LIKE {} ESCAPE '\\'", arg(args, like(v))),
         ("camera", "none") => "ifnull(make,'') = '' AND ifnull(model,'') = ''".into(),
-        ("lens", "contains") => format!("lower(ifnull(lens,'')) LIKE {}", arg(args, like(v))),
+        ("lens", "contains") => format!("lower(ifnull(lens,'')) LIKE {} ESCAPE '\\'", arg(args, like(v))),
         ("lens", "none") => "ifnull(lens,'') = ''".into(),
 
         ("type", "is") => type_sql(v)?,
@@ -187,7 +205,7 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
 
         ("location", "yes") => "lat IS NOT NULL AND lon IS NOT NULL".into(),
         ("location", "no") => "(lat IS NULL OR lon IS NULL)".into(),
-        ("place", "contains") => format!("lower(ifnull(place,'')) LIKE {}", arg(args, like(v))),
+        ("place", "contains") => format!("lower(ifnull(place,'')) LIKE {} ESCAPE '\\'", arg(args, like(v))),
 
         ("shape", "landscape") => format!("{SHOWN_W} > {SHOWN_H}"),
         ("shape", "portrait") => format!("{SHOWN_W} < {SHOWN_H}"),

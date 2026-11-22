@@ -173,7 +173,8 @@ pub fn copy(files: &[PathBuf]) -> Result<Copied> {
     }
     let cb = guard.as_mut().unwrap();
     if files.len() == 1 && is_still_image(&files[0]) {
-        let img = image::ImageReader::open(&files[0])?.with_guessed_format()?.decode()?;
+        // Upright, as the photo is shown (a portrait JPEG must not paste sideways).
+        let img = crate::thumbs::open_upright(&files[0])?;
         let img = if img.width().max(img.height()) > CLIPBOARD_EDGE {
             img.resize(CLIPBOARD_EDGE, CLIPBOARD_EDGE, image::imageops::FilterType::Triangle)
         } else {

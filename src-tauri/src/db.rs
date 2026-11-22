@@ -264,16 +264,37 @@ pub fn folder_clause(folder: &str, recursive: bool, args: &mut Vec<rusqlite::typ
     let f = folder.trim_end_matches(['/', '\\']).to_string();
     let f = if f.is_empty() { folder.to_string() } else { f };
     if recursive {
-        let prefix = format!("{}{}", f, MAIN_SEPARATOR);
+        // Everything starting with "<f><sep>" sorts between "<f><sep>" and "<f><sep + 1>",
+        // a range the folder index can search instead of scanning every photo.
+        let prefix = format!("{f}{MAIN_SEPARATOR}");
+        let after = format!("{f}{}", char::from(MAIN_SEPARATOR as u8 + 1));
         args.push(f.clone().into());
-        args.push((prefix.chars().count() as i64).into());
         args.push(prefix.into());
+        args.push(after.into());
         let n = args.len();
-        format!("(folder = ?{} OR substr(folder, 1, ?{}) = ?{})", n - 2, n - 1, n)
+        format!("(folder = ?{} OR (folder >= ?{} AND folder < ?{}))", n - 2, n - 1, n)
     } else {
         args.push(f.into());
         format!("folder = ?{}", args.len())
     }
+}
+
+/// Escapes `%`, `_` and `\\` for a `LIKE … ESCAPE '\\'` pattern, so "100%" means the
+/// text "100%" and not "100 followed by anything".
+pub fn like_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// A lower-case "contains" pattern for `LIKE ? ESCAPE '\\'`.
+pub fn like_contains(s: &str) -> String {
+    format!("%{}%", like_escape(&s.to_lowercase()))
 }
 
 pub fn query_photos(conn: &Connection, q: &Query) -> Result<Vec<PhotoLite>> {
@@ -314,10 +335,11 @@ pub fn query_photos(conn: &Connection, q: &Query) -> Result<Vec<PhotoLite>> {
     }
     if let Some(t) = q.text.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         for word in t.split_whitespace() {
-            args.push(format!("%{}%", word.to_lowercase()).into());
+            args.push(like_contains(word).into());
             let n = args.len();
+            let l = format!("LIKE ?{n} ESCAPE '\\'");
             wh.push(format!(
-                "(lower(filename) LIKE ?{n} OR lower(ifnull(title,'')) LIKE ?{n} OR lower(ifnull(caption,'')) LIKE ?{n} OR lower(ifnull(keywords,'')) LIKE ?{n} OR lower(ifnull(place,'')) LIKE ?{n} OR lower(ifnull(model,'')) LIKE ?{n} OR lower(ifnull(lens,'')) LIKE ?{n} OR lower(folder) LIKE ?{n})"
+                "(lower(filename) {l} OR lower(ifnull(title,'')) {l} OR lower(ifnull(caption,'')) {l} OR lower(ifnull(keywords,'')) {l} OR lower(ifnull(place,'')) {l} OR lower(ifnull(model,'')) {l} OR lower(ifnull(lens,'')) {l} OR lower(folder) {l})"
             ));
         }
     }

@@ -11,6 +11,7 @@ mod fileops;
 mod histogram;
 mod history;
 mod indexer;
+mod keys;
 mod logfile;
 mod metadata;
 mod notify;
@@ -35,19 +36,47 @@ use std::sync::Arc;
 use tauri::http::{header, Response, StatusCode};
 use tauri::Manager;
 
-fn respond(status: StatusCode, mime: &str, body: Vec<u8>, cache: bool) -> Response<Vec<u8>> {
-    let mut b = Response::builder()
-        .status(status)
-        .header(header::CONTENT_TYPE, mime)
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+/// Threads that answer `thumb://` and `photo://` requests. A fixed number, so scrolling
+/// fast through a big library queues requests instead of starting hundreds of threads.
+fn asset_pool() -> &'static rayon::ThreadPool {
+    static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(4, 12);
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(n)
+            .thread_name(|i| format!("assets-{i}"))
+            .build()
+            .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().num_threads(1).build().expect("one thread"))
+    })
+}
+
+/// Lumio's own page, when it is the one asking (only it may read pixels back).
+fn cors_origin(req: &tauri::http::Request<Vec<u8>>) -> Option<String> {
+    req.headers()
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        .filter(|o| videoserver::allowed_origin(o))
+        .map(str::to_owned)
+}
+
+fn build(status: StatusCode, mime: &str, cors: Option<&str>) -> tauri::http::response::Builder {
+    let mut b = Response::builder().status(status).header(header::CONTENT_TYPE, mime);
+    if let Some(o) = cors {
+        b = b.header(header::ACCESS_CONTROL_ALLOW_ORIGIN, o).header(header::VARY, "Origin");
+    }
+    b
+}
+
+fn respond(status: StatusCode, mime: &str, body: Vec<u8>, cache: bool, cors: Option<&str>) -> Response<Vec<u8>> {
+    let mut b = build(status, mime, cors);
     if cache {
         b = b.header(header::CACHE_CONTROL, "max-age=31536000, immutable");
     }
-    b.body(body).unwrap()
+    b.body(body).unwrap_or_default()
 }
 
-fn not_found() -> Response<Vec<u8>> {
-    respond(StatusCode::NOT_FOUND, "text/plain", b"not found".to_vec(), false)
+fn not_found(cors: Option<&str>) -> Response<Vec<u8>> {
+    respond(StatusCode::NOT_FOUND, "text/plain", b"not found".to_vec(), false, cors)
 }
 
 fn id_from_uri(uri: &tauri::http::Uri) -> Option<i64> {
@@ -89,17 +118,12 @@ fn parse_range(h: &str, len: u64) -> Option<(u64, u64)> {
 
 /// Serve a video in pieces (HTTP range requests), which is what the webviews' players
 /// need to start quickly and to seek.
-fn serve_video(path: &std::path::Path, ext: &str, range: Option<&str>) -> Response<Vec<u8>> {
+fn serve_video(path: &std::path::Path, ext: &str, range: Option<&str>, cors: Option<&str>) -> Response<Vec<u8>> {
     use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut f) = std::fs::File::open(path) else { return not_found() };
+    let Ok(mut f) = std::fs::File::open(path) else { return not_found(cors) };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     let mime = metadata::video_mime(ext);
-    let base = || {
-        Response::builder()
-            .header(header::CONTENT_TYPE, mime)
-            .header(header::ACCEPT_RANGES, "bytes")
-            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-    };
+    let base = || build(StatusCode::OK, mime, cors).header(header::ACCEPT_RANGES, "bytes");
     let wanted = match range {
         Some(h) => match parse_range(h, len) {
             Some(r) => Some(r),
@@ -108,7 +132,7 @@ fn serve_video(path: &std::path::Path, ext: &str, range: Option<&str>) -> Respon
                     .status(StatusCode::RANGE_NOT_SATISFIABLE)
                     .header(header::CONTENT_RANGE, format!("bytes */{len}"))
                     .body(vec![])
-                    .unwrap()
+                    .unwrap_or_default()
             }
         },
         None => None,
@@ -117,68 +141,69 @@ fn serve_video(path: &std::path::Path, ext: &str, range: Option<&str>) -> Respon
     if wanted.is_none() && len <= VIDEO_CHUNK {
         let mut body = Vec::with_capacity(len as usize);
         return match f.read_to_end(&mut body) {
-            Ok(_) => base().status(StatusCode::OK).header(header::CONTENT_LENGTH, body.len()).body(body).unwrap(),
-            Err(_) => not_found(),
+            Ok(_) => base().status(StatusCode::OK).header(header::CONTENT_LENGTH, body.len()).body(body).unwrap_or_default(),
+            Err(_) => not_found(cors),
         };
     }
     let (start, end) = wanted.unwrap_or((0, len.saturating_sub(1)));
     let end = end.min(start + VIDEO_CHUNK - 1);
     let mut body = vec![0u8; (end - start + 1) as usize];
     if f.seek(SeekFrom::Start(start)).and_then(|_| f.read_exact(&mut body)).is_err() {
-        return not_found();
+        return not_found(cors);
     }
     base()
         .status(StatusCode::PARTIAL_CONTENT)
         .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"))
         .header(header::CONTENT_LENGTH, body.len())
         .body(body)
-        .unwrap()
+        .unwrap_or_default()
 }
 
 /// Serves `photo://localhost/<id>`: the original if the webview can show it, otherwise a
 /// generated JPEG preview; when the drive is offline, the saved offline preview or,
 /// failing that, the thumbnail. Videos are streamed in pieces (see `serve_video`).
-fn serve_photo(state: &AppState, id: i64, range: Option<&str>) -> Response<Vec<u8>> {
+fn serve_photo(state: &AppState, id: i64, range: Option<&str>, cors: Option<&str>) -> Response<Vec<u8>> {
     let (p, waiting_at) = {
         let conn = state.conn.lock();
-        let Ok(Some(p)) = db::get_photo(&conn, id) else { return not_found() };
+        let Ok(Some(p)) = db::get_photo(&conn, id) else { return not_found(cors) };
         (p, pending::source_of(&conn, id).ok().flatten())
     };
     // A photo whose move is still waiting is really still at its old place.
     let path = PathBuf::from(waiting_at.as_deref().unwrap_or(&p.path));
     if metadata::is_video(&p.ext) {
-        return serve_video(&path, &p.ext, range);
+        return serve_video(&path, &p.ext, range, cors);
     }
     if path.exists() {
         if metadata::browser_native(&p.ext) {
             if let Ok(bytes) = std::fs::read(&path) {
-                return respond(StatusCode::OK, mime_for(&p.ext), bytes, false);
+                return respond(StatusCode::OK, mime_for(&p.ext), bytes, false, cors);
             }
         }
         let cached = state.previews_dir.join(format!("v2-{}-{}-{}.jpg", p.id, p.mtime, p.orientation.unwrap_or(1)));
         if let Ok(bytes) = std::fs::read(&cached) {
-            return respond(StatusCode::OK, "image/jpeg", bytes, false);
+            return respond(StatusCode::OK, "image/jpeg", bytes, false, cors);
         }
         if let Ok(bytes) = thumbs::make_preview(&path, &p.ext, p.orientation, &state.et, &state.tmp_dir) {
-            let _ = std::fs::write(&cached, &bytes);
-            return respond(StatusCode::OK, "image/jpeg", bytes, false);
+            // Written under a temporary name first, so a half-written preview is never read.
+            let _ = thumbs::write_atomic(&cached, &bytes);
+            return respond(StatusCode::OK, "image/jpeg", bytes, false, cors);
         }
     }
-    serve_saved(state, id, true)
+    serve_saved(state, id, true, cors)
 }
 
 /// The saved offline preview (when `large`) or the thumbnail, from Lumio's own folders,
 /// so it works with the drive unplugged. Falls back to the thumbnail, uncached, so the
 /// sharper preview shows once it has been made.
-fn serve_saved(state: &AppState, id: i64, large: bool) -> Response<Vec<u8>> {
+fn serve_saved(state: &AppState, id: i64, large: bool, cors: Option<&str>) -> Response<Vec<u8>> {
     if large {
         if let Ok(b) = std::fs::read(thumbs::offline_preview_path(&state.offline_dir, id)) {
-            return respond(StatusCode::OK, "image/jpeg", b, false);
+            return respond(StatusCode::OK, "image/jpeg", b, false, cors);
         }
     }
     match std::fs::read(thumbs::thumb_path(&state.thumbs_dir, id)) {
-        Ok(b) => respond(StatusCode::OK, "image/jpeg", b, !large),
-        Err(_) => not_found(),
+        Ok(b) => respond(StatusCode::OK, "image/jpeg", b, !large, cors),
+        Err(_) => not_found(cors),
     }
 }
 
@@ -191,7 +216,8 @@ fn video_base(base: tauri::State<'_, VideoBase>) -> Option<String> {
 }
 
 fn clean_previews(dir: &std::path::Path) {
-    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(14 * 24 * 3600);
+    // A clock set before 1970 + 14 days has no cutoff (and must not panic).
+    let Some(cutoff) = std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(14 * 24 * 3600)) else { return };
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.flatten() {
             if e.metadata().and_then(|m| m.modified()).map(|t| t < cutoff).unwrap_or(false) {
@@ -228,16 +254,20 @@ pub fn run() {
             let id = id_from_uri(request.uri());
             // `?s=L` asks for the sharper offline preview (for the large view and filmstrip).
             let large = request.uri().query().is_some_and(|q| q.split('&').any(|kv| kv == "s=L"));
-            std::thread::spawn(move || {
-                responder.respond(id.map(|id| serve_saved(&state, id, large)).unwrap_or_else(not_found));
+            let cors = cors_origin(&request);
+            asset_pool().spawn(move || {
+                let c = cors.as_deref();
+                responder.respond(id.map(|id| serve_saved(&state, id, large, c)).unwrap_or_else(|| not_found(c)));
             });
         })
         .register_asynchronous_uri_scheme_protocol("photo", |ctx, request, responder| {
             let state = ctx.app_handle().state::<Arc<AppState>>().inner().clone();
             let id = id_from_uri(request.uri());
             let range = request.headers().get(header::RANGE).and_then(|v| v.to_str().ok()).map(str::to_owned);
-            std::thread::spawn(move || {
-                responder.respond(id.map(|id| serve_photo(&state, id, range.as_deref())).unwrap_or_else(not_found));
+            let cors = cors_origin(&request);
+            asset_pool().spawn(move || {
+                let c = cors.as_deref();
+                responder.respond(id.map(|id| serve_photo(&state, id, range.as_deref(), c)).unwrap_or_else(|| not_found(c)));
             });
         })
         .setup(|app| {
@@ -260,6 +290,12 @@ pub fn run() {
             let db_path = data.join("catalogue.sqlite");
             let conn = db::open(&db_path)?;
             db::migrate(&conn)?;
+            if let Err(e) = keys::migrate_plaintext(&conn) {
+                log::warn!("could not check the catalogue for old keys: {e}");
+            }
+            for f in ["catalogue.sqlite", "catalogue.sqlite-wal", "catalogue.sqlite-shm", "lumio.log", "lumio.log.1"] {
+                keys::restrict(&data.join(f));
+            }
             let et = Arc::new(exiftool::ExifTool::new(app.path().resource_dir().ok()).with_scratch(tmp_dir.clone()));
             if !et.available() {
                 log::warn!("ExifTool not found – metadata will be limited");

@@ -795,6 +795,9 @@ pub fn set_setting(state: S, key: String, value: String) -> R<()> {
     if key.starts_with("key_") {
         return Err("use ai_set_key".into());
     }
+    if key == "ai_openai_base_url" {
+        ai::check_base_url(&value).map_err(e)?;
+    }
     db::set_setting(&state.conn.lock(), &key, &value).map_err(e)?;
     if key.starts_with("offline_preview") {
         state.queue(Job::Previews);
@@ -831,14 +834,13 @@ pub fn ai_settings(state: S) -> ai::AiSettings {
 }
 
 #[tauri::command]
-pub fn ai_set_key(state: S, which: String, key: String) -> R<()> {
-    ai::set_key(&state, &which, &key).map_err(e)
+pub fn ai_set_key(which: String, key: String) -> R<()> {
+    ai::set_key(&which, &key).map_err(e)
 }
 
 #[tauri::command]
 pub async fn ai_chat(state: S<'_>, text: String) -> R<ai::ChatReply> {
-    let st = state.inner().clone();
-    ai::chat(&st, text).await.map_err(e)
+    ai::chat(state.inner().clone(), text).await.map_err(e)
 }
 
 #[tauri::command]

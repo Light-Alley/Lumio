@@ -31,6 +31,36 @@ fn decode_with_orientation(reader: ImageReader<impl std::io::BufRead + std::io::
     Ok(img)
 }
 
+/// Decode an embedded preview. A preview that carries its own orientation tag describes
+/// itself; one without (the usual case) is stored the way the sensor saw it, so the
+/// photo's orientation applies. Never both, which would turn it twice.
+fn decode_preview(bytes: Vec<u8>, photo_orientation: Option<i64>) -> Result<DynamicImage> {
+    let mut decoder = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?.into_decoder()?;
+    let own = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    let mut img = DynamicImage::from_decoder(decoder)?;
+    img.apply_orientation(if own == Orientation::NoTransforms { orientation_from_exif(photo_orientation) } else { own });
+    Ok(img)
+}
+
+/// Decode a file the way it should be shown (its EXIF orientation applied).
+pub fn open_upright(path: &Path) -> Result<DynamicImage> {
+    decode_with_orientation(ImageReader::open(path)?)
+}
+
+/// Writes `bytes` to `dest` through a temporary file in the same folder, so nobody ever
+/// reads a half-written file (two writers of the same file each use their own name).
+pub fn write_atomic(dest: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(p) = dest.parent() {
+        std::fs::create_dir_all(p)?;
+    }
+    let part = dest.with_extension(format!("{}.part", crate::secure::random_hex(4)?));
+    if let Err(e) = std::fs::write(&part, bytes).and_then(|_| std::fs::rename(&part, dest)) {
+        let _ = std::fs::remove_file(&part);
+        return Err(e.into());
+    }
+    Ok(())
+}
+
 fn orientation_from_exif(o: Option<i64>) -> Orientation {
     o.and_then(|v| Orientation::from_exif(v as u8)).unwrap_or(Orientation::NoTransforms)
 }
@@ -52,10 +82,7 @@ pub fn load_image(path: &Path, ext: &str, orientation: Option<i64>, want: u32, e
             return Ok(None);
         }
         let Some(bytes) = et.extract_preview(path, tmp)? else { return Ok(None) };
-        let mut img = decode_with_orientation(ImageReader::new(Cursor::new(bytes)))?;
-        // Embedded previews are usually stored unrotated.
-        img.apply_orientation(orientation_from_exif(orientation));
-        Ok(Some(img))
+        Ok(Some(decode_preview(bytes, orientation)?))
     };
     let mut small: Option<DynamicImage> = None;
     if raw {
@@ -88,18 +115,32 @@ pub fn load_image(path: &Path, ext: &str, orientation: Option<i64>, want: u32, e
 /// XMP sidecar), otherwise by the tag sips kept.
 #[cfg(target_os = "macos")]
 fn sips_decode(path: &Path, tmp: &Path, orientation: Option<i64>) -> Result<DynamicImage> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static N: AtomicU64 = AtomicU64::new(0);
-    let out = tmp.join(format!("sips{}-{}.jpg", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-    let status = std::process::Command::new("/usr/bin/sips")
+    use std::time::{Duration, Instant};
+    let out = tmp.join(format!("sips-{}.jpg", crate::secure::random_hex(8)?));
+    let mut child = std::process::Command::new("/usr/bin/sips")
         .args(["-s", "format", "jpeg", "-Z", &PREVIEW_SIZE.to_string()])
         .arg(path)
         .arg("--out")
         .arg(&out)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status()?;
+        .spawn()?;
+    // A file on a network drive that stopped answering must not hold up indexing.
+    let start = Instant::now();
+    let status = loop {
+        if let Some(st) = child.try_wait()? {
+            break st;
+        }
+        if start.elapsed() > Duration::from_secs(60) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_file(&out);
+            return Err(anyhow!("sips timed out"));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
     if !status.success() {
+        let _ = std::fs::remove_file(&out);
         return Err(anyhow!("sips failed"));
     }
     let img = (|| -> Result<DynamicImage> {
@@ -176,24 +217,13 @@ fn write_preview(img: &DynamicImage, dest: &Path, size: u32) -> Result<()> {
         img.clone()
     };
     // High quality previews (for full screen on sharp displays) also compress less.
-    let bytes = encode_jpeg(&img, if size >= 2400 { 90 } else { 82 })?;
-    if let Some(p) = dest.parent() {
-        std::fs::create_dir_all(p)?;
-    }
-    let part = dest.with_extension("part");
-    std::fs::write(&part, bytes)?;
-    std::fs::rename(&part, dest)?;
-    Ok(())
+    write_atomic(dest, &encode_jpeg(&img, if size >= 2400 { 90 } else { 82 })?)
 }
 
 fn write_thumb(img: &DynamicImage, dest: &Path) -> Result<(u32, u32)> {
     let (w, h) = (img.width(), img.height());
     let t = img.thumbnail(THUMB_SIZE, THUMB_SIZE);
-    let bytes = encode_jpeg(&t, 80)?;
-    if let Some(p) = dest.parent() {
-        std::fs::create_dir_all(p)?;
-    }
-    std::fs::write(dest, bytes)?;
+    write_atomic(dest, &encode_jpeg(&t, 80)?)?;
     Ok((w, h))
 }
 
@@ -210,7 +240,7 @@ pub fn save_frame(bytes: &[u8], dest: &Path) -> Result<(u32, u32)> {
 fn video_frame(src: &Path, et: &ExifTool, tmp: &Path) -> Result<DynamicImage> {
     if et.available() {
         if let Ok(Some(bytes)) = et.extract_preview(src, tmp) {
-            if let Ok(img) = decode_with_orientation(ImageReader::new(Cursor::new(bytes))) {
+            if let Ok(img) = decode_preview(bytes, None) {
                 return Ok(img);
             }
         }
@@ -225,10 +255,8 @@ fn video_frame(src: &Path, et: &ExifTool, tmp: &Path) -> Result<DynamicImage> {
 /// Ask Quick Look for a thumbnail (macOS decodes H.264, HEVC, ProRes and so on).
 #[cfg(target_os = "macos")]
 fn quicklook_thumb(src: &Path, tmp: &Path) -> Result<DynamicImage> {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{Duration, Instant};
-    static N: AtomicU64 = AtomicU64::new(0);
-    let dir = tmp.join(format!("ql{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    let dir = tmp.join(format!("ql-{}", crate::secure::random_hex(8)?));
     std::fs::create_dir_all(&dir)?;
     let result = (|| -> Result<DynamicImage> {
         let mut child = std::process::Command::new("/usr/bin/qlmanage")
@@ -254,7 +282,7 @@ fn quicklook_thumb(src: &Path, tmp: &Path) -> Result<DynamicImage> {
         let out = std::fs::read_dir(&dir)?
             .flatten()
             .map(|e| e.path())
-            .find(|p| p.extension().map_or(false, |e| e.eq_ignore_ascii_case("png")))
+            .find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")))
             .ok_or_else(|| anyhow!("Quick Look made no thumbnail"))?;
         Ok(ImageReader::open(out)?.with_guessed_format()?.decode()?)
     })();
@@ -270,4 +298,61 @@ pub fn make_preview(src: &Path, ext: &str, orientation: Option<i64>, et: &ExifTo
         img
     };
     encode_jpeg(&img, 88)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::ImageEncoder;
+
+    /// A 20×10 JPEG, optionally tagged with an EXIF orientation.
+    fn jpeg(orientation: Option<u8>) -> Vec<u8> {
+        let img = image::RgbImage::new(20, 10);
+        let mut buf = Vec::new();
+        let mut enc = JpegEncoder::new_with_quality(&mut buf, 80);
+        if let Some(o) = orientation {
+            // Big-endian TIFF header, one IFD entry: Orientation (0x0112), SHORT, 1, o.
+            let exif = vec![
+                0x4D, 0x4D, 0x00, 0x2A, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, o, 0, 0, 0, 0, 0, 0,
+            ];
+            enc.set_exif_metadata(exif).unwrap();
+        }
+        enc.write_image(img.as_raw(), 20, 10, image::ExtendedColorType::Rgb8).unwrap();
+        buf
+    }
+
+    #[test]
+    fn untagged_preview_takes_the_photos_orientation() {
+        let img = decode_preview(jpeg(None), Some(6)).unwrap();
+        assert_eq!((img.width(), img.height()), (10, 20));
+    }
+
+    #[test]
+    fn tagged_preview_is_not_turned_twice() {
+        // The preview says "turn me" itself; the photo says the same. Turn once.
+        let img = decode_preview(jpeg(Some(6)), Some(6)).unwrap();
+        assert_eq!((img.width(), img.height()), (10, 20));
+        // A preview with its own (different) turn follows its tag, not the photo's.
+        let img = decode_preview(jpeg(Some(3)), Some(6)).unwrap();
+        assert_eq!((img.width(), img.height()), (20, 10));
+    }
+
+    #[test]
+    fn portrait_jpegs_open_upright() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("p.jpg");
+        std::fs::write(&f, jpeg(Some(6))).unwrap();
+        let img = open_upright(&f).unwrap();
+        assert_eq!((img.width(), img.height()), (10, 20));
+    }
+
+    #[test]
+    fn atomic_writes_leave_no_parts() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("ab").join("1.jpg");
+        write_atomic(&f, b"one").unwrap();
+        write_atomic(&f, b"two").unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"two");
+        assert_eq!(std::fs::read_dir(f.parent().unwrap()).unwrap().count(), 1);
+    }
 }

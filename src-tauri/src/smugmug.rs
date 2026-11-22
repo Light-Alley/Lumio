@@ -17,11 +17,11 @@ use crate::db::{self, Photo};
 use crate::metadata;
 use crate::state::AppState;
 use crate::webexport::{self, ExportOptions};
-use crate::ai;
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
 use futures_util::StreamExt;
 use hmac::{Hmac, Mac};
+use std::collections::HashSet;
 use parking_lot::Mutex;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -66,21 +66,50 @@ impl Creds {
     }
 }
 
-fn load(state: &AppState) -> Creds {
-    ai::get_key_inner(&state.conn.lock(), KEY_NAME)
+fn load() -> Creds {
+    crate::keys::get(KEY_NAME)
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
 
-fn save(state: &AppState, c: &Creds) -> Result<()> {
+fn save(c: &Creds) -> Result<()> {
     if c.key.is_empty() && c.secret.is_empty() {
-        return ai::set_key(state, KEY_NAME, "");
+        return crate::keys::set(KEY_NAME, "");
     }
-    ai::set_key(state, KEY_NAME, &serde_json::to_string(c)?)
+    crate::keys::set(KEY_NAME, &serde_json::to_string(c)?)
 }
 
 /// The request token waiting for the user to paste SmugMug's six-digit code.
 static PENDING: Mutex<Option<(String, String)>> = Mutex::new(None);
+/// Web addresses SmugMug gave this session (the approval page, galleries): the only
+/// ones besides APPLY_URL that `smugmug_open` will open. Galleries can live on a custom
+/// domain, so a fixed host list wouldn't do.
+static OPENABLE: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+fn remember(url: &str) {
+    if url.starts_with("https://") {
+        OPENABLE.lock().get_or_insert_with(HashSet::new).insert(url.to_string());
+    }
+}
+
+fn may_open(url: &str) -> bool {
+    let https = reqwest::Url::parse(url).map(|u| u.scheme() == "https").unwrap_or(false);
+    https && (url == APPLY_URL || OPENABLE.lock().as_ref().is_some_and(|s| s.contains(url)))
+}
+
+/// An API address for `path`, which SmugMug's own replies supply ("/api/v2/…"). Only
+/// paths on api.smugmug.com are accepted, so a reply naming another host can never
+/// receive Lumio's signed request.
+fn api_url(path: &str) -> Result<reqwest::Url> {
+    if !path.starts_with('/') || path.starts_with("//") || path.contains('\\') {
+        bail!("SmugMug sent an unexpected address.");
+    }
+    let url = reqwest::Url::parse(API)?.join(path)?;
+    if url.scheme() != "https" || url.host_str() != Some("api.smugmug.com") {
+        bail!("SmugMug sent an unexpected address.");
+    }
+    Ok(url)
+}
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
 #[derive(Serialize)]
@@ -91,23 +120,23 @@ pub struct Status {
     pub apply_url: &'static str,
 }
 
-pub fn status(state: &AppState) -> Status {
-    let c = load(state);
+pub fn status() -> Status {
+    let c = load();
     Status { has_app_key: !c.key.is_empty() && !c.secret.is_empty(), connected: c.connected(), nickname: c.nickname, apply_url: APPLY_URL }
 }
 
 /// Save the user's own API key and secret. Changing them signs out.
-pub fn set_app_key(state: &AppState, key: &str, secret: &str) -> Result<()> {
+pub fn set_app_key(key: &str, secret: &str) -> Result<()> {
     let (key, secret) = (key.trim(), secret.trim());
     if key.is_empty() != secret.is_empty() {
         bail!("Please paste both the API key and the secret.");
     }
-    save(state, &Creds { key: key.into(), secret: secret.into(), ..Default::default() })
+    save(&Creds { key: key.into(), secret: secret.into(), ..Default::default() })
 }
 
-pub fn sign_out(state: &AppState) -> Result<()> {
-    let c = load(state);
-    save(state, &Creds { key: c.key, secret: c.secret, ..Default::default() })
+pub fn sign_out() -> Result<()> {
+    let c = load();
+    save(&Creds { key: c.key, secret: c.secret, ..Default::default() })
 }
 
 // ------------------------------------------------------------------ OAuth 1.0a
@@ -119,12 +148,9 @@ fn enc(s: &str) -> String {
     utf8_percent_encode(s, OAUTH_SET).to_string()
 }
 
-fn nonce() -> String {
-    static N: AtomicU64 = AtomicU64::new(0);
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
-    let mut mac = Hmac::<Sha1>::new_from_slice(b"lumio").expect("any key length works");
-    mac.update(format!("{t}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)).as_bytes());
-    mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect()
+/// 16 random bytes from the operating system, as OAuth asks for an unpredictable nonce.
+fn nonce() -> Result<String> {
+    crate::secure::random_hex(16)
 }
 
 /// Build the `Authorization: OAuth …` header for a request. Query parameters are part of
@@ -169,9 +195,9 @@ fn sign(
     format!("OAuth {fields}")
 }
 
-fn auth(method: &str, url: &reqwest::Url, c: &Creds, token: Option<(&str, &str)>, extra: &[(&str, &str)]) -> String {
+fn auth(method: &str, url: &reqwest::Url, c: &Creds, token: Option<(&str, &str)>, extra: &[(&str, &str)]) -> Result<String> {
     let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-    sign(method, url, (&c.key, &c.secret), token, extra, ts, &nonce())
+    Ok(sign(method, url, (&c.key, &c.secret), token, extra, ts, &nonce()?))
 }
 
 fn client() -> Result<reqwest::Client> {
@@ -192,18 +218,18 @@ fn form_get(pairs: &[(String, String)], k: &str) -> Option<String> {
 }
 
 /// Step 1: get a request token and return the page where the user approves Lumio.
-pub async fn begin_sign_in(state: &AppState) -> Result<String> {
-    let c = load(state);
+pub async fn begin_sign_in() -> Result<String> {
+    let c = load();
     if c.key.is_empty() {
         bail!("Add your SmugMug API key first.");
     }
     let url = reqwest::Url::parse(REQUEST_TOKEN_URL)?;
-    let header = auth("GET", &url, &c, None, &[("oauth_callback", "oob")]);
+    let header = auth("GET", &url, &c, None, &[("oauth_callback", "oob")])?;
     let resp = client()?.get(url).header("Authorization", header).send().await.context("contacting SmugMug")?;
     let code = resp.status();
     let body = resp.text().await?;
     if !code.is_success() {
-        log::info!("SmugMug request token failed: {code} {body}");
+        log::info!("SmugMug request token failed: {code} {}", crate::secure::redact_body(&body));
         bail!("SmugMug didn't accept the API key and secret. Check that both were copied in full ({}).", code.as_u16());
     }
     let pairs = parse_form(&body);
@@ -213,11 +239,12 @@ pub async fn begin_sign_in(state: &AppState) -> Result<String> {
     *PENDING.lock() = Some((t.clone(), s));
     let mut auth_url = reqwest::Url::parse(AUTHORIZE_URL)?;
     auth_url.query_pairs_mut().append_pair("oauth_token", &t).append_pair("Access", "Full").append_pair("Permissions", "Add");
+    remember(auth_url.as_str());
     Ok(auth_url.to_string())
 }
 
 /// Step 2: trade the six-digit code for a lasting access token.
-pub async fn finish_sign_in(state: &AppState, code: &str) -> Result<Status> {
+pub async fn finish_sign_in(code: &str) -> Result<Status> {
     let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
     if code.is_empty() {
         bail!("Please enter the code SmugMug showed you.");
@@ -225,14 +252,14 @@ pub async fn finish_sign_in(state: &AppState, code: &str) -> Result<Status> {
     let Some((rt, rs)) = PENDING.lock().clone() else {
         bail!("Please click \"Sign in to SmugMug\" again; the sign-in request has expired.");
     };
-    let mut c = load(state);
+    let mut c = load();
     let url = reqwest::Url::parse(ACCESS_TOKEN_URL)?;
-    let header = auth("GET", &url, &c, Some((&rt, &rs)), &[("oauth_verifier", &code)]);
+    let header = auth("GET", &url, &c, Some((&rt, &rs)), &[("oauth_verifier", &code)])?;
     let resp = client()?.get(url).header("Authorization", header).send().await.context("contacting SmugMug")?;
     let status_code = resp.status();
     let body = resp.text().await?;
     if !status_code.is_success() {
-        log::info!("SmugMug access token failed: {status_code} {body}");
+        log::info!("SmugMug access token failed: {status_code} {}", crate::secure::redact_body(&body));
         bail!("SmugMug didn't accept that code. Codes only work once and expire quickly, so click \"Sign in to SmugMug\" again for a new one.");
     }
     let pairs = parse_form(&body);
@@ -246,8 +273,8 @@ pub async fn finish_sign_in(state: &AppState, code: &str) -> Result<Status> {
     if let Ok(u) = auth_user(&c).await {
         c.nickname = u.nickname;
     }
-    save(state, &c)?;
-    Ok(status(state))
+    save(&c)?;
+    Ok(status())
 }
 
 // ------------------------------------------------------------------ API calls
@@ -256,7 +283,7 @@ async fn api(c: &Creds, method: &str, path: &str, query: &[(&str, &str)], body: 
     if !c.connected() {
         bail!("Sign in to SmugMug first.");
     }
-    let mut url = reqwest::Url::parse(API)?.join(path)?;
+    let mut url = api_url(path)?;
     {
         let mut q = url.query_pairs_mut();
         q.append_pair("_verbosity", "1");
@@ -264,7 +291,7 @@ async fn api(c: &Creds, method: &str, path: &str, query: &[(&str, &str)], body: 
             q.append_pair(k, v);
         }
     }
-    let header = auth(method, &url, c, Some((&c.token, &c.token_secret)), &[]);
+    let header = auth(method, &url, c, Some((&c.token, &c.token_secret)), &[])?;
     let http = client()?;
     let mut req = match method {
         "POST" => http.post(url.clone()),
@@ -280,12 +307,12 @@ async fn api(c: &Creds, method: &str, path: &str, query: &[(&str, &str)], body: 
     let code = resp.status();
     let text = resp.text().await?;
     if code.as_u16() == 401 {
-        log::info!("SmugMug 401 for {url}: {text}");
+        log::info!("SmugMug 401 for {}: {}", crate::secure::redact_url(url.as_str()), crate::secure::redact_body(&text));
         bail!("SmugMug no longer accepts Lumio's sign-in. Please sign out and sign in again.");
     }
     let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if !code.is_success() {
-        log::info!("SmugMug {code} for {url}: {text}");
+        log::info!("SmugMug {code} for {}: {}", crate::secure::redact_url(url.as_str()), crate::secure::redact_body(&text));
         let msg = v["Message"].as_str().unwrap_or("").to_string();
         bail!("SmugMug said: {} ({})", if msg.is_empty() { code.canonical_reason().unwrap_or("error") } else { &msg }, code.as_u16());
     }
@@ -335,12 +362,12 @@ fn album_from(v: &Value) -> Option<Album> {
 }
 
 /// The signed-in user's galleries, most recently changed first.
-pub async fn albums(state: &AppState) -> Result<Vec<Album>> {
-    let mut c = load(state);
+pub async fn albums() -> Result<Vec<Album>> {
+    let mut c = load();
     let me = auth_user(&c).await?;
     if c.nickname != me.nickname {
         c.nickname = me.nickname.clone();
-        let _ = save(state, &c);
+        let _ = save(&c);
     }
     let path = me.albums.unwrap_or_else(|| format!("/api/v2/user/{}!albums", me.nickname));
     let mut out = vec![];
@@ -350,6 +377,9 @@ pub async fn albums(state: &AppState) -> Result<Vec<Album>> {
         let r = api(&c, "GET", &path, &[("start", &s), ("count", "100")], None).await?;
         let list = r["Album"].as_array().cloned().unwrap_or_default();
         out.extend(list.iter().filter_map(album_from));
+        for a in &out {
+            remember(&a.web_uri);
+        }
         let total = r["Pages"]["Total"].as_i64().unwrap_or(0);
         start += list.len() as i64;
         if list.is_empty() || start > total {
@@ -382,7 +412,7 @@ pub fn url_name(name: &str) -> String {
 }
 
 /// Make a new gallery at the top level of the user's site.
-pub async fn create_album(state: &AppState, name: &str, privacy: &str) -> Result<Album> {
+pub async fn create_album(name: &str, privacy: &str) -> Result<Album> {
     let name = name.trim();
     if name.is_empty() {
         bail!("Please give the gallery a name.");
@@ -391,7 +421,7 @@ pub async fn create_album(state: &AppState, name: &str, privacy: &str) -> Result
         "Public" | "Unlisted" | "Private" => privacy,
         _ => "Unlisted",
     };
-    let c = load(state);
+    let c = load();
     let me = auth_user(&c).await?;
     let Some(node) = me.node else {
         bail!("This SmugMug account doesn't support creating galleries from other apps. Please create the gallery on smugmug.com, then pick it here.");
@@ -407,6 +437,7 @@ pub async fn create_album(state: &AppState, name: &str, privacy: &str) -> Result
                 let n = &r["Node"];
                 let album_uri = n["Uris"]["Album"].as_str().map(String::from).or_else(|| n["Uris"]["Album"]["Uri"].as_str().map(String::from));
                 let Some(uri) = album_uri else { bail!("SmugMug created the gallery but didn't say where it is. Please pick it from the list.") };
+                remember(n["WebUri"].as_str().unwrap_or_default());
                 return Ok(Album {
                     name: name.into(),
                     uri,
@@ -499,7 +530,7 @@ fn prepare(state: &AppState, p: &Photo, opts: &UploadOptions) -> Result<Prepared
         return Ok(Prepared { file: src.to_path_buf(), name: p.filename.clone(), ctype: content_type(&ext), temp: false });
     }
     let stem = src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| format!("photo-{}", p.id));
-    let tmp = state.tmp_dir.join(format!("smugmug-{}-{}.jpg", std::process::id(), p.id));
+    let tmp = state.tmp_dir.join(format!("smugmug-{}-{}.jpg", p.id, crate::secure::random_hex(8)?));
     let eo = ExportOptions { long_edge: if web { opts.long_edge.or(Some(3000)) } else { None }, quality: if web { 88 } else { 95 }, strip_location: false };
     webexport::render_jpeg(state, p, &eo, &tmp)?;
     Ok(Prepared { file: tmp, name: format!("{stem}.jpg"), ctype: "image/jpeg", temp: true })
@@ -515,7 +546,7 @@ async fn upload_one(
     let size = tokio::fs::metadata(&f.file).await?.len();
     let url = reqwest::Url::parse(UPLOAD_URL)?;
     let mut h = HeaderMap::new();
-    h.insert("Authorization", HeaderValue::from_str(&auth("POST", &url, c, Some((&c.token, &c.token_secret)), &[]))?);
+    h.insert("Authorization", HeaderValue::from_str(&auth("POST", &url, c, Some((&c.token, &c.token_secret)), &[])?)?);
     h.insert("Content-Length", HeaderValue::from(size));
     h.insert("Content-Type", HeaderValue::from_static(f.ctype));
     h.insert("X-Smug-AlbumUri", HeaderValue::from_str(album_uri)?);
@@ -565,7 +596,7 @@ async fn upload_one(
     if code.is_success() && v["stat"].as_str() == Some("ok") {
         return Ok(());
     }
-    log::info!("SmugMug upload of {} failed: {code} {text}", p.path);
+    log::info!("SmugMug upload of {} failed: {code} {}", p.filename, crate::secure::redact_body(&text));
     let msg = v["message"].as_str().or(v["Message"].as_str()).unwrap_or(code.canonical_reason().unwrap_or("upload failed"));
     if code.as_u16() == 401 {
         bail!("SmugMug no longer accepts Lumio's sign-in; please sign in again");
@@ -575,8 +606,11 @@ async fn upload_one(
 
 pub async fn upload(state_arc: Arc<AppState>, ids: Vec<i64>, album_uri: String, web_uri: String, opts: UploadOptions) -> Result<UploadReport> {
     CANCEL.store(false, Ordering::Relaxed);
+    if !album_uri.starts_with("/api/v2/album/") || album_uri.contains(['\r', '\n']) {
+        bail!("Please pick a gallery from the list.");
+    }
     let state: &AppState = &state_arc;
-    let c = load(state);
+    let c = load();
     if !c.connected() {
         bail!("Sign in to SmugMug first.");
     }
@@ -655,21 +689,21 @@ pub mod cmd {
     }
 
     #[tauri::command]
-    pub fn smugmug_status(state: S) -> Status {
-        status(&state)
+    pub fn smugmug_status() -> Status {
+        status()
     }
 
     #[tauri::command]
-    pub fn smugmug_set_app_key(state: S, key: String, secret: String) -> R<Status> {
-        set_app_key(&state, &key, &secret).map_err(e)?;
-        Ok(status(&state))
+    pub fn smugmug_set_app_key(key: String, secret: String) -> R<Status> {
+        set_app_key(&key, &secret).map_err(e)?;
+        Ok(status())
     }
 
     /// Opens SmugMug's approval page in the browser and also returns its address,
     /// so the window can offer it as a link if the browser didn't open.
     #[tauri::command]
-    pub async fn smugmug_begin_sign_in(state: S<'_>) -> R<String> {
-        let url = begin_sign_in(&state).await.map_err(e)?;
+    pub async fn smugmug_begin_sign_in() -> R<String> {
+        let url = begin_sign_in().await.map_err(e)?;
         if let Err(x) = tauri_plugin_opener::open_url(&url, None::<&str>) {
             log::info!("could not open the browser: {x}");
         }
@@ -677,24 +711,24 @@ pub mod cmd {
     }
 
     #[tauri::command]
-    pub async fn smugmug_finish_sign_in(state: S<'_>, code: String) -> R<Status> {
-        finish_sign_in(&state, &code).await.map_err(e)
+    pub async fn smugmug_finish_sign_in(code: String) -> R<Status> {
+        finish_sign_in(&code).await.map_err(e)
     }
 
     #[tauri::command]
-    pub fn smugmug_sign_out(state: S, forget_key: bool) -> R<Status> {
-        if forget_key { set_app_key(&state, "", "") } else { sign_out(&state) }.map_err(e)?;
-        Ok(status(&state))
+    pub fn smugmug_sign_out(forget_key: bool) -> R<Status> {
+        if forget_key { set_app_key("", "") } else { sign_out() }.map_err(e)?;
+        Ok(status())
     }
 
     #[tauri::command]
-    pub async fn smugmug_albums(state: S<'_>) -> R<Vec<Album>> {
-        albums(&state).await.map_err(e)
+    pub async fn smugmug_albums() -> R<Vec<Album>> {
+        albums().await.map_err(e)
     }
 
     #[tauri::command]
-    pub async fn smugmug_create_album(state: S<'_>, name: String, privacy: String) -> R<Album> {
-        create_album(&state, &name, &privacy).await.map_err(e)
+    pub async fn smugmug_create_album(name: String, privacy: String) -> R<Album> {
+        create_album(&name, &privacy).await.map_err(e)
     }
 
     #[tauri::command]
@@ -707,13 +741,12 @@ pub mod cmd {
         cancel();
     }
 
-    /// Open a SmugMug page (developer sign-up, a gallery) in the browser.
+    /// Open a SmugMug page in the browser: the developer sign-up page, the approval page
+    /// from the current sign-in, or a gallery SmugMug itself named in this session.
     #[tauri::command]
     pub fn smugmug_open(url: String) -> R<()> {
-        // Galleries can live on a custom domain, so any secure web address is allowed;
-        // they only ever come from SmugMug's own replies or Lumio itself.
-        if !reqwest::Url::parse(&url).map(|u| u.scheme() == "https").unwrap_or(false) {
-            return Err("not a secure web address".into());
+        if !may_open(&url) {
+            return Err("Lumio only opens SmugMug pages it got from SmugMug.".into());
         }
         tauri_plugin_opener::open_url(&url, None::<&str>).map_err(|x| x.to_string())
     }
@@ -730,6 +763,32 @@ mod tests {
         assert_eq!(url_name("2026 trip"), "Gallery-2026-Trip");
         assert_eq!(url_name("Café"), "Caf");
         assert_eq!(url_name("日本"), "Gallery");
+    }
+
+    #[test]
+    fn api_requests_stay_on_smugmug() {
+        assert_eq!(api_url("/api/v2!authuser").unwrap().as_str(), "https://api.smugmug.com/api/v2!authuser");
+        for bad in ["https://attacker.example/api", "//attacker.example/x", "api/v2", "/\\attacker.example", ""] {
+            assert!(api_url(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn only_known_pages_open() {
+        assert!(may_open(APPLY_URL));
+        assert!(!may_open("https://example.com/"));
+        assert!(!may_open("file:///etc/passwd"));
+        remember("https://photos.example.com/Travel/Iceland");
+        assert!(may_open("https://photos.example.com/Travel/Iceland"));
+        remember("http://insecure.example.com/");
+        assert!(!may_open("http://insecure.example.com/"));
+    }
+
+    #[test]
+    fn nonces_are_random() {
+        let (a, b) = (nonce().unwrap(), nonce().unwrap());
+        assert_ne!(a, b);
+        assert_eq!(a.len(), 32);
     }
 
     #[test]
