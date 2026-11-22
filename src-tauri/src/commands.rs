@@ -726,6 +726,31 @@ pub fn open_with(state: S, ids: Vec<i64>, app: String) -> R<()> {
     Ok(())
 }
 
+/// "Other application…": shows the system's file dialog from here, so only an application
+/// the person picks in that dialog can be started (never a path sent by the interface).
+#[tauri::command]
+pub async fn choose_app_and_open(state: S<'_>, ids: Vec<i64>) -> R<bool> {
+    use tauri_plugin_dialog::DialogExt;
+    let photos = db::get_photos(&state.conn.lock(), &ids).map_err(e)?;
+    let app = state.app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let mut d = app.dialog().file().set_title("Choose an application");
+        if cfg!(target_os = "macos") {
+            d = d.add_filter("Applications", &["app"]).set_directory("/Applications");
+        } else if cfg!(target_os = "windows") {
+            d = d.add_filter("Programs", &["exe"]);
+        }
+        d.blocking_pick_file()
+    })
+    .await
+    .map_err(e)?;
+    let Some(chosen) = picked.and_then(|f| f.into_path().ok()) else { return Ok(false) };
+    for p in photos {
+        openwith::open_with_chosen(Path::new(&p.path), &chosen).map_err(e)?;
+    }
+    Ok(true)
+}
+
 // ------------------------------------------------------------ settings
 
 #[tauri::command]

@@ -21,11 +21,42 @@ pub fn list(file: &Path) -> Vec<AppInfo> {
     v
 }
 
+/// Opens `file` with `app_id`, which must be one of the applications the operating system
+/// itself offers for that file (see `list`). The id comes from the user interface, so it
+/// is never trusted on its own: anything else is refused, whatever it points at.
 pub fn open_with(file: &Path, app_id: &str) -> Result<()> {
     if !file.exists() {
         bail!("The file is not available (is its drive connected?)");
     }
+    if !list(file).iter().any(|a| a.id == app_id) {
+        bail!("That application is not offered for this file.");
+    }
     imp::open_with(file, app_id)
+}
+
+/// Opens `file` with an application the person picked themselves in the system file
+/// dialog (shown by Rust, so the path never comes from the user interface).
+pub fn open_with_chosen(file: &Path, chosen: &Path) -> Result<()> {
+    if !file.exists() {
+        bail!("The file is not available (is its drive connected?)");
+    }
+    if !chosen_app_ok(chosen) {
+        bail!("That is not an application.");
+    }
+    imp::open_with(file, &chosen.to_string_lossy())
+}
+
+/// What may be picked as "another application": an .app bundle on macOS, an .exe on
+/// Windows, an installed .desktop entry or an executable file on Linux.
+fn chosen_app_ok(p: &Path) -> bool {
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if cfg!(target_os = "macos") {
+        ext == "app" && p.is_dir()
+    } else if cfg!(target_os = "windows") {
+        ext == "exe" && p.is_file()
+    } else {
+        imp::chosen_ok(p)
+    }
 }
 
 // ---------------------------------------------------------------- macOS
@@ -75,7 +106,8 @@ mod imp {
     }
 
     pub fn open_with(file: &Path, app: &str) -> Result<()> {
-        std::process::Command::new("/usr/bin/open").arg("-a").arg(app).arg(file).spawn()?;
+        // `--` so a file name can never be read as an option of `open`.
+        std::process::Command::new("/usr/bin/open").arg("-a").arg(app).arg("--").arg(file).spawn()?;
         Ok(())
     }
 }
@@ -86,7 +118,7 @@ mod imp {
     use super::AppInfo;
     use anyhow::{anyhow, Result};
     use std::path::Path;
-    use windows::core::{HSTRING, PCWSTR};
+    use windows::core::HSTRING;
     use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, IDataObject, COINIT_APARTMENTTHREADED};
     use windows::Win32::UI::Shell::{
         BHID_DataObject, IAssocHandler, IShellItem, SHAssocEnumHandlers, SHCreateItemFromParsingName,
@@ -149,8 +181,7 @@ mod imp {
                 }
             }
         }
-        // Otherwise treat it as a path to an .exe chosen by the user.
-        let _ = PCWSTR::null();
+        // Otherwise it is an .exe the person picked in the file dialog (see `open_with_chosen`).
         std::process::Command::new(app).arg(file).spawn().map_err(|e| anyhow!("could not start {app}: {e}"))?;
         Ok(())
     }
@@ -181,8 +212,40 @@ mod imp {
             "raf" => "image/x-fuji-raf",
             "orf" => "image/x-olympus-orf",
             "rw2" => "image/x-panasonic-rw2",
+            "mp4" | "m4v" => "video/mp4",
+            "mov" => "video/quicktime",
+            "avi" => "video/x-msvideo",
+            "mkv" => "video/x-matroska",
+            "webm" => "video/webm",
+            "mts" | "m2ts" => "video/mp2t",
+            "3gp" => "video/3gpp",
+            "wmv" => "video/x-ms-wmv",
+            _ if crate::metadata::is_video(&file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase()) => "video/*",
             _ => "image/x-raw",
         }
+    }
+
+    /// The broad family ("image/*" or "video/*") an application may declare instead.
+    fn family(mime: &str) -> &'static str {
+        if mime.starts_with("video/") {
+            "video/*"
+        } else {
+            "image/*"
+        }
+    }
+
+    /// True when `p` is a .desktop entry inside one of the system's application folders.
+    fn trusted_desktop(p: &Path) -> bool {
+        let Ok(canon) = std::fs::canonicalize(p) else { return false };
+        app_dirs().iter().filter_map(|d| std::fs::canonicalize(d).ok()).any(|d| canon.parent() == Some(d.as_path()))
+    }
+
+    pub fn chosen_ok(p: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        if p.extension().and_then(|e| e.to_str()) == Some("desktop") {
+            return trusted_desktop(p);
+        }
+        std::fs::metadata(p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
     }
 
     fn app_dirs() -> Vec<PathBuf> {
@@ -241,7 +304,7 @@ mod imp {
                 let fname = p.file_name().unwrap().to_string_lossy().to_string();
                 if !seen.insert(fname) { continue; }
                 if let Some(d) = parse(&p) {
-                    if d.mimes.iter().any(|m| m == mime || m == "image/*") {
+                    if d.mimes.iter().any(|m| m == mime || m == family(mime)) {
                         out.push(AppInfo { name: d.name, id: p.to_string_lossy().to_string(), is_default: false });
                     }
                 }
@@ -253,6 +316,9 @@ mod imp {
     pub fn open_with(file: &Path, app: &str) -> Result<()> {
         let f = file.to_string_lossy().to_string();
         if app.ends_with(".desktop") {
+            if !trusted_desktop(Path::new(app)) {
+                return Err(anyhow!("that application entry is not installed on this computer"));
+            }
             let d = parse(Path::new(app)).ok_or_else(|| anyhow!("cannot read {app}"))?;
             let words = shell_words::split(&d.exec)?;
             let mut args: Vec<String> = vec![];

@@ -105,6 +105,7 @@ export const api = {
   setStackTop: (id: number) => invoke<void>("set_stack_top", { id }),
   listOpenWith: (id: number) => invoke<AppInfo[]>("list_open_with", { id }),
   openWith: (ids: number[], app: string) => invoke<void>("open_with", { ids, app }),
+  chooseAppAndOpen: (ids: number[]) => invoke<boolean>("choose_app_and_open", { ids }),
   openDefault: (ids: number[]) => invoke<void>("open_default", { ids }),
   reveal: (id?: number, path?: string) => invoke<void>("reveal", { id: id ?? null, path: path ?? null }),
   getSettings: () => invoke<Record<string, string>>("get_settings"),

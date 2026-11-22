@@ -18,6 +18,7 @@ mod offline;
 mod openwith;
 mod pending;
 mod rename;
+mod secure;
 mod share;
 mod smugmug;
 mod state;
@@ -259,7 +260,7 @@ pub fn run() {
             let db_path = data.join("catalogue.sqlite");
             let conn = db::open(&db_path)?;
             db::migrate(&conn)?;
-            let et = Arc::new(exiftool::ExifTool::new(app.path().resource_dir().ok()));
+            let et = Arc::new(exiftool::ExifTool::new(app.path().resource_dir().ok()).with_scratch(tmp_dir.clone()));
             if !et.available() {
                 log::warn!("ExifTool not found – metadata will be limited");
             }
@@ -355,6 +356,7 @@ pub fn run() {
             commands::set_stack_top,
             commands::list_open_with,
             commands::open_with,
+            commands::choose_app_and_open,
             commands::get_settings,
             commands::set_setting,
             commands::app_status,

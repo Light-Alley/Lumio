@@ -514,6 +514,41 @@ fn truncate(s: &str, max_bytes: usize) -> String {
     s[..end].to_string()
 }
 
+/// Every tag that says where a photo was taken: GPS coordinates and the IPTC/XMP place
+/// names. Used when exporting or sharing "without location".
+pub const LOCATION_TAGS: &[&str] = &[
+    "GPS:all",
+    "XMP:GPS*",
+    "XMP-exif:GPS*",
+    "IPTC:City",
+    "IPTC:Sub-location",
+    "IPTC:Province-State",
+    "IPTC:Country-PrimaryLocationName",
+    "IPTC:Country-PrimaryLocationCode",
+    "XMP-photoshop:City",
+    "XMP-photoshop:State",
+    "XMP-photoshop:Country",
+    "XMP-iptcCore:Location",
+    "XMP-iptcCore:CountryCode",
+    "XMP-iptcExt:LocationCreated",
+    "XMP-iptcExt:LocationShown",
+    "XMP-iptcExt:City",
+    "XMP-iptcExt:CountryName",
+    "XMP-iptcExt:CountryCode",
+    "XMP-iptcExt:ProvinceState",
+    "XMP-iptcExt:Sublocation",
+    "Keys:GPSCoordinates",
+    "UserData:GPSCoordinates",
+    "ItemList:GPSCoordinates",
+    "Keys:LocationName",
+    "QuickTime:LocationInformation",
+];
+
+/// ExifTool arguments removing every tag in [`LOCATION_TAGS`].
+pub fn strip_location_args() -> Vec<String> {
+    LOCATION_TAGS.iter().map(|t| format!("-{t}=")).collect()
+}
+
 /// Orientations 5–8 show the stored image turned by a quarter, so width and height swap.
 pub fn is_quarter_turn(o: Option<i64>) -> bool {
     matches!(o, Some(5..=8))
@@ -713,14 +748,38 @@ mod exiftool_tests {
 "#;
 
     #[test]
-    fn edits_a_lightroom_sidecar_without_losing_develop_settings() {
-        let et = ExifTool::new(None);
-        if !et.available() {
-            eprintln!("ExifTool not installed; skipping");
-            return;
+    fn stripping_location_removes_coordinates_and_place_names() {
+        let Some(et) = crate::exiftool::test_tool() else { return };
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("place.jpg");
+        image::RgbImage::new(8, 8).save(&f).unwrap();
+        let set: Vec<String> = [
+            "-GPSLatitude=64.1", "-GPSLatitudeRef=N", "-GPSLongitude=21.9", "-GPSLongitudeRef=W",
+            "-IPTC:City=Reykjavik", "-IPTC:Province-State=Capital", "-IPTC:Country-PrimaryLocationName=Iceland",
+            "-IPTC:Sub-location=Harbour", "-XMP-photoshop:City=Reykjavik", "-XMP-photoshop:State=Capital",
+            "-XMP-photoshop:Country=Iceland", "-XMP-iptcCore:Location=Harbour", "-XMP-iptcCore:CountryCode=IS",
+            "-XMP-dc:Title=Keep me",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        et.write(&f, &set).unwrap();
+        let before = et.read_json(std::slice::from_ref(&f)).unwrap();
+        assert_eq!(before[0]["City"].as_str(), Some("Reykjavik"));
+        et.write(&f, &strip_location_args()).unwrap();
+        let after = et.read_json(std::slice::from_ref(&f)).unwrap();
+        let o = after[0].as_object().unwrap();
+        for k in ["GPSLatitude", "GPSLongitude", "City", "State", "Country", "Location", "Sub-location", "Province-State", "Country-PrimaryLocationName"] {
+            assert!(!o.contains_key(k), "{k} survived: {:?}", o.get(k));
         }
-        let dir = std::env::temp_dir().join(format!("lumio-xmp-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(o["Title"].as_str(), Some("Keep me"));
+    }
+
+    #[test]
+    fn edits_a_lightroom_sidecar_without_losing_develop_settings() {
+        let Some(et) = crate::exiftool::test_tool() else { return };
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let side = dir.join("IMG_1.xmp");
         std::fs::write(&side, LR_SIDECAR).unwrap();
         let read = |et: &ExifTool| parse(&et.read_json(std::slice::from_ref(&side)).unwrap()[0]);
