@@ -4,7 +4,7 @@ Thank you for wanting to help. Lumio is a small project looked after in spare ti
 
 ## Ways to help
 
-- **Report a bug** or **suggest an idea**: open an [issue](https://github.com/LIght-Alley/Lumio/issues/new/choose). The templates ask for the things we always need (Lumio version, system, what drive the photos are on).
+- **Report a bug** or **suggest an idea**: open an [issue](https://github.com/Light-Alley/Lumio/issues/new/choose). The templates ask for the things we always need (Lumio version, system, what drive the photos are on).
 - **Test a release** on a system or camera we don't have, and say how it went.
 - **Improve the docs**: the [user guide](docs/user-guide.md) and README are plain Markdown; small fixes can be made straight in GitHub.
 - **Write code**: see below.
@@ -27,7 +27,7 @@ Lumio aims to stay a **light, fast, safe photo browser**. Please keep these in m
 You need [Rust](https://rustup.rs) (stable), [Node.js](https://nodejs.org) 20 or later and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your system.
 
 ```bash
-git clone https://github.com/LIght-Alley/Lumio.git
+git clone https://github.com/Light-Alley/Lumio.git
 cd Lumio
 npm install
 npm run fetch-exiftool   # downloads ExifTool into src-tauri/resources/exiftool
@@ -39,17 +39,35 @@ Try your change with a **copy** of some photos, not your real library. Lumio's d
 ## Before you open a pull request
 
 ```bash
-npm run check                     # Svelte and TypeScript checks
-npm run build                     # front end builds
-cd src-tauri && cargo test        # Rust tests
+npm run verify    # everything below, in one go
 ```
 
-The **Check** workflow runs the same on macOS, Windows and Linux for every pull request.
+`npm run verify` runs the repository rules (`scripts/verify-repo-rules.mjs`), the Svelte and TypeScript checks, the front-end tests (Vitest), the front-end build, `cargo fmt --check`, `cargo clippy -- -D warnings` and `cargo test`. To run it automatically before every push, turn on the hook once:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The **Check** workflow runs the same on macOS, Windows and Linux for every pull request, plus dependency advisories (npm audit, cargo audit, OSV-Scanner), a secret scan of the whole history (gitleaks), CodeQL, and lint for the workflows (actionlint, zizmor).
+
+The repository rules keep a few habits: no switched-off checks (`#[allow]`, `@ts-ignore`, `svelte-ignore` and the like; fix the cause instead), no source file over 1,000 lines, no reminder comments (open an issue), every document linked from somewhere and every internal link working, and one version number in all manifests.
+
+### Commit messages
+
+Use [Conventional Commits](https://www.conventionalcommits.org): `fix: keep sidecars when renaming`, `feat: slideshow shuffle`, `docs: …`, `chore(deps): …`. A `!` after the type (`feat!:`) or a `BREAKING CHANGE:` line marks a change people must know about. Releases are made from these messages (see below), so they are what the changelog says.
 
 - Keep each pull request to one change, and describe what it does and how you tested it (which system, which kind of drive).
 - Add or update tests for anything that moves, copies, renames, deletes or writes metadata.
 - Update the README and [user guide](docs/user-guide.md) if users will notice the change.
 - Don't bump the version number; that happens when a release is made.
+
+## How releases are made
+
+1. Every push to `main` updates a pull request called **chore(main): release X.Y.Z** (the Release workflow, using release-please). It sets the new version in `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json`, and adds the changes to [CHANGELOG.md](CHANGELOG.md). Edit the CHANGELOG text in that pull request if it needs plainer words: the new version's section is what Lumio shows in its update window.
+2. Merging it creates a **draft** release and builds the installers for every system (`.github/workflows/release.yml`), with `SHA256SUMS.txt`, build attestations, and copies under fixed names for the README download links.
+3. Check the draft, then press **Publish**. Installed copies of Lumio see the new version from then on.
+
+The repository setting **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests** must be on for step 1.
 
 ## Where things are
 

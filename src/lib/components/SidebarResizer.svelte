@@ -2,7 +2,7 @@
   // The thin strip on the folder sidebar's right edge. Drag it to make the sidebar
   // narrower or wider; double-click to go back to the standard width. The width is
   // kept between a usable minimum and 40% of the window, and remembered.
-  import { app, clampSidebar, saveSetting, SIDEBAR_DEFAULT, SIDEBAR_MIN } from "../store.svelte";
+  import { app, clampSidebar, saveSetting, SIDEBAR_DEFAULT, SIDEBAR_MIN, SIDEBAR_MAX } from "../store.svelte";
 
   let dragging = $state(false);
   let startX = 0;
@@ -41,16 +41,16 @@
 
 <svelte:window onresize={() => (app.sidebarWidth = clampSidebar(app.sidebarWidth))} />
 
-<!-- A focusable separator is the standard pattern for a resizable splitter. -->
-<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+<!-- A slider: it can be focused and moved with the arrow keys, and screen readers announce the width. -->
 <div
   class="resizer"
   class:dragging
-  role="separator"
-  aria-orientation="vertical"
-  aria-label="Resize folder sidebar"
+  role="slider"
+  aria-orientation="horizontal"
+  aria-label="Folder sidebar width"
   aria-valuenow={app.sidebarWidth}
   aria-valuemin={SIDEBAR_MIN}
+  aria-valuemax={SIDEBAR_MAX}
   tabindex="0"
   title="Drag to resize. Double-click for the standard width."
   onpointerdown={down}

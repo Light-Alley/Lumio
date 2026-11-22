@@ -1,5 +1,4 @@
 // Context-menu builders shared by the grid, viewer and map.
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, errText, fileManagerName, isMac, isLinux, LABELS, shareApi, type PhotoLite, type FolderNode, type Root, type ShareOutcome, type Collection } from "./api";
 import { menu, type MenuItem } from "./menu.svelte";
 import { setFullscreen } from "./fullscreen";
@@ -113,14 +112,8 @@ function stackItems(p: PhotoLite, ids: number[]): MenuItem[] {
 }
 
 export async function chooseApp(ids: number[]) {
-  const app = await openDialog({
-    title: "Choose an application",
-    multiple: false,
-    directory: false,
-    defaultPath: isMac ? "/Applications" : undefined,
-    filters: isMac ? [{ name: "Applications", extensions: ["app"] }] : /Windows/.test(navigator.userAgent) ? [{ name: "Programs", extensions: ["exe"] }] : undefined,
-  });
-  if (typeof app === "string") api.openWith(ids, app).catch(errorToast);
+  // The file dialog is shown by Lumio's back end, so only an app picked there can be started.
+  await api.chooseAppAndOpen(ids).catch(errorToast);
 }
 
 export function folderMenu(n: FolderNode, root?: Root): MenuItem[] {

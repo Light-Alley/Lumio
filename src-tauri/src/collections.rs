@@ -88,20 +88,38 @@ fn type_sql(kind: &str) -> Result<String> {
 }
 
 fn num(s: &str) -> Result<f64> {
-    s.trim().parse::<f64>().map_err(|_| anyhow::anyhow!("\"{s}\" is not a number"))
+    let n = s.trim().parse::<f64>().map_err(|_| anyhow::anyhow!("\"{s}\" is not a number"))?;
+    if !n.is_finite() {
+        bail!("\"{s}\" is not a number");
+    }
+    Ok(n)
+}
+
+/// A number of days for "in the last N days", 0 to 100 years.
+fn days(s: &str) -> Result<i64> {
+    let n = num(s)?;
+    if !(0.0..=36500.0).contains(&n) {
+        bail!("\"{s}\" days is out of range (0 to 36500)");
+    }
+    Ok(n as i64)
 }
 
 /// A `YYYY-MM-DD` date, checked so bad input can't match by accident.
 fn day(s: &str) -> Result<String> {
     let d = s.trim();
-    if chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_err() {
+    if jiff::civil::Date::strptime("%Y-%m-%d", d).is_err() {
         bail!("\"{s}\" is not a date (use YYYY-MM-DD)");
     }
     Ok(d.to_string())
 }
 
 fn like(s: &str) -> Value {
-    format!("%{}%", s.trim().to_lowercase()).into()
+    crate::db::like_contains(s.trim()).into()
+}
+
+/// The `|keyword|` pattern for an exact keyword.
+fn keyword_like(s: &str) -> Value {
+    format!("%|{}|%", crate::db::like_escape(&s.to_lowercase())).into()
 }
 
 /// The SQL condition for one rule, adding its values to `args`. `None` means the rule
@@ -129,8 +147,10 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
         ("label", "none") => "ifnull(label,'') = ''".into(),
 
         // Keywords are stored as |a|b|c| so a whole keyword can be matched.
-        ("keyword", "has") => format!("lower(ifnull(keywords,'')) LIKE {}", arg(args, format!("%|{}|%", v.to_lowercase()).into())),
-        ("keyword", "has_not") => format!("lower(ifnull(keywords,'')) NOT LIKE {}", arg(args, format!("%|{}|%", v.to_lowercase()).into())),
+        ("keyword", "has") => format!("lower(ifnull(keywords,'')) LIKE {} ESCAPE '\\'", arg(args, keyword_like(v))),
+        ("keyword", "has_not") => {
+            format!("lower(ifnull(keywords,'')) NOT LIKE {} ESCAPE '\\'", arg(args, keyword_like(v)))
+        }
         ("keyword", "any") => "ifnull(keywords,'') <> ''".into(),
         ("keyword", "none") => "ifnull(keywords,'') = ''".into(),
 
@@ -138,19 +158,30 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
         ("text", "contains") | ("text", "not_contains") => {
             let a = arg(args, like(v));
             let hit = format!(
-                "(lower(filename) LIKE {a} OR lower(ifnull(title,'')) LIKE {a} OR lower(ifnull(caption,'')) LIKE {a} OR lower(ifnull(keywords,'')) LIKE {a} OR lower(ifnull(place,'')) LIKE {a})"
+                "(lower(filename) LIKE {a} ESCAPE '\\' OR lower(ifnull(title,'')) LIKE {a} ESCAPE '\\' OR lower(ifnull(caption,'')) LIKE {a} ESCAPE '\\' OR lower(ifnull(keywords,'')) LIKE {a} ESCAPE '\\' OR lower(ifnull(place,'')) LIKE {a} ESCAPE '\\')"
             );
-            if r.op == "contains" { hit } else { format!("NOT {hit}") }
+            if r.op == "contains" {
+                hit
+            } else {
+                format!("NOT {hit}")
+            }
         }
 
-        ("filename", "contains") => format!("lower(filename) LIKE {}", arg(args, like(v))),
-        ("filename", "not_contains") => format!("lower(filename) NOT LIKE {}", arg(args, like(v))),
-        ("filename", "starts") => format!("lower(filename) LIKE {}", arg(args, format!("{}%", v.to_lowercase()).into())),
+        ("filename", "contains") => format!("lower(filename) LIKE {} ESCAPE '\\'", arg(args, like(v))),
+        ("filename", "not_contains") => format!("lower(filename) NOT LIKE {} ESCAPE '\\'", arg(args, like(v))),
+        ("filename", "starts") => format!(
+            "lower(filename) LIKE {} ESCAPE '\\'",
+            arg(args, format!("{}%", crate::db::like_escape(&v.to_lowercase())).into())
+        ),
 
         // A folder and everything below it.
         ("folder", "in") | ("folder", "not_in") => {
             let clause = crate::db::folder_clause(v, true, args);
-            if r.op == "in" { clause } else { format!("NOT {clause}") }
+            if r.op == "in" {
+                clause
+            } else {
+                format!("NOT {clause}")
+            }
         }
 
         // When it was taken.
@@ -166,20 +197,27 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
             let (a, b) = if a <= b { (a, b) } else { (b, a) };
             format!("substr({DATE}, 1, 10) BETWEEN {} AND {}", arg(args, a.into()), arg(args, b.into()))
         }
-        ("taken", "last_days") => format!("{DATE} >= datetime('now', {})", arg(args, format!("-{} days", num(v)? as i64).into())),
+        ("taken", "last_days") => {
+            format!("{DATE} >= datetime('now', {})", arg(args, format!("-{} days", days(v)?).into()))
+        }
         ("taken", "none") => "taken_at IS NULL".into(),
 
         // When Lumio first saw it.
         ("added", "last_days") => {
-            let cutoff = chrono::Utc::now().timestamp_millis() - (num(v)? as i64) * 24 * 3600 * 1000;
+            let cutoff = crate::db::now_ms().saturating_sub(days(v)? * 24 * 3600 * 1000);
             format!("indexed_at >= {}", arg(args, cutoff.into()))
         }
 
         // Camera: make and model together, e.g. "Canon EOS R5".
-        ("camera", "contains") => format!("lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) LIKE {}", arg(args, like(v))),
-        ("camera", "not_contains") => format!("lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) NOT LIKE {}", arg(args, like(v))),
+        ("camera", "contains") => {
+            format!("lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) LIKE {} ESCAPE '\\'", arg(args, like(v)))
+        }
+        ("camera", "not_contains") => format!(
+            "lower(trim(ifnull(make,'') || ' ' || ifnull(model,''))) NOT LIKE {} ESCAPE '\\'",
+            arg(args, like(v))
+        ),
         ("camera", "none") => "ifnull(make,'') = '' AND ifnull(model,'') = ''".into(),
-        ("lens", "contains") => format!("lower(ifnull(lens,'')) LIKE {}", arg(args, like(v))),
+        ("lens", "contains") => format!("lower(ifnull(lens,'')) LIKE {} ESCAPE '\\'", arg(args, like(v))),
         ("lens", "none") => "ifnull(lens,'') = ''".into(),
 
         ("type", "is") => type_sql(v)?,
@@ -187,7 +225,7 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
 
         ("location", "yes") => "lat IS NOT NULL AND lon IS NOT NULL".into(),
         ("location", "no") => "(lat IS NULL OR lon IS NULL)".into(),
-        ("place", "contains") => format!("lower(ifnull(place,'')) LIKE {}", arg(args, like(v))),
+        ("place", "contains") => format!("lower(ifnull(place,'')) LIKE {} ESCAPE '\\'", arg(args, like(v))),
 
         ("shape", "landscape") => format!("{SHOWN_W} > {SHOWN_H}"),
         ("shape", "portrait") => format!("{SHOWN_W} < {SHOWN_H}"),
@@ -261,7 +299,8 @@ pub fn save(conn: &Connection, id: Option<i64>, name: &str, rules: &RuleSet) -> 
     let json = serde_json::to_string(rules)?;
     match id {
         Some(id) => {
-            let n = conn.execute("UPDATE collections SET name = ?1, rules = ?2 WHERE id = ?3", params![name, json, id])?;
+            let n =
+                conn.execute("UPDATE collections SET name = ?1, rules = ?2 WHERE id = ?3", params![name, json, id])?;
             if n == 0 {
                 bail!("That collection no longer exists.");
             }
@@ -271,7 +310,7 @@ pub fn save(conn: &Connection, id: Option<i64>, name: &str, rules: &RuleSet) -> 
             let pos: i64 = conn.query_row("SELECT ifnull(MAX(position), 0) + 1 FROM collections", [], |r| r.get(0))?;
             conn.execute(
                 "INSERT INTO collections (name, rules, position, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![name, json, pos, chrono::Utc::now().timestamp_millis()],
+                params![name, json, pos, crate::db::now_ms()],
             )?;
             Ok(conn.last_insert_rowid())
         }
@@ -355,6 +394,28 @@ mod tests {
         conn
     }
 
+    #[test]
+    fn bad_numbers_are_errors_not_crashes() {
+        let mut args = vec![];
+        for v in ["NaN", "inf", "Infinity", "-inf"] {
+            assert!(rule_sql(&rule("rating", "gte", v), &mut args).is_err(), "{v}");
+        }
+        // Used to overflow (and abort the app) when multiplied out to milliseconds.
+        assert!(rule_sql(&rule("added", "last_days", "1000000000000"), &mut args).is_err());
+        assert!(rule_sql(&rule("taken", "last_days", "-5"), &mut args).is_err());
+        assert!(rule_sql(&rule("added", "last_days", "30"), &mut args).unwrap().is_some());
+    }
+
+    #[test]
+    fn wildcards_in_text_are_literal() {
+        let conn = library();
+        conn.execute("UPDATE photos SET filename = '100%.jpg' WHERE filename = 'a.jpg'", []).unwrap();
+        conn.execute("UPDATE photos SET filename = '1000.jpg' WHERE filename = 'c.jpg'", []).unwrap();
+        assert_eq!(names(&conn, &all(vec![rule("filename", "contains", "100%")])), vec!["100%.jpg"]);
+        assert_eq!(names(&conn, &all(vec![rule("filename", "contains", "1_0")])), Vec::<String>::new());
+        assert_eq!(names(&conn, &all(vec![rule("filename", "starts", "100%")])), vec!["100%.jpg"]);
+    }
+
     fn names(conn: &Connection, set: &RuleSet) -> Vec<String> {
         let mut args = vec![];
         let w = where_sql(set, &mut args).unwrap().unwrap_or_else(|| "1".into());
@@ -382,7 +443,8 @@ mod tests {
         let c = library();
         assert_eq!(names(&c, &all(vec![])).len(), 5);
         assert_eq!(names(&c, &all(vec![rule("camera", "contains", "  ")])).len(), 5);
-        let half = Rule { field: "taken".into(), op: "between".into(), value: "2024-01-01".into(), value2: String::new() };
+        let half =
+            Rule { field: "taken".into(), op: "between".into(), value: "2024-01-01".into(), value2: String::new() };
         assert_eq!(names(&c, &all(vec![half])).len(), 5);
     }
 
@@ -408,7 +470,12 @@ mod tests {
     #[test]
     fn dates() {
         let c = library();
-        let between = Rule { field: "taken".into(), op: "between".into(), value: "2024-06-30".into(), value2: "2024-01-01".into() };
+        let between = Rule {
+            field: "taken".into(),
+            op: "between".into(),
+            value: "2024-06-30".into(),
+            value2: "2024-01-01".into(),
+        };
         assert_eq!(names(&c, &all(vec![between])), ["a.jpg", "c.jpg"]);
         assert_eq!(names(&c, &all(vec![rule("taken", "month", "12")])), ["b.cr3"]);
         assert_eq!(names(&c, &all(vec![rule("taken", "none", "")])), ["d.mp4", "trips-notes.png"]);
@@ -460,7 +527,8 @@ mod tests {
         let id = save(&c, None, "Best", &set).unwrap();
         let l = list(&c).unwrap();
         assert_eq!((l[0].id, l[0].name.as_str(), l[0].count), (id, "Best", 2));
-        save(&c, Some(id), "Best of 2024", &all(vec![rule("rating", "gte", "5"), rule("taken", "year", "2024")])).unwrap();
+        save(&c, Some(id), "Best of 2024", &all(vec![rule("rating", "gte", "5"), rule("taken", "year", "2024")]))
+            .unwrap();
         assert_eq!(list(&c).unwrap()[0].count, 1);
         assert_eq!(get_rules(&c, id).unwrap().unwrap().rules.len(), 2);
         delete(&c, id).unwrap();

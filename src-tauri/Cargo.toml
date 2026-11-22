@@ -1,11 +1,11 @@
 [package]
 name = "lumio"
-version = "1.0.1"
+version = "2.0.0"
 description = "Lumio – a lightweight, open-source photo browser and digital asset manager"
 authors = ["Light and Alley and Lumio contributors"]
 license = "MIT"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.88"
 
 [lib]
 name = "lumio_lib"
@@ -33,7 +33,8 @@ notify-debouncer-full = "0.5"
 trash = "5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 base64 = "0.22"
-chrono = "0.4"
+# Dates and times (replaces the unmaintained chrono).
+jiff = "0.2"
 parking_lot = "0.12"
 log = { version = "0.4", features = ["std"] }
 # Copying photos to the clipboard for pasting into WhatsApp, email or a website.
@@ -45,6 +46,13 @@ percent-encoding = "2"
 tokio = { version = "1", features = ["fs", "time", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = { version = "0.3", default-features = false }
+# Random numbers from the operating system (OAuth nonces, the video server's secret).
+getrandom = "0.3"
+# Checking web addresses (the AI server, SmugMug, GitHub release links).
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"

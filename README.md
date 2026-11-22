@@ -4,6 +4,17 @@
 
 Lumio is for photographers who want something simple: browse folders of photos on your computer, external drives and network drives, rate and tag them, group them, put them on a map, and find them again, without importing them into a heavy catalogue or editing suite. Lumio doesn't edit pixels. It hands photos to the editor you already use and picks up the result when you save.
 
+## Download
+
+| System | Installer |
+|---|---|
+| **macOS** (Apple Silicon: M1 and later) | [Lumio-macOS-AppleSilicon.dmg](https://github.com/Light-Alley/Lumio/releases/latest/download/Lumio-macOS-AppleSilicon.dmg) |
+| **macOS** (Intel) | [Lumio-macOS-Intel.dmg](https://github.com/Light-Alley/Lumio/releases/latest/download/Lumio-macOS-Intel.dmg) |
+| **Windows** 10 or 11 | [Lumio-Windows-x64-setup.exe](https://github.com/Light-Alley/Lumio/releases/latest/download/Lumio-Windows-x64-setup.exe) (or the [.msi](https://github.com/Light-Alley/Lumio/releases/latest/download/Lumio-Windows-x64.msi)) |
+| **Linux** | [AppImage](https://github.com/Light-Alley/Lumio/releases/latest/download/Lumio-Linux-x86_64.AppImage) · [.deb](https://github.com/Light-Alley/Lumio/releases/latest/download/Lumio-Linux-amd64.deb) (Ubuntu, Debian) · [.rpm](https://github.com/Light-Alley/Lumio/releases/latest/download/Lumio-Linux-x86_64.rpm) (Fedora) |
+
+These links always fetch the newest version. Checksums: [SHA256SUMS.txt](https://github.com/Light-Alley/Lumio/releases/latest/download/SHA256SUMS.txt). What changed: [CHANGELOG.md](CHANGELOG.md). Installing and first-launch warnings: [Installing](#installing).
+
 ![Lumio](docs/screenshot.png)
 
 **New to Lumio?** Read the [user guide](docs/user-guide.md): installing, adding your photos, shortcuts and troubleshooting, in about ten minutes.
@@ -55,11 +66,13 @@ Videos: MP4, MOV, M4V and WebM play on every system; MKV, AVI, MTS, MPG, WMV and
 
 ## Installing
 
-Download the installer for your system from the **Releases** page:
+Download the installer for your system from the [Download](#download) table above, or from the [**Releases** page](https://github.com/Light-Alley/Lumio/releases/latest):
 
-- **macOS**: `Lumio_x.y.z_aarch64.dmg` (Apple Silicon) or `_x64.dmg` (Intel). Open the .dmg and drag Lumio to Applications.
-- **Windows 10 or 11**: `Lumio_x.y.z_x64-setup.exe` or `.msi`.
+- **macOS**: `Lumio-macOS-AppleSilicon.dmg` (M1 and later) or `Lumio-macOS-Intel.dmg`. Open the .dmg and drag Lumio to Applications.
+- **Windows 10 or 11**: `Lumio-Windows-x64-setup.exe` or `.msi`.
 - **Linux**: `.AppImage` (any distro), `.deb` (Ubuntu/Debian) or `.rpm` (Fedora).
+
+To check a download, compare its SHA-256 with `SHA256SUMS.txt` on the release page. Each installer also carries a GitHub build attestation: `gh attestation verify <file> --repo Light-Alley/Lumio` shows it was built by Lumio's release workflow from this repository.
 
 If a build isn't code-signed, the first launch shows a warning (release notes say whether a build is signed):
 
@@ -126,7 +139,7 @@ To build installers for all three systems at once, push the repository to GitHub
 
 Lumio is a hobby project. I have a full-time and very different day job, so I fix things in my free time and replies can be slow.
 
-- **Found a problem or have an idea?** Open an [issue](https://github.com/LIght-Alley/Lumio/issues). Feedback and suggestions are welcome.
+- **Found a problem or have an idea?** Open an [issue](https://github.com/Light-Alley/Lumio/issues). Feedback and suggestions are welcome.
 - **Want to work on Lumio?** Pull requests are welcome, and so are people who would like to help maintain it. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, and open an issue to say hello. Please keep Lumio light: no pixel editing, no heavy dependencies, and every change that touches files should be safe on external and network drives.
 - **Found a security problem?** Please report it privately, as described in [SECURITY.md](SECURITY.md).
 

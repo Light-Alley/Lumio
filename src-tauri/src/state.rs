@@ -7,7 +7,8 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use tauri::AppHandle;
 
-pub type Watcher = notify_debouncer_full::Debouncer<notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>;
+pub type Watcher =
+    notify_debouncer_full::Debouncer<notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>;
 
 pub struct AppState {
     pub app: AppHandle,

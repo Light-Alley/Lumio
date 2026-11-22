@@ -68,6 +68,10 @@ pub struct OpReport {
     pub failed: Vec<(String, String)>,
     /// True when the destination is not inside any library folder.
     pub outside_library: bool,
+    /// For deletions: the photo id of each entry in `failed`, in the same order, so a
+    /// retry can never pick a different photo that happens to share a file name.
+    #[serde(default)]
+    pub failed_ids: Vec<i64>,
     /// Moves that will happen when a drive that isn't connected comes back.
     #[serde(default)]
     pub queued: usize,
@@ -86,10 +90,81 @@ pub struct OpReport {
 
 // ------------------------------------------------------------------ safe file primitives
 
-/// Do two paths name the same place? Compared without case, because the drives most
-/// photos live on (macOS, Windows, exFAT cards) ignore case.
+/// Do two paths name the same place? Names that differ only in case are the same place
+/// on drives that ignore case (macOS, Windows, exFAT cards) and different files on the
+/// case-sensitive drives Linux usually has. When both exist the drive itself answers;
+/// otherwise the usual behaviour of the system decides.
 pub(crate) fn same_place(a: &Path, b: &Path) -> bool {
-    a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    if a == b {
+        return true;
+    }
+    if a.to_string_lossy().to_lowercase() != b.to_string_lossy().to_lowercase() {
+        return false;
+    }
+    same_file(a, b).unwrap_or(cfg!(any(target_os = "macos", target_os = "windows")))
+}
+
+/// `Some(true)` when both paths exist and are the same file or folder.
+fn same_file(a: &Path, b: &Path) -> Option<bool> {
+    let (ma, mb) = (std::fs::metadata(a).ok()?, std::fs::metadata(b).ok()?);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(ma.dev() == mb.dev() && ma.ino() == mb.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (ma, mb);
+        Some(std::fs::canonicalize(a).ok()? == std::fs::canonicalize(b).ok()?)
+    }
+}
+
+/// Is `path` really inside `root` once links are followed? A link inside a library folder
+/// that points elsewhere must not let folder commands reach outside the library. For a
+/// path that doesn't exist yet the nearest existing parent is checked. When the root
+/// itself isn't reachable (drive unplugged) there is nothing a link could lead to.
+pub fn inside_root(root: &Path, path: &Path) -> Result<()> {
+    let Ok(croot) = std::fs::canonicalize(root) else { return Ok(()) };
+    let mut probe = path.to_path_buf();
+    let mut rest: Vec<std::ffi::OsString> = vec![];
+    let real = loop {
+        match std::fs::canonicalize(&probe) {
+            Ok(c) => break rest.iter().rev().fold(c, |acc, n| acc.join(n)),
+            Err(_) => {
+                let (Some(name), Some(parent)) =
+                    (probe.file_name().map(|n| n.to_os_string()), probe.parent().map(Path::to_path_buf))
+                else {
+                    bail!("\"{}\" is not a folder in your library.", path.display());
+                };
+                rest.push(name);
+                probe = parent;
+            }
+        }
+    };
+    if !real.starts_with(&croot) {
+        bail!("\"{}\" leads outside your library (through a link), so Lumio won't change it.", path.display());
+    }
+    Ok(())
+}
+
+/// Refuses a path that is itself a symbolic link (deleting, renaming or moving one would
+/// act on whatever it points at, or surprise the person).
+pub fn not_a_link(path: &Path) -> Result<()> {
+    if std::fs::symlink_metadata(path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+        bail!("\"{}\" is a link to another place, so Lumio won't change it.", path.display());
+    }
+    Ok(())
+}
+
+/// Did `rename` fail only because source and target are on different drives?
+fn crosses_devices(e: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    let code = 18; // EXDEV
+    #[cfg(windows)]
+    let code = 17; // ERROR_NOT_SAME_DEVICE
+    #[cfg(not(any(unix, windows)))]
+    let code = -1;
+    e.raw_os_error() == Some(code)
 }
 
 fn numbered(name: &str, i: u32) -> String {
@@ -109,7 +184,12 @@ pub fn unique_target(dir: &Path, name: &str) -> PathBuf {
 
 /// The first of "name", "name (2)", "name (3)"... in `dir` that `taken` says is free, for the
 /// photo and, when it has one, for its sidecar under the matching name.
-pub(crate) fn free_name(dir: &Path, name: &str, sidecar: Option<&Path>, mut taken: impl FnMut(&Path) -> bool) -> PathBuf {
+pub(crate) fn free_name(
+    dir: &Path,
+    name: &str,
+    sidecar: Option<&Path>,
+    mut taken: impl FnMut(&Path) -> bool,
+) -> PathBuf {
     for i in 1.. {
         let c = dir.join(numbered(name, i));
         if taken(&c) {
@@ -128,12 +208,10 @@ pub(crate) fn free_name(dir: &Path, name: &str, sidecar: Option<&Path>, mut take
     unreachable!()
 }
 
-/// A hidden name next to `dst` for a copy that isn't finished yet.
-fn part_name(dst: &Path) -> PathBuf {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    static N: AtomicU32 = AtomicU32::new(0);
+/// A hidden, unpredictable name next to `dst` for a copy that isn't finished yet.
+fn part_name(dst: &Path) -> Result<PathBuf> {
     let name = dst.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    dst.with_file_name(format!(".lumio-{}-{}-{name}.part", std::process::id(), N.fetch_add(1, Ordering::Relaxed)))
+    Ok(dst.with_file_name(format!(".lumio-{}-{name}.part", crate::secure::random_hex(8)?)))
 }
 
 fn already_there(dst: &Path) -> anyhow::Error {
@@ -143,7 +221,7 @@ fn already_there(dst: &Path) -> anyhow::Error {
 /// Give `from`, a file Lumio has just made, the name `to`, never replacing a file that is
 /// already called that. A hard link fails if the name is taken, which rename doesn't on
 /// every system; drives without hard links fall back to checking first.
-fn place_new(from: &Path, to: &Path) -> Result<()> {
+pub(crate) fn place_new(from: &Path, to: &Path) -> Result<()> {
     match std::fs::hard_link(from, to) {
         Ok(()) => {
             let _ = std::fs::remove_file(from);
@@ -199,7 +277,7 @@ pub fn copy_verified(src: &Path, dst: &Path) -> Result<()> {
     if dst.exists() {
         return Err(already_there(dst));
     }
-    let part = part_name(dst);
+    let part = part_name(dst)?;
     let res: Result<()> = (|| {
         std::fs::copy(src, &part).with_context(|| format!("copying to {}", dst.display()))?;
         if let Ok(f) = std::fs::File::open(&part) {
@@ -248,15 +326,21 @@ pub fn move_file(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Copies a folder tree. Only folders and ordinary files are copied: links (which could
+/// pull in files from outside the library) and special files (pipes, devices, which could
+/// hang the copy) are left out.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst)?;
     for e in std::fs::read_dir(src)? {
         let e = e?;
         let t = dst.join(e.file_name());
-        if e.file_type()?.is_dir() {
+        let ft = e.file_type()?;
+        if ft.is_dir() {
             copy_dir_recursive(&e.path(), &t)?;
-        } else {
+        } else if ft.is_file() {
             copy_verified(&e.path(), &t)?;
+        } else {
+            log::info!("not copying {} (a link or special file)", e.path().display());
         }
     }
     Ok(())
@@ -335,9 +419,14 @@ struct Dest {
 
 /// Move (or copy) each photo to its own folder, optionally under a given name (Undo uses
 /// that to put photos back exactly where they were).
-pub fn move_photos_to<H: Host + ?Sized>(h: &H, items: &[(i64, PathBuf, Option<String>)], copy: bool) -> Result<OpReport> {
+pub fn move_photos_to<H: Host + ?Sized>(
+    h: &H,
+    items: &[(i64, PathBuf, Option<String>)],
+    copy: bool,
+) -> Result<OpReport> {
     let ids: Vec<i64> = items.iter().map(|(id, _, _)| *id).collect();
-    let photos: HashMap<i64, db::Photo> = { db::get_photos(&h.conn().lock(), &ids)?.into_iter().map(|p| (p.id, p)).collect() };
+    let photos: HashMap<i64, db::Photo> =
+        { db::get_photos(&h.conn().lock(), &ids)?.into_iter().map(|p| (p.id, p)).collect() };
 
     // Check each destination once.
     let mut dests: HashMap<PathBuf, Dest> = HashMap::new();
@@ -392,8 +481,8 @@ pub fn move_photos_to<H: Host + ?Sized>(h: &H, items: &[(i64, PathBuf, Option<St
             let queue = {
                 let conn = h.conn().lock();
                 let waiting = crate::pending::source_of(&conn, p.id)?.is_some();
-                let src_away = !src.exists()
-                    && db::root_for_path(&conn, &src)?.map_or(true, |(_, root)| !indexer::reachable(&root));
+                let src_away =
+                    !src.exists() && db::root_for_path(&conn, &src)?.is_none_or(|(_, root)| !indexer::reachable(&root));
                 match (&d.root, d.away || src_away || waiting) {
                     (Some((root_id, _)), true) => Some(crate::pending::queue_move(&conn, p, dest, &name, *root_id)),
                     _ => None,
@@ -402,7 +491,12 @@ pub fn move_photos_to<H: Host + ?Sized>(h: &H, items: &[(i64, PathBuf, Option<St
             match queue {
                 Some(Ok(to)) => {
                     rep.queued += 1;
-                    rep.moved.push(Moved { id: p.id, from: p.path.clone(), to: to.to_string_lossy().to_string(), in_library: true });
+                    rep.moved.push(Moved {
+                        id: p.id,
+                        from: p.path.clone(),
+                        to: to.to_string_lossy().to_string(),
+                        in_library: true,
+                    });
                     continue;
                 }
                 Some(Err(e)) => {
@@ -457,10 +551,20 @@ pub fn move_photos_to<H: Host + ?Sized>(h: &H, items: &[(i64, PathBuf, Option<St
                         "UPDATE photos SET path = ?1, folder = ?2, filename = ?3, root_id = ?4 WHERE id = ?5",
                         params![dst.to_string_lossy(), dest.to_string_lossy(), filename, root_id, p.id],
                     )?;
-                    rep.moved.push(Moved { id: p.id, from: p.path.clone(), to: dst.to_string_lossy().to_string(), in_library: true });
+                    rep.moved.push(Moved {
+                        id: p.id,
+                        from: p.path.clone(),
+                        to: dst.to_string_lossy().to_string(),
+                        in_library: true,
+                    });
                 } else {
                     h.forget(&conn, &[p.id])?;
-                    rep.moved.push(Moved { id: p.id, from: p.path.clone(), to: dst.to_string_lossy().to_string(), in_library: false });
+                    rep.moved.push(Moved {
+                        id: p.id,
+                        from: p.path.clone(),
+                        to: dst.to_string_lossy().to_string(),
+                        in_library: false,
+                    });
                 }
             }
             Err(e) => rep.failed.push((p.filename.clone(), format!("{e:#}"))),
@@ -508,7 +612,8 @@ fn rewrite_pending(conn: &Connection, old: &str, new: &str) -> Result<()> {
     let sep = std::path::MAIN_SEPARATOR;
     let prefix = format!("{}{sep}", old.trim_end_matches(['/', '\\']));
     let mut st = conn.prepare("SELECT photo_id, src FROM pending_moves")?;
-    let rows: Vec<(i64, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+    let rows: Vec<(i64, String)> =
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
     for (id, src) in rows {
         if let Some(rest) = src.strip_prefix(&prefix) {
             let np = format!("{}{sep}{rest}", new.trim_end_matches(['/', '\\']));
@@ -540,7 +645,12 @@ pub fn move_folder<H: Host + ?Sized>(h: &H, src: &Path, dest_parent: &Path, copy
             let _ = std::fs::remove_dir_all(&dst); // only what this copy made: `dst` was a new name
             return Err(e);
         }
-    } else if std::fs::rename(src, &dst).is_err() {
+    } else if let Err(err) = std::fs::rename(src, &dst) {
+        // Only a move to another drive needs copy-then-remove. Any other failure (no
+        // permission, file in use…) is reported, never "fixed" by deleting the original.
+        if !crosses_devices(&err) {
+            return Err(anyhow::Error::from(err).context(format!("moving {}", src.display())));
+        }
         if let Err(e) = copy_dir_recursive(src, &dst) {
             let _ = std::fs::remove_dir_all(&dst);
             return Err(e.context("copying the folder (the original is untouched)"));
@@ -608,7 +718,10 @@ pub fn rename_folder<H: Host + ?Sized>(h: &H, path: &Path, new_name: &str) -> Re
     if same_place(&dst, path) {
         // Only the case changes ("trip" -> "Trip"). Drives that ignore case see the new
         // name as taken by the folder itself, so go through a temporary name.
-        let tmp = path.with_file_name(format!(".lumio-rename-{}.tmp", std::process::id()));
+        let tmp = path.with_file_name(format!(".lumio-rename-{}.tmp", crate::secure::random_hex(8)?));
+        if tmp.exists() {
+            bail!("Could not rename the folder; try again.");
+        }
         std::fs::rename(path, &tmp)?;
         if let Err(e) = std::fs::rename(&tmp, &dst) {
             let _ = std::fs::rename(&tmp, path);
@@ -661,7 +774,10 @@ pub fn delete_photos<H: Host + ?Sized>(h: &H, ids: &[i64], permanent: bool) -> R
                 crate::notify::changed([src.as_path()]);
                 h.forget(&h.conn().lock(), &[p.id])?;
             }
-            Err(e) => rep.failed.push((p.filename.clone(), e.to_string())),
+            Err(e) => {
+                rep.failed.push((p.filename.clone(), e.to_string()));
+                rep.failed_ids.push(p.id);
+            }
         }
     }
     Ok(rep)
@@ -686,433 +802,7 @@ pub fn delete_folder<H: Host + ?Sized>(h: &H, path: &Path, permanent: bool) -> R
 // ------------------------------------------------------------------ tests
 
 #[cfg(test)]
-pub(crate) mod testing {
-    //! A stand-in for the app, a throwaway folder and a catalogue, for tests that work on
-    //! real files.
-    use super::*;
-
-    pub struct TestHost {
-        pub conn: Mutex<Connection>,
-        pub jobs: Mutex<Vec<Job>>,
-    }
-
-    impl Host for TestHost {
-        fn conn(&self) -> &Mutex<Connection> {
-            &self.conn
-        }
-        fn queue(&self, job: Job) {
-            self.jobs.lock().push(job);
-        }
-        fn forget(&self, conn: &Connection, ids: &[i64]) -> Result<()> {
-            for id in ids {
-                conn.execute("DELETE FROM photos WHERE id = ?1", [id])?;
-            }
-            Ok(())
-        }
-    }
-
-    /// A temporary folder, removed when dropped.
-    pub struct Tmp(pub PathBuf);
-    impl Tmp {
-        pub fn new(tag: &str) -> Tmp {
-            use std::sync::atomic::{AtomicU32, Ordering};
-            static N: AtomicU32 = AtomicU32::new(0);
-            let p = std::env::temp_dir().join(format!("lumio-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-            let _ = std::fs::remove_dir_all(&p);
-            std::fs::create_dir_all(&p).unwrap();
-            Tmp(p)
-        }
-        /// `t.join("a/b.jpg")` with the platform's separator, so paths compare equal to
-        /// the ones Lumio builds (on Windows "a\\b.jpg", not "a/b.jpg").
-        pub fn join(&self, s: &str) -> PathBuf {
-            s.split('/').filter(|c| !c.is_empty()).fold(self.0.clone(), |p, c| p.join(c))
-        }
-    }
-    impl Drop for Tmp {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    pub fn host() -> TestHost {
-        let conn = Connection::open_in_memory().unwrap();
-        db::migrate(&conn).unwrap();
-        TestHost { conn: Mutex::new(conn), jobs: Mutex::new(vec![]) }
-    }
-
-    impl TestHost {
-        pub fn root(&self, path: &Path) -> i64 {
-            let c = self.conn.lock();
-            c.execute("INSERT INTO roots (path, name, added_at) VALUES (?1, 'r', 0)", [path.to_string_lossy()]).unwrap();
-            c.last_insert_rowid()
-        }
-        /// Write a file (its content is its own name unless given) and catalogue it unless it's a sidecar.
-        pub fn file(&self, root: i64, path: &Path, content: Option<&str>) -> i64 {
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            let name = path.file_name().unwrap().to_string_lossy().to_string();
-            std::fs::write(path, content.unwrap_or(&name)).unwrap();
-            if indexer::ext_of(path) == "xmp" {
-                return 0;
-            }
-            self.photo(root, path)
-        }
-        /// Catalogue a photo without making the file.
-        pub fn photo(&self, root: i64, path: &Path) -> i64 {
-            let c = self.conn.lock();
-            let size = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(5);
-            c.execute(
-                "INSERT INTO photos (root_id, path, folder, filename, ext, size, rating) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 4)",
-                params![
-                    root,
-                    path.to_string_lossy(),
-                    path.parent().unwrap().to_string_lossy(),
-                    path.file_name().unwrap().to_string_lossy(),
-                    indexer::ext_of(path),
-                    size
-                ],
-            )
-            .unwrap();
-            c.last_insert_rowid()
-        }
-        pub fn path_of(&self, id: i64) -> Option<String> {
-            db::get_photo(&self.conn.lock(), id).unwrap().map(|p| p.path)
-        }
-        pub fn rating(&self, id: i64) -> i64 {
-            db::get_photo(&self.conn.lock(), id).unwrap().unwrap().rating
-        }
-    }
-
-    pub fn names(dir: &Path) -> Vec<String> {
-        let mut v: Vec<String> = match std::fs::read_dir(dir) {
-            // Finder leaves a .DS_Store behind when it puts files in the Trash.
-            Ok(rd) => rd.flatten().map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n != ".DS_Store").collect(),
-            Err(_) => vec![],
-        };
-        v.sort();
-        v
-    }
-
-    pub fn read(p: &Path) -> String {
-        std::fs::read_to_string(p).unwrap()
-    }
-}
+pub(crate) mod testing;
 
 #[cfg(test)]
-mod tests {
-    use super::testing::*;
-    use super::*;
-
-    #[test]
-    fn move_file_never_replaces_an_existing_file() {
-        let t = Tmp::new("fo");
-        let (a, b) = (t.join("a.jpg"), t.join("b.jpg"));
-        std::fs::write(&a, "A").unwrap();
-        std::fs::write(&b, "B").unwrap();
-        assert!(move_file(&a, &b).is_err());
-        assert_eq!((read(&a), read(&b)), ("A".into(), "B".into()));
-        assert!(copy_verified(&a, &b).is_err());
-        assert_eq!(read(&b), "B", "a refused copy must not touch the file that was there");
-        // Into a free name it works, and leaves no temporary files behind.
-        move_file(&a, &t.join("c.jpg")).unwrap();
-        assert_eq!(names(&t.0), ["b.jpg", "c.jpg"]);
-    }
-
-    #[test]
-    fn copies_are_checked_and_keep_the_date() {
-        let t = Tmp::new("fo");
-        let a = t.join("a.jpg");
-        std::fs::write(&a, vec![7u8; 3_000_000]).unwrap();
-        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_500_000_000);
-        std::fs::File::options().write(true).open(&a).unwrap().set_modified(old).unwrap();
-        let c = t.join("copy.jpg");
-        copy_verified(&a, &c).unwrap();
-        assert!(same_content(&a, &c).unwrap());
-        assert_eq!(std::fs::metadata(&c).unwrap().modified().unwrap(), old);
-        assert_eq!(names(&t.0), ["a.jpg", "copy.jpg"]);
-        std::fs::write(&c, vec![7u8; 2_999_999]).unwrap();
-        assert!(!same_content(&a, &c).unwrap());
-        let mut d = vec![7u8; 3_000_000];
-        d[2_500_000] = 8;
-        std::fs::write(&c, d).unwrap();
-        assert!(!same_content(&a, &c).unwrap());
-    }
-
-    #[test]
-    fn copying_from_a_missing_file_leaves_nothing_behind() {
-        let t = Tmp::new("fo");
-        assert!(copy_verified(&t.join("gone.jpg"), &t.join("new.jpg")).is_err());
-        assert!(names(&t.0).is_empty());
-    }
-
-    #[test]
-    fn moves_photo_sidecar_and_catalogue() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        let id = h.file(r, &t.join("in/IMG_1.CR2"), None);
-        h.file(r, &t.join("in/IMG_1.xmp"), None);
-        std::fs::create_dir_all(t.join("out")).unwrap();
-        let rep = move_photos(&h, &[id], &t.join("out"), false).unwrap();
-        assert_eq!((rep.done, rep.failed.len()), (1, 0));
-        assert_eq!(names(&t.join("out")), ["IMG_1.CR2", "IMG_1.xmp"]);
-        assert!(names(&t.join("in")).is_empty());
-        assert_eq!(h.path_of(id).unwrap(), t.join("out/IMG_1.CR2").to_string_lossy());
-        assert_eq!(h.rating(id), 4, "the catalogue entry (and its rating) moves with the file");
-        assert_eq!(rep.moved.len(), 1);
-        assert_eq!(rep.moved[0].from, t.join("in/IMG_1.CR2").to_string_lossy());
-    }
-
-    #[test]
-    fn moving_never_overwrites_a_photo_or_a_sidecar() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        let id = h.file(r, &t.join("in/IMG_1.jpg"), Some("mine"));
-        h.file(r, &t.join("in/IMG_1.xmp"), Some("my sidecar"));
-        // The destination has a different IMG_1.jpg, and an IMG_1.xmp that belongs to an IMG_1.CR2.
-        h.file(r, &t.join("out/IMG_1.jpg"), Some("theirs"));
-        h.file(r, &t.join("out/IMG_1.CR2"), Some("raw"));
-        h.file(r, &t.join("out/IMG_1.xmp"), Some("their sidecar"));
-        let rep = move_photos(&h, &[id], &t.join("out"), false).unwrap();
-        assert_eq!(rep.done, 1, "{:?}", rep.failed);
-        let out = t.join("out");
-        assert_eq!(read(&out.join("IMG_1.jpg")), "theirs");
-        assert_eq!(read(&out.join("IMG_1.xmp")), "their sidecar");
-        assert_eq!(read(&out.join("IMG_1 (2).jpg")), "mine");
-        assert_eq!(read(&out.join("IMG_1 (2).xmp")), "my sidecar");
-    }
-
-    #[test]
-    fn sidecar_name_taken_even_when_photo_name_is_free() {
-        // Only the sidecar's name is taken: the photo must not take a name whose sidecar
-        // would land on someone else's.
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        let id = h.file(r, &t.join("in/IMG_1.jpg"), Some("mine"));
-        h.file(r, &t.join("in/IMG_1.xmp"), Some("my sidecar"));
-        h.file(r, &t.join("out/IMG_1.CR2"), Some("raw"));
-        h.file(r, &t.join("out/IMG_1.xmp"), Some("their sidecar"));
-        let rep = move_photos(&h, &[id], &t.join("out"), false).unwrap();
-        assert_eq!(rep.done, 1);
-        assert_eq!(read(&t.join("out/IMG_1.xmp")), "their sidecar");
-        assert_eq!(read(&t.join("out/IMG_1 (2).xmp")), "my sidecar");
-        assert_eq!(read(&t.join("out/IMG_1 (2).jpg")), "mine");
-    }
-
-    #[test]
-    fn moving_the_raw_of_a_raw_jpeg_pair_takes_its_sidecar() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        let raw = h.file(r, &t.join("in/IMG_1.CR2"), None);
-        h.file(r, &t.join("in/IMG_1.JPG"), None);
-        h.file(r, &t.join("in/IMG_1.xmp"), Some("edits"));
-        std::fs::create_dir_all(t.join("out")).unwrap();
-        move_photos(&h, &[raw], &t.join("out"), false).unwrap();
-        // No copy is left behind: the JPEG would otherwise start showing the RAW's rating.
-        assert_eq!(names(&t.join("in")), ["IMG_1.JPG"]);
-        assert_eq!(names(&t.join("out")), ["IMG_1.CR2", "IMG_1.xmp"]);
-    }
-
-    #[test]
-    fn moving_the_jpeg_of_a_raw_jpeg_pair_leaves_the_raw_sidecar() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        let raw = h.file(r, &t.join("in/IMG_1.CR2"), None);
-        let jpg = h.file(r, &t.join("in/IMG_1.JPG"), None);
-        h.file(r, &t.join("in/IMG_1.xmp"), Some("edits"));
-        std::fs::create_dir_all(t.join("out")).unwrap();
-        move_photos(&h, &[jpg], &t.join("out"), false).unwrap();
-        assert_eq!(names(&t.join("in")), ["IMG_1.CR2", "IMG_1.xmp"], "the RAW keeps its sidecar");
-        // "IMG_1.xmp" is the RAW's (Lightroom's naming), so the JPEG leaves without it.
-        assert_eq!(names(&t.join("out")), ["IMG_1.JPG"]);
-        // Moving the RAW after it brings the sidecar along.
-        move_photos(&h, &[raw], &t.join("out"), false).unwrap();
-        assert!(names(&t.join("in")).is_empty());
-        assert_eq!(names(&t.join("out")), ["IMG_1.CR2", "IMG_1.JPG", "IMG_1.xmp"]);
-        assert_eq!(read(&t.join("out/IMG_1.xmp")), "edits");
-    }
-
-    #[test]
-    fn moving_the_whole_pair_moves_the_sidecar() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        let raw = h.file(r, &t.join("in/IMG_1.CR2"), None);
-        let jpg = h.file(r, &t.join("in/IMG_1.JPG"), None);
-        h.file(r, &t.join("in/IMG_1.xmp"), None);
-        std::fs::create_dir_all(t.join("out")).unwrap();
-        let rep = move_photos(&h, &[raw, jpg], &t.join("out"), false).unwrap();
-        assert_eq!(rep.done, 2);
-        assert!(names(&t.join("in")).is_empty());
-        assert_eq!(names(&t.join("out")), ["IMG_1.CR2", "IMG_1.JPG", "IMG_1.xmp"]);
-    }
-
-    #[test]
-    fn two_photos_with_the_same_name_from_different_folders() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        let a = h.file(r, &t.join("a/IMG_1.jpg"), Some("a"));
-        let b = h.file(r, &t.join("b/IMG_1.jpg"), Some("b"));
-        std::fs::create_dir_all(t.join("out")).unwrap();
-        let rep = move_photos(&h, &[a, b], &t.join("out"), false).unwrap();
-        assert_eq!(rep.done, 2);
-        assert_eq!(names(&t.join("out")), ["IMG_1 (2).jpg", "IMG_1.jpg"]);
-        assert_eq!(read(&t.join("out/IMG_1 (2).jpg")), "b");
-        assert_eq!(h.path_of(b).unwrap(), t.join("out/IMG_1 (2).jpg").to_string_lossy());
-    }
-
-    #[test]
-    fn copy_keeps_the_original_and_queues_indexing() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        let id = h.file(r, &t.join("in/IMG_1.jpg"), None);
-        h.file(r, &t.join("in/IMG_1.xmp"), None);
-        std::fs::create_dir_all(t.join("out")).unwrap();
-        let rep = move_photos(&h, &[id], &t.join("out"), true).unwrap();
-        assert_eq!(rep.done, 1);
-        assert_eq!(names(&t.join("in")), ["IMG_1.jpg", "IMG_1.xmp"]);
-        assert_eq!(names(&t.join("out")), ["IMG_1.jpg", "IMG_1.xmp"]);
-        assert_eq!(rep.copies.len(), 2);
-        assert!(h.jobs.lock().iter().any(|j| matches!(j, Job::Files(f) if f.len() == 1)));
-        // Copying into the same folder makes a numbered copy.
-        let rep = move_photos(&h, &[id], &t.join("in"), true).unwrap();
-        assert_eq!(rep.done, 1);
-        assert_eq!(names(&t.join("in")), ["IMG_1 (2).jpg", "IMG_1 (2).xmp", "IMG_1.jpg", "IMG_1.xmp"]);
-    }
-
-    #[test]
-    fn missing_file_on_a_connected_drive_fails_without_changes() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        std::fs::create_dir_all(t.join("in")).unwrap();
-        std::fs::create_dir_all(t.join("out")).unwrap();
-        let id = h.photo(r, &t.join("in/gone.jpg"));
-        let rep = move_photos(&h, &[id], &t.join("out"), false).unwrap();
-        assert_eq!((rep.done, rep.queued, rep.failed.len()), (0, 0, 1));
-        assert_eq!(h.path_of(id).unwrap(), t.join("in/gone.jpg").to_string_lossy());
-    }
-
-    #[test]
-    fn unavailable_destination_is_refused() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.join("lib"));
-        let id = h.file(r, &t.join("lib/a.jpg"), None);
-        // Not a library folder, and not there.
-        assert!(move_photos(&h, &[id], &t.join("nowhere"), false).is_err());
-        assert!(t.join("lib/a.jpg").exists());
-    }
-
-    #[test]
-    fn moving_to_a_drive_that_is_away_waits_and_copying_is_refused() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let ra = h.root(&t.join("a"));
-        h.root(&t.join("b")); // drive b isn't connected: its folder doesn't exist
-        let id = h.file(ra, &t.join("a/IMG_1.jpg"), None);
-        assert!(move_photos(&h, &[id], &t.join("b/Trip"), true).is_err());
-        let rep = move_photos(&h, &[id], &t.join("b/Trip"), false).unwrap();
-        assert_eq!((rep.done, rep.queued), (0, 1));
-        assert!(t.join("a/IMG_1.jpg").exists(), "the file waits where it is");
-        assert_eq!(h.path_of(id).unwrap(), t.join("b/Trip/IMG_1.jpg").to_string_lossy());
-        assert!(h.jobs.lock().iter().any(|j| matches!(j, Job::ApplyPending)));
-        // The drive comes back: the move happens.
-        std::fs::create_dir_all(t.join("b")).unwrap();
-        let rep = crate::pending::apply_in(&h.conn.lock()).unwrap();
-        assert_eq!(rep.done, 1);
-        assert!(t.join("b/Trip/IMG_1.jpg").exists());
-        assert!(!t.join("a/IMG_1.jpg").exists());
-    }
-
-    #[test]
-    fn moving_out_of_the_library_forgets_the_photo() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.join("lib"));
-        let id = h.file(r, &t.join("lib/a.jpg"), None);
-        std::fs::create_dir_all(t.join("elsewhere")).unwrap();
-        let rep = move_photos(&h, &[id], &t.join("elsewhere"), false).unwrap();
-        assert!(rep.outside_library);
-        assert!(h.path_of(id).is_none());
-        assert!(!rep.moved[0].in_library);
-        // And back again.
-        let back = move_file_back(&h, Path::new(&rep.moved[0].to), &t.join("lib"), "a.jpg").unwrap();
-        assert_eq!(back, t.join("lib/a.jpg"));
-    }
-
-    #[test]
-    fn deleting_one_of_a_pair_keeps_the_shared_sidecar() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        h.file(r, &t.join("IMG_1.CR2"), None);
-        let jpg = h.file(r, &t.join("IMG_1.JPG"), None);
-        let other = h.file(r, &t.join("IMG_2.JPG"), None);
-        h.file(r, &t.join("IMG_1.xmp"), None);
-        h.file(r, &t.join("IMG_2.xmp"), None);
-        let rep = delete_photos(&h, &[jpg, other], true).unwrap();
-        assert_eq!(rep.done, 2);
-        assert_eq!(names(&t.0), ["IMG_1.CR2", "IMG_1.xmp"]);
-    }
-
-    #[test]
-    fn folder_rename_keeps_photos_and_waiting_moves() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let ra = h.root(&t.join("a"));
-        h.root(&t.join("b")); // away
-        let id = h.file(ra, &t.join("a/Trip/IMG_1.jpg"), None);
-        let keep = h.file(ra, &t.join("a/Trip/IMG_2.jpg"), None);
-        let lookalike = h.file(ra, &t.join("a/Trip 2/IMG_3.jpg"), None);
-        move_photos(&h, &[id], &t.join("b/Out"), false).unwrap();
-        let dst = rename_folder(&h, &t.join("a/Trip"), "Iceland").unwrap();
-        assert_eq!(dst, t.join("a/Iceland"));
-        assert_eq!(h.path_of(keep).unwrap(), t.join("a/Iceland/IMG_2.jpg").to_string_lossy());
-        assert_eq!(h.path_of(lookalike).unwrap(), t.join("a/Trip 2/IMG_3.jpg").to_string_lossy(), "a folder whose name only starts the same is left alone");
-        // The waiting move now starts from the renamed folder, so it still works.
-        assert_eq!(crate::pending::source_of(&h.conn.lock(), id).unwrap().unwrap(), t.join("a/Iceland/IMG_1.jpg").to_string_lossy());
-        std::fs::create_dir_all(t.join("b")).unwrap();
-        assert_eq!(crate::pending::apply_in(&h.conn.lock()).unwrap().done, 1);
-        assert!(t.join("b/Out/IMG_1.jpg").exists());
-    }
-
-    #[test]
-    fn folder_rename_refuses_a_taken_name_but_allows_a_case_change() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        let id = h.file(r, &t.join("trip/IMG_1.jpg"), None);
-        std::fs::create_dir_all(t.join("other")).unwrap();
-        assert!(rename_folder(&h, &t.join("trip"), "other").is_err());
-        assert!(rename_folder(&h, &t.join("trip"), "a/b").is_err());
-        let dst = rename_folder(&h, &t.join("trip"), "Trip").unwrap();
-        assert_eq!(names(&t.0), ["Trip", "other"]);
-        assert_eq!(h.path_of(id).unwrap(), dst.join("IMG_1.jpg").to_string_lossy());
-    }
-
-    #[test]
-    fn folder_move_and_copy() {
-        let t = Tmp::new("fo");
-        let h = host();
-        let r = h.root(&t.0);
-        let id = h.file(r, &t.join("Trip/IMG_1.jpg"), None);
-        h.file(r, &t.join("Trip/sub/IMG_2.jpg"), None);
-        std::fs::create_dir_all(t.join("Travel/Trip")).unwrap(); // the name is taken there
-        assert!(move_folder(&h, &t.join("Trip"), &t.join("Trip/sub"), false).is_err(), "not into itself");
-        let rep = move_folder(&h, &t.join("Trip"), &t.join("Travel"), false).unwrap();
-        let dst = rep.folder.unwrap();
-        assert_eq!(dst, t.join("Travel/Trip (2)"));
-        assert_eq!(h.path_of(id).unwrap(), dst.join("IMG_1.jpg").to_string_lossy());
-        assert!(!t.join("Trip").exists());
-        let rep = move_folder(&h, &dst, &t.0, true).unwrap();
-        let copy = rep.folder.unwrap();
-        assert_eq!(names(&copy), ["IMG_1.jpg", "sub"]);
-        assert_eq!(names(&dst), ["IMG_1.jpg", "sub"], "the original stays");
-    }
-}
+mod tests;

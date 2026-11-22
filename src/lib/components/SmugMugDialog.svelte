@@ -69,6 +69,7 @@
     progress = null;
     code = "";
     authUrl = "";
+    newName = ""; // a new selection gets its own suggested name
     try {
       status = await smugmug.status();
       next();
@@ -79,7 +80,7 @@
     // Suggest the folder name as a gallery name.
     try {
       const [p] = await api.getPhotos(ids.slice(0, 1));
-      if (p && !newName) newName = basename(p.folder);
+      if (p) newName = basename(p.folder);
     } catch { /* not important */ }
   }
 
@@ -289,7 +290,7 @@
         <p>Uploading to <strong>{albumName}</strong>: {Math.min(progress.done + 1, progress.total)} of {progress.total}</p>
         <div class="bar"><div style:width={`${(fraction * 100).toFixed(1)}%`}></div></div>
         <p class="faint small file">{progress.current}</p>
-        <p class="faint small">You can keep using Lumio while this runs.</p>
+        <p class="faint small">Keep this window open until the upload finishes.</p>
         <div class="buttons"><button onclick={() => smugmug.cancel()}>Cancel upload</button></div>
 
       {:else if step === "done" && report}

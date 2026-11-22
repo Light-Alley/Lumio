@@ -29,7 +29,8 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> anyhow::Result<T> + Sen
 
 #[tauri::command]
 pub fn get_roots(state: S) -> R<Vec<Root>> {
-    db::list_roots(&state.conn.lock()).map_err(e)
+    let roots = db::roots(&state.conn.lock()).map_err(e)?;
+    Ok(db::with_online(roots))
 }
 
 #[tauri::command]
@@ -43,7 +44,7 @@ pub fn add_root(state: S, path: String) -> R<i64> {
         let conn = state.conn.lock();
         // A folder inside an existing library folder is already covered.
         let mut children = vec![];
-        for r in db::list_roots(&conn).map_err(e)? {
+        for r in db::roots(&conn).map_err(e)? {
             let rp = PathBuf::from(&r.path);
             if p.starts_with(&rp) {
                 return Err(format!("This folder is already in your library (inside \"{}\").", r.name));
@@ -57,7 +58,7 @@ pub fn add_root(state: S, path: String) -> R<i64> {
         let tx = conn.unchecked_transaction().map_err(e)?;
         tx.execute(
             "INSERT INTO roots (path, name, added_at) VALUES (?1, ?2, ?3)",
-            params![path, name, chrono::Utc::now().timestamp_millis()],
+            params![path, name, crate::db::now_ms()],
         )
         .map_err(e)?;
         let id = tx.last_insert_rowid();
@@ -96,7 +97,8 @@ pub fn rescan(state: S, root_id: Option<i64>, folder: Option<String>) -> R<()> {
     } else if let Some(id) = root_id {
         state.queue(Job::ScanRoot(id));
     } else {
-        for r in db::list_roots(&state.conn.lock()).map_err(e)? {
+        let roots = db::roots(&state.conn.lock()).map_err(e)?;
+        for r in roots {
             state.queue(Job::ScanRoot(r.id));
         }
     }
@@ -126,6 +128,8 @@ pub struct FolderNode {
 pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
     let base = path.trim_end_matches(['/', '\\']).to_string();
     let base = if base.is_empty() { path.clone() } else { base };
+    // Only folders of the library are listed, never any other folder on the computer.
+    in_library(&state, Path::new(&base), false).map_err(e)?;
     let prefix = format!("{base}{MAIN_SEPARATOR}");
     // Photo counts per immediate child, from the catalogue.
     let mut counts: HashMap<String, i64> = HashMap::new();
@@ -134,7 +138,8 @@ pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
         let conn = state.conn.lock();
         let mut args = vec![];
         let clause = db::folder_clause(&base, true, &mut args);
-        let mut st = conn.prepare(&format!("SELECT folder, COUNT(*) FROM photos WHERE {clause} GROUP BY folder")).map_err(e)?;
+        let mut st =
+            conn.prepare(&format!("SELECT folder, COUNT(*) FROM photos WHERE {clause} GROUP BY folder")).map_err(e)?;
         let rows = st
             .query_map(rusqlite::params_from_iter(args.iter()), |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
             .map_err(e)?;
@@ -163,7 +168,11 @@ pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
                 }
                 let name = ent.file_name().to_string_lossy().to_string();
                 let has_children = std::fs::read_dir(&p)
-                    .map(|rd| rd.flatten().any(|c| c.file_type().map(|t| t.is_dir()).unwrap_or(false) && !indexer::is_hidden(&c.path())))
+                    .map(|rd| {
+                        rd.flatten().any(|c| {
+                            c.file_type().map(|t| t.is_dir()).unwrap_or(false) && !indexer::is_hidden(&c.path())
+                        })
+                    })
                     .unwrap_or(false);
                 out.push(FolderNode {
                     count: counts.get(&name).copied().unwrap_or(0),
@@ -185,22 +194,48 @@ pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
             });
         }
     }
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     Ok(out)
 }
 
 /// Folder commands only touch folders inside the library. `strictly` also refuses a
 /// library root itself (roots are removed from the library, never renamed, moved or
 /// trashed from Lumio). Paths with ".." are refused so they can't step outside a root.
+/// Links are followed: a link inside a library folder that points elsewhere is refused,
+/// and with `strictly` (the folder itself is changed) a link is never acted on.
 fn in_library(st: &AppState, path: &Path, strictly: bool) -> anyhow::Result<()> {
-    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-        anyhow::bail!("\"{}\" is not a folder in your library.", path.display());
-    }
-    match db::root_for_path(&st.conn.lock(), path)? {
-        Some((_, root)) if !(strictly && root == path) => Ok(()),
+    plain_path(path)?;
+    let root = db::root_for_path(&st.conn.lock(), path)?;
+    match root {
+        Some((_, root)) if !(strictly && root == path) => {
+            fileops::inside_root(&root, path)?;
+            if strictly {
+                fileops::not_a_link(path)?;
+            }
+            Ok(())
+        }
         Some(_) => anyhow::bail!("A library folder can't be changed here. Use Remove from library instead."),
         None => anyhow::bail!("\"{}\" is not a folder in your library.", path.display()),
     }
+}
+
+/// An absolute path without ".." (which could step out of wherever it seems to be).
+fn plain_path(path: &Path) -> anyhow::Result<()> {
+    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        anyhow::bail!("\"{}\" is not a usable folder.", path.display());
+    }
+    Ok(())
+}
+
+/// A destination outside the library is fine when the person picked it (Move to…, Export
+/// to…), but it must be a plain absolute folder, and one inside the library must really
+/// be inside it.
+fn usable_destination(st: &AppState, dest: &Path) -> anyhow::Result<()> {
+    plain_path(dest)?;
+    if let Some((_, root)) = db::root_for_path(&st.conn.lock(), dest)? {
+        fileops::inside_root(&root, dest)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -225,7 +260,8 @@ pub async fn rename_folder(state: S<'_>, path: String, name: String) -> R<String
         in_library(&st, &from, true)?;
         let to = fileops::rename_folder(&*st, &from, &name)?;
         if to != from {
-            let label = format!("Renamed folder {} to {}", from.file_name().unwrap_or_default().to_string_lossy(), name.trim());
+            let label =
+                format!("Renamed folder {} to {}", from.file_name().unwrap_or_default().to_string_lossy(), name.trim());
             history::record(&st.conn.lock(), &label, &history::Change::FolderRename { from, to: to.clone() })?;
         }
         Ok(to.to_string_lossy().to_string())
@@ -242,7 +278,11 @@ pub async fn delete_folder(state: S<'_>, path: String, permanent: bool) -> R<()>
         in_library(&st, Path::new(&path), true)?;
         fileops::delete_folder(&*st, Path::new(&path), permanent)?;
         let name = Path::new(&path).file_name().unwrap_or_default().to_string_lossy().to_string();
-        let label = if permanent { format!("Deleted folder {name} permanently") } else { format!("Moved folder {name} to the Trash") };
+        let label = if permanent {
+            format!("Deleted folder {name} permanently")
+        } else {
+            format!("Moved folder {name} to the Trash")
+        };
         history::record(&st.conn.lock(), &label, &history::Change::Trash { count: 1, permanent })?;
         Ok(())
     })
@@ -293,6 +333,7 @@ pub fn get_photos(state: S, ids: Vec<i64>) -> R<Vec<Photo>> {
 pub async fn move_photos(state: S<'_>, ids: Vec<i64>, dest: String, copy: bool) -> R<OpReport> {
     let st = state.inner().clone();
     blocking(move || {
+        usable_destination(&st, Path::new(&dest))?;
         let mut rep = fileops::move_photos(&*st, &ids, Path::new(&dest), copy)?;
         history::record_move(&st.conn.lock(), &mut rep, copy, Path::new(&dest))?;
         Ok(rep)
@@ -468,7 +509,8 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
             let path = PathBuf::from(&p.path);
             // Work out the keyword list the photo ends up with, and what was taken off.
             let keyword_change: Option<(Vec<String>, Vec<String>)> = if let Some(k) = &edit.keywords {
-                let removed = p.keywords.iter().filter(|x| !k.iter().any(|y| y.eq_ignore_ascii_case(x))).cloned().collect();
+                let removed =
+                    p.keywords.iter().filter(|x| !k.iter().any(|y| y.eq_ignore_ascii_case(x))).cloned().collect();
                 Some((k.clone(), removed))
             } else if edit.add_keywords.is_some() || edit.remove_keywords.is_some() {
                 let mut k = p.keywords.clone();
@@ -523,20 +565,39 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
                 Ok(()) => {
                     rep.done += 1;
                     let conn = st.conn.lock();
-                    if let Some(r) = edit.rating { conn.execute("UPDATE photos SET rating=?1 WHERE id=?2", params![r, p.id])?; }
-                    if let Some(v) = &edit.label { conn.execute("UPDATE photos SET label=?1 WHERE id=?2", params![nz(v), p.id])?; }
-                    if let Some(v) = &edit.title { conn.execute("UPDATE photos SET title=?1 WHERE id=?2", params![nz(v), p.id])?; }
-                    if let Some(v) = &edit.caption { conn.execute("UPDATE photos SET caption=?1 WHERE id=?2", params![nz(v), p.id])?; }
-                    if let Some(v) = &edit.creator { conn.execute("UPDATE photos SET creator=?1 WHERE id=?2", params![nz(v), p.id])?; }
-                    if let Some(v) = &edit.copyright { conn.execute("UPDATE photos SET copyright=?1 WHERE id=?2", params![nz(v), p.id])?; }
-                    if let Some(k) = &plan { conn.execute("UPDATE photos SET keywords=?1 WHERE id=?2", params![db::encode_keywords(&k.subject), p.id])?; }
+                    // The same 0 to 5 range the file was given.
+                    if let Some(r) = edit.rating {
+                        conn.execute("UPDATE photos SET rating=?1 WHERE id=?2", params![r.clamp(0, 5), p.id])?;
+                    }
+                    if let Some(v) = &edit.label {
+                        conn.execute("UPDATE photos SET label=?1 WHERE id=?2", params![nz(v), p.id])?;
+                    }
+                    if let Some(v) = &edit.title {
+                        conn.execute("UPDATE photos SET title=?1 WHERE id=?2", params![nz(v), p.id])?;
+                    }
+                    if let Some(v) = &edit.caption {
+                        conn.execute("UPDATE photos SET caption=?1 WHERE id=?2", params![nz(v), p.id])?;
+                    }
+                    if let Some(v) = &edit.creator {
+                        conn.execute("UPDATE photos SET creator=?1 WHERE id=?2", params![nz(v), p.id])?;
+                    }
+                    if let Some(v) = &edit.copyright {
+                        conn.execute("UPDATE photos SET copyright=?1 WHERE id=?2", params![nz(v), p.id])?;
+                    }
+                    if let Some(k) = &plan {
+                        conn.execute(
+                            "UPDATE photos SET keywords=?1 WHERE id=?2",
+                            params![db::encode_keywords(&k.subject), p.id],
+                        )?;
+                    }
                     if let Some(g) = &edit.gps_change() {
                         let (la, lo) = g.map(|(a, b)| (Some(a), Some(b))).unwrap_or((None, None));
                         conn.execute("UPDATE photos SET lat=?1, lon=?2 WHERE id=?3", params![la, lo, p.id])?;
                     }
-                    if let Ok(m) = std::fs::metadata(&path) {
-                        let mtime = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
-                        conn.execute("UPDATE photos SET size=?1, mtime=?2 WHERE id=?3", params![m.len() as i64, mtime, p.id])?;
+                    // The newer of the photo and its sidecar, as the indexer stores it, so
+                    // the next scan sees nothing new.
+                    if let Some((size, mtime)) = indexer::stat_with_sidecar(&path) {
+                        conn.execute("UPDATE photos SET size=?1, mtime=?2 WHERE id=?3", params![size, mtime, p.id])?;
                     }
                 }
                 Err(err) => rep.failed.push((p.filename.clone(), err.to_string())),
@@ -586,12 +647,7 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
             match res {
                 Ok(()) => {
                     rep.done += 1;
-                    let (size, mtime) = std::fs::metadata(&path)
-                        .map(|m| {
-                            let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
-                            (m.len() as i64, t)
-                        })
-                        .unwrap_or((p.size, p.mtime));
+                    let (size, mtime) = indexer::stat_with_sidecar(&path).unwrap_or((p.size, p.mtime));
                     let swap = metadata::is_quarter_turn(p.orientation) != metadata::is_quarter_turn(Some(new_o));
                     {
                         let conn = st.conn.lock();
@@ -609,8 +665,14 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
                     let preview = size.map(|s| (pdest.as_path(), s));
                     match crate::thumbs::make_thumb(&path, &p.ext, Some(new_o), &dest, preview, &st.et, &st.tmp_dir) {
                         Ok(made) => {
-                            let pv = match made.preview { Some(false) => 0, _ => p.preview };
-                            st.conn.lock().execute("UPDATE photos SET thumb = 1, preview = ?2 WHERE id = ?1", params![p.id, pv])?;
+                            let pv = match made.preview {
+                                Some(false) => 0,
+                                _ => p.preview,
+                            };
+                            st.conn.lock().execute(
+                                "UPDATE photos SET thumb = 1, preview = ?2 WHERE id = ?1",
+                                params![p.id, pv],
+                            )?;
                         }
                         Err(err) => log::warn!("thumbnail after rotate failed for {}: {err:#}", path.display()),
                     }
@@ -630,7 +692,14 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
 /// the system could not make a thumbnail for. Also fills in the size and length if the
 /// file's metadata did not have them.
 #[tauri::command]
-pub async fn save_video_thumb(state: S<'_>, id: i64, jpeg: String, width: Option<i64>, height: Option<i64>, duration: Option<f64>) -> R<()> {
+pub async fn save_video_thumb(
+    state: S<'_>,
+    id: i64,
+    jpeg: String,
+    width: Option<i64>,
+    height: Option<i64>,
+    duration: Option<f64>,
+) -> R<()> {
     use base64::Engine;
     let st = state.inner().clone();
     blocking(move || {
@@ -662,9 +731,7 @@ pub fn stack_photos(state: S, ids: Vec<i64>, top: Option<i64>) -> R<i64> {
     let conn = state.conn.lock();
     let tx = conn.unchecked_transaction().map_err(e)?;
     let list = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
-    let sid: i64 = tx
-        .query_row("SELECT coalesce(MAX(stack_id), 0) + 1 FROM photos", [], |r| r.get(0))
-        .map_err(e)?;
+    let sid: i64 = tx.query_row("SELECT coalesce(MAX(stack_id), 0) + 1 FROM photos", [], |r| r.get(0)).map_err(e)?;
     let top = top.filter(|t| ids.contains(t)).unwrap_or(ids[0]);
     tx.execute(
         &format!(
@@ -681,6 +748,9 @@ pub fn stack_photos(state: S, ids: Vec<i64>, top: Option<i64>) -> R<i64> {
 /// Take photos out of their stacks. With `whole`, every stack they belong to is dissolved.
 #[tauri::command]
 pub fn unstack_photos(state: S, ids: Vec<i64>, whole: bool) -> R<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
     let conn = state.conn.lock();
     let list = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
     let sql = if whole {
@@ -706,7 +776,11 @@ pub fn set_stack_top(state: S, id: i64) -> R<()> {
 
 fn nz(s: &str) -> Option<String> {
     let t = s.trim();
-    if t.is_empty() { None } else { Some(t.to_string()) }
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
 }
 
 // ------------------------------------------------------------ open with
@@ -726,6 +800,31 @@ pub fn open_with(state: S, ids: Vec<i64>, app: String) -> R<()> {
     Ok(())
 }
 
+/// "Other application…": shows the system's file dialog from here, so only an application
+/// the person picks in that dialog can be started (never a path sent by the interface).
+#[tauri::command]
+pub async fn choose_app_and_open(state: S<'_>, ids: Vec<i64>) -> R<bool> {
+    use tauri_plugin_dialog::DialogExt;
+    let photos = db::get_photos(&state.conn.lock(), &ids).map_err(e)?;
+    let app = state.app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let mut d = app.dialog().file().set_title("Choose an application");
+        if cfg!(target_os = "macos") {
+            d = d.add_filter("Applications", &["app"]).set_directory("/Applications");
+        } else if cfg!(target_os = "windows") {
+            d = d.add_filter("Programs", &["exe"]);
+        }
+        d.blocking_pick_file()
+    })
+    .await
+    .map_err(e)?;
+    let Some(chosen) = picked.and_then(|f| f.into_path().ok()) else { return Ok(false) };
+    for p in photos {
+        openwith::open_with_chosen(Path::new(&p.path), &chosen).map_err(e)?;
+    }
+    Ok(true)
+}
+
 // ------------------------------------------------------------ settings
 
 #[tauri::command]
@@ -740,6 +839,9 @@ pub fn get_settings(state: S) -> R<HashMap<String, String>> {
 pub fn set_setting(state: S, key: String, value: String) -> R<()> {
     if key.starts_with("key_") {
         return Err("use ai_set_key".into());
+    }
+    if key == "ai_openai_base_url" {
+        ai::check_base_url(&value).map_err(e)?;
     }
     db::set_setting(&state.conn.lock(), &key, &value).map_err(e)?;
     if key.starts_with("offline_preview") {
@@ -777,57 +879,18 @@ pub fn ai_settings(state: S) -> ai::AiSettings {
 }
 
 #[tauri::command]
-pub fn ai_set_key(state: S, which: String, key: String) -> R<()> {
-    ai::set_key(&state, &which, &key).map_err(e)
+pub fn ai_set_key(which: String, key: String) -> R<()> {
+    ai::set_key(&which, &key).map_err(e)
 }
 
 #[tauri::command]
 pub async fn ai_chat(state: S<'_>, text: String) -> R<ai::ChatReply> {
-    let st = state.inner().clone();
-    ai::chat(&st, text).await.map_err(e)
+    ai::chat(state.inner().clone(), text).await.map_err(e)
 }
 
 #[tauri::command]
 pub fn ai_reset(state: S) {
     ai::reset(&state)
-}
-
-// ------------------------------------------------------------ geocoding (OpenStreetMap Nominatim)
-
-#[derive(Serialize)]
-pub struct Place {
-    pub name: String,
-    pub lat: f64,
-    pub lon: f64,
-}
-
-#[tauri::command]
-pub async fn geocode(query: String) -> R<Vec<Place>> {
-    let client = reqwest::Client::builder()
-        .user_agent(concat!("Lumio/", env!("CARGO_PKG_VERSION"), " (open-source photo manager)"))
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(e)?;
-    let v: serde_json::Value = client
-        .get("https://nominatim.openstreetmap.org/search")
-        .query(&[("q", query.as_str()), ("format", "jsonv2"), ("limit", "6")])
-        .send()
-        .await
-        .map_err(e)?
-        .json()
-        .await
-        .map_err(e)?;
-    Ok(v.as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|p| {
-            Some(Place {
-                name: p["display_name"].as_str()?.to_string(),
-                lat: p["lat"].as_str()?.parse().ok()?,
-                lon: p["lon"].as_str()?.parse().ok()?,
-            })
-        })
-        .collect())
 }
 
 // ------------------------------------------------------------ system integration
@@ -836,7 +899,11 @@ pub async fn geocode(query: String) -> R<Vec<Place>> {
 pub fn reveal(state: S, id: Option<i64>, path: Option<String>) -> R<()> {
     let p = match (id, path) {
         (Some(id), _) => db::get_photo(&state.conn.lock(), id).map_err(e)?.ok_or("photo not found")?.path,
-        (None, Some(p)) => p,
+        (None, Some(p)) => {
+            // A folder from the folder list: only ones in the library.
+            in_library(&state, Path::new(&p), false).map_err(e)?;
+            p
+        }
         _ => return Err("nothing to show".into()),
     };
     if !Path::new(&p).exists() {

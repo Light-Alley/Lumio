@@ -3,19 +3,17 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-pub const IMAGE_EXTS: &[&str] = &[
-    "jpg", "jpeg", "jpe", "png", "webp", "gif", "bmp", "tif", "tiff", "heic", "heif", "avif",
-];
+pub const IMAGE_EXTS: &[&str] =
+    &["jpg", "jpeg", "jpe", "png", "webp", "gif", "bmp", "tif", "tiff", "heic", "heif", "avif"];
 pub const RAW_EXTS: &[&str] = &[
-    "dng", "cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "srw",
-    "x3f", "3fr", "iiq", "erf", "mef", "mos", "kdc", "dcr", "rwl",
+    "dng", "cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "srw", "x3f", "3fr",
+    "iiq", "erf", "mef", "mos", "kdc", "dcr", "rwl",
 ];
 
 /// Video files. Lumio catalogues them like photos and plays them in the webview's own
 /// player, so which ones actually play depends on the system (see docs/video.md).
-pub const VIDEO_EXTS: &[&str] = &[
-    "mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv",
-];
+pub const VIDEO_EXTS: &[&str] =
+    &["mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv"];
 
 pub fn is_supported(ext: &str) -> bool {
     let e = ext.to_ascii_lowercase();
@@ -183,24 +181,42 @@ fn list_exact(v: &Value, key: &str) -> Vec<String> {
 }
 
 /// ExifTool dates look like "2023:07:14 18:22:05+02:00"; store ISO-like "2023-07-14T18:22:05".
+/// Anything else (text in other scripts, half-dates) gives `None`, never a panic.
 pub fn normalize_date(d: &str) -> Option<String> {
     let d = d.trim();
-    if d.len() < 10 || d.starts_with("0000") {
+    if d.starts_with("0000") {
         return None;
     }
-    let date = d[..10].replace(':', "-");
-    let time = if d.len() >= 19 { d[11..19].to_string() } else { "00:00:00".into() };
-    if !date.chars().all(|c| c.is_ascii_digit() || c == '-') {
+    let date = d.get(..10)?.replace(':', "-");
+    let b = date.as_bytes();
+    let shape = b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b.iter().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit());
+    if !shape {
         return None;
     }
+    let time = match d.get(11..19) {
+        Some(t)
+            if t.len() == 8
+                && t.bytes()
+                    .enumerate()
+                    .all(|(i, c)| if i == 2 || i == 5 { c == b':' } else { c.is_ascii_digit() }) =>
+        {
+            t.to_string()
+        }
+        _ => "00:00:00".into(),
+    };
     Some(format!("{date}T{time}"))
 }
 
 pub fn parse(v: &Value) -> Meta {
-    let mut m = Meta::default();
-    m.width = f(v, &["ExifImageWidth", "ImageWidth"]).map(|x| x as i64);
-    m.height = f(v, &["ExifImageHeight", "ImageHeight"]).map(|x| x as i64);
-    m.orientation = f(v, &["Orientation"]).map(|x| x as i64);
+    let mut m = Meta {
+        width: f(v, &["ExifImageWidth", "ImageWidth"]).map(|x| x as i64),
+        height: f(v, &["ExifImageHeight", "ImageHeight"]).map(|x| x as i64),
+        orientation: f(v, &["Orientation"]).map(|x| x as i64),
+        ..Default::default()
+    };
     if let Some(o) = m.orientation {
         if (5..=8).contains(&o) {
             std::mem::swap(&mut m.width, &mut m.height);
@@ -356,7 +372,8 @@ pub fn plan_keywords(wanted: &[String], removed: &[String], old_hier: &[String])
     for h in old_hier {
         let parts: Vec<String> = split_path(h).iter().map(|s| s.to_string()).collect();
         let Some(leaf) = parts.last() else { continue };
-        let leaf_wanted = has_ci(&flat, leaf) || new_paths.iter().any(|p| p.last().is_some_and(|l| l.eq_ignore_ascii_case(leaf)));
+        let leaf_wanted =
+            has_ci(&flat, leaf) || new_paths.iter().any(|p| p.last().is_some_and(|l| l.eq_ignore_ascii_case(leaf)));
         if leaf_wanted && !parts.iter().any(|p| has_ci(removed, p)) {
             push_ci(&mut hierarchy, &parts.join("|"));
             kept.push(parts);
@@ -369,7 +386,8 @@ pub fn plan_keywords(wanted: &[String], removed: &[String], old_hier: &[String])
     }
     // Parents of dropped paths that nothing else still needs.
     let needed = |k: &str| kept.iter().chain(new_paths.iter()).any(|p| has_ci(p, k));
-    let orphan = |k: &str| !needed(k) && dropped.iter().any(|p| p[..p.len() - 1].iter().any(|x| x.eq_ignore_ascii_case(k)));
+    let orphan =
+        |k: &str| !needed(k) && dropped.iter().any(|p| p[..p.len() - 1].iter().any(|x| x.eq_ignore_ascii_case(k)));
     let mut subject: Vec<String> = vec![];
     for k in &flat {
         if !orphan(k) {
@@ -512,6 +530,41 @@ fn truncate(s: &str, max_bytes: usize) -> String {
         end -= 1;
     }
     s[..end].to_string()
+}
+
+/// Every tag that says where a photo was taken: GPS coordinates and the IPTC/XMP place
+/// names. Used when exporting or sharing "without location".
+pub const LOCATION_TAGS: &[&str] = &[
+    "GPS:all",
+    "XMP:GPS*",
+    "XMP-exif:GPS*",
+    "IPTC:City",
+    "IPTC:Sub-location",
+    "IPTC:Province-State",
+    "IPTC:Country-PrimaryLocationName",
+    "IPTC:Country-PrimaryLocationCode",
+    "XMP-photoshop:City",
+    "XMP-photoshop:State",
+    "XMP-photoshop:Country",
+    "XMP-iptcCore:Location",
+    "XMP-iptcCore:CountryCode",
+    "XMP-iptcExt:LocationCreated",
+    "XMP-iptcExt:LocationShown",
+    "XMP-iptcExt:City",
+    "XMP-iptcExt:CountryName",
+    "XMP-iptcExt:CountryCode",
+    "XMP-iptcExt:ProvinceState",
+    "XMP-iptcExt:Sublocation",
+    "Keys:GPSCoordinates",
+    "UserData:GPSCoordinates",
+    "ItemList:GPSCoordinates",
+    "Keys:LocationName",
+    "QuickTime:LocationInformation",
+];
+
+/// ExifTool arguments removing every tag in [`LOCATION_TAGS`].
+pub fn strip_location_args() -> Vec<String> {
+    LOCATION_TAGS.iter().map(|t| format!("-{t}=")).collect()
 }
 
 /// Orientations 5–8 show the stored image turned by a quarter, so width and height swap.
@@ -682,6 +735,19 @@ mod keyword_tests {
     }
 
     #[test]
+    fn odd_dates_never_panic() {
+        assert_eq!(normalize_date("2023:07:14 18:22:05+02:00").as_deref(), Some("2023-07-14T18:22:05"));
+        assert_eq!(normalize_date("2023:07:14").as_deref(), Some("2023-07-14T00:00:00"));
+        // Multi-byte text where byte 10 or 19 falls inside a character used to panic.
+        assert_eq!(normalize_date("2023年07月14日 12:00:00"), None);
+        assert_eq!(normalize_date("2023:07:14 1é:00:00").as_deref(), Some("2023-07-14T00:00:00"));
+        assert_eq!(normalize_date("0000:00:00 00:00:00"), None);
+        assert_eq!(normalize_date("abc"), None);
+        assert_eq!(normalize_date("2023-7-14 xx"), None);
+        assert_eq!(normalize_date(""), None);
+    }
+
+    #[test]
     fn keywords_from_paths_only() {
         let m = parse(&serde_json::json!({"HierarchicalSubject": "Places|France, south|Nice"}));
         assert_eq!(m.hier_keywords, v(&["Places|France, south|Nice"]));
@@ -713,14 +779,57 @@ mod exiftool_tests {
 "#;
 
     #[test]
-    fn edits_a_lightroom_sidecar_without_losing_develop_settings() {
-        let et = ExifTool::new(None);
-        if !et.available() {
-            eprintln!("ExifTool not installed; skipping");
-            return;
+    fn stripping_location_removes_coordinates_and_place_names() {
+        let Some(et) = crate::exiftool::test_tool() else { return };
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("place.jpg");
+        image::RgbImage::new(8, 8).save(&f).unwrap();
+        let set: Vec<String> = [
+            "-GPSLatitude=64.1",
+            "-GPSLatitudeRef=N",
+            "-GPSLongitude=21.9",
+            "-GPSLongitudeRef=W",
+            "-IPTC:City=Reykjavik",
+            "-IPTC:Province-State=Capital",
+            "-IPTC:Country-PrimaryLocationName=Iceland",
+            "-IPTC:Sub-location=Harbour",
+            "-XMP-photoshop:City=Reykjavik",
+            "-XMP-photoshop:State=Capital",
+            "-XMP-photoshop:Country=Iceland",
+            "-XMP-iptcCore:Location=Harbour",
+            "-XMP-iptcCore:CountryCode=IS",
+            "-XMP-dc:Title=Keep me",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        et.write(&f, &set).unwrap();
+        let before = et.read_json(std::slice::from_ref(&f)).unwrap();
+        assert_eq!(before[0]["City"].as_str(), Some("Reykjavik"));
+        et.write(&f, &strip_location_args()).unwrap();
+        let after = et.read_json(std::slice::from_ref(&f)).unwrap();
+        let o = after[0].as_object().unwrap();
+        for k in [
+            "GPSLatitude",
+            "GPSLongitude",
+            "City",
+            "State",
+            "Country",
+            "Location",
+            "Sub-location",
+            "Province-State",
+            "Country-PrimaryLocationName",
+        ] {
+            assert!(!o.contains_key(k), "{k} survived: {:?}", o.get(k));
         }
-        let dir = std::env::temp_dir().join(format!("lumio-xmp-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(o["Title"].as_str(), Some("Keep me"));
+    }
+
+    #[test]
+    fn edits_a_lightroom_sidecar_without_losing_develop_settings() {
+        let Some(et) = crate::exiftool::test_tool() else { return };
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let side = dir.join("IMG_1.xmp");
         std::fs::write(&side, LR_SIDECAR).unwrap();
         let read = |et: &ExifTool| parse(&et.read_json(std::slice::from_ref(&side)).unwrap()[0]);
@@ -730,7 +839,8 @@ mod exiftool_tests {
         assert_eq!(m.hier_keywords, vec!["Places|France|Paris".to_string()]);
 
         // Take "Paris" off, add a path, change rating and clear the label.
-        let wanted: Vec<String> = ["Places", "France", "Holiday", "People|Family"].iter().map(|s| s.to_string()).collect();
+        let wanted: Vec<String> =
+            ["Places", "France", "Holiday", "People|Family"].iter().map(|s| s.to_string()).collect();
         let plan = plan_keywords(&wanted, &["Paris".to_string()], &m.hier_keywords);
         let edit = Edit { rating: Some(2), label: Some(String::new()), ..Default::default() };
         et.write(&side, &write_args(&edit, Some((&plan, true)), true)).unwrap();

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs every local check before a push. Turn it on once with:
+#   git config core.hooksPath .githooks
+# (CONTRIBUTING.md explains it.) Skip it for one push with `git push --no-verify`.
+set -e
+npm run verify

@@ -39,7 +39,7 @@ It asks for a password (choose a strong one and keep it in your password manager
 
 ### Step 2: add them to GitHub
 
-In **GitHub → LIght-Alley/Lumio → Settings → Secrets and variables → Actions**:
+In **GitHub → Light-Alley/Lumio → Settings → Secrets and variables → Actions**:
 
 | Where | Name | Value |
 |---|---|---|
@@ -55,7 +55,7 @@ The next run of **Build installers** sees the key and:
 
 - builds each installer with an update package next to it (`.app.tar.gz` for macOS, the setup `.exe`/`.msi` for Windows, `.AppImage` for Linux) plus a `.sig` signature file,
 - writes `latest.json`, which lists the new version and where each package is, and attaches it to the draft release,
-- builds the public key and the address of `latest.json` (`https://github.com/LIght-Alley/Lumio/releases/latest/download/latest.json`) into the app.
+- builds the public key and the address of `latest.json` (`https://github.com/Light-Alley/Lumio/releases/latest/download/latest.json`) into the app.
 
 When you publish the draft, copies of Lumio **built with the key** offer **Install and Restart**. Copies with the update check but built before the key existed still get the notice, and their **Download** button opens the release page; once people have installed one keyed version, later updates are one click. (Lumio 1.0.0 as first built has no update check at all, so people on it only find out from the website.)
 

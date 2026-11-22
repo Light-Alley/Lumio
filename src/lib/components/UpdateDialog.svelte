@@ -2,6 +2,7 @@
   import { Download, RefreshCw } from "@lucide/svelte";
   import { updates, installUpdate, openReleasePage, skipThisVersion } from "../updates.svelte";
   import { formatBytes } from "../api";
+  import { plainNotes as plain } from "../notes";
 
   let box: HTMLDivElement | undefined = $state();
   $effect(() => { if (updates.open) box?.focus(); });
@@ -9,18 +10,7 @@
   function close() {
     if (!updates.installing) updates.open = false;
   }
-  /** Release notes are Markdown; show them as plain text without the # and ** marks. */
-  function plain(md: string): string {
-    return md
-      .replace(/\r/g, "")
-      .replace(/^#{1,6}\s*/gm, "")
-      .replace(/^\s*[-*]\s+/gm, "• ")
-      .replace(/\*\*(.+?)\*\*/g, "$1")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/`([^`]+)`/g, "$1")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-  }
+  const notes = $derived(updates.info ? plain(updates.info.notes) : "");
   const pct = $derived(updates.total ? Math.min(100, Math.round((updates.downloaded / updates.total) * 100)) : null);
 </script>
 
@@ -31,8 +21,8 @@
       onkeydown={(e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } }}>
       <h3>Lumio {u.latest} is available</h3>
       <p class="muted">You have version {u.current}.{#if u.published}{" "}Released {new Date(u.published).toLocaleDateString()}.{/if}</p>
-      {#if plain(u.notes)}
-        <div class="notes">{plain(u.notes)}</div>
+      {#if notes}
+        <div class="notes">{notes}</div>
       {/if}
       {#if updates.installing}
         <div class="progress" aria-live="polite">

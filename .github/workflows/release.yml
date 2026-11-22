@@ -1,23 +1,45 @@
-# Builds installers for macOS (Apple Silicon + Intel), Windows and Linux.
-# Run it from the Actions tab ("Run workflow") or by pushing a tag like v0.1.0.
-# The installers are attached to a draft GitHub Release.
+# Builds installers for macOS (Apple Silicon + Intel), Windows and Linux, and attaches
+# them to a draft GitHub Release, with checksums, build provenance, and copies under
+# fixed names so README.md can link to "the latest .dmg / .exe" forever.
 #
-# Code signing is switched on by repository secrets and skipped when they are
-# missing, so the workflow keeps working (unsigned) until they are added.
-# What each secret is and how to get it: docs/code-signing.md, and for in-app
-# updates docs/updates.md.
+# It runs when release-please makes a release (see release-please.yml), from the
+# Actions tab ("Run workflow"), or when a tag like v2.0.0 is pushed. Nothing is
+# published: Liju presses Publish on the draft.
+#
+# Code signing is switched on by repository secrets and skipped when they are missing,
+# so the workflow keeps working (unsigned) until they are added. What each secret is
+# and how to get it: docs/code-signing.md, and for in-app updates docs/updates.md.
+#
+# Release builds use no caches, so nothing from another run can end up in an installer.
 name: Build installers
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (leave empty to use the version in package.json)
+        required: false
+        type: string
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
+    name: Build (${{ matrix.platform }} ${{ matrix.rust_target }})
+    # Signing secrets are only handed to jobs in the "release" environment (created by
+    # GitHub on first use; add reviewers there to approve each release build).
+    environment: release
+    permissions:
+      contents: write # create the draft release and upload installers
+      id-token: write # build provenance
+      attestations: write # build provenance
     strategy:
       fail-fast: false
       matrix:
@@ -36,7 +58,10 @@ jobs:
             rust_target: ""
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Linux build dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -44,22 +69,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
-          cache: npm
+          package-manager-cache: false
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
+      - name: Rust toolchain
+        shell: bash
+        env:
+          RUST_TARGET: ${{ matrix.rust_target }}
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          if [ -n "$RUST_TARGET" ]; then rustup target add "$RUST_TARGET"; fi
 
       - run: npm ci
 
-      - name: Bundle ExifTool
+      - name: Bundle ExifTool (checksum-verified)
         run: node scripts/fetch-exiftool.mjs
 
       # Turns signing on only for the secrets that are actually set. Tauri treats an
@@ -84,7 +110,8 @@ jobs:
           LUMIO_UPDATER_PUBKEY: ${{ vars.LUMIO_UPDATER_PUBKEY }}
         run: |
           put() { # name value -> $GITHUB_ENV (multi-line safe)
-            local d="EOF_$RANDOM$RANDOM"
+            local d
+            d="EOF_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
             printf '%s<<%s\n%s\n%s\n' "$1" "$d" "$2" "$d" >> "$GITHUB_ENV"
           }
           echo "SIGNING_ARGS=" >> "$GITHUB_ENV"
@@ -94,7 +121,7 @@ jobs:
           # the app still tells people about new versions and links to the download page.
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$LUMIO_UPDATER_PUBKEY" ]; then
             put TAURI_SIGNING_PRIVATE_KEY "$TAURI_SIGNING_PRIVATE_KEY"
-            [ -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ] && put TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+            if [ -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then put TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"; fi
             node -e '
               const repo = "https://github.com/" + process.env.GITHUB_REPOSITORY;
               require("fs").writeFileSync("src-tauri/tauri.updater.json", JSON.stringify({
@@ -114,7 +141,7 @@ jobs:
             if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ]; then
               put APPLE_CERTIFICATE "$APPLE_CERTIFICATE"
               put APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD"
-              [ -n "$APPLE_SIGNING_IDENTITY" ] && put APPLE_SIGNING_IDENTITY "$APPLE_SIGNING_IDENTITY"
+              if [ -n "$APPLE_SIGNING_IDENTITY" ]; then put APPLE_SIGNING_IDENTITY "$APPLE_SIGNING_IDENTITY"; fi
               echo "macOS: signing with the Developer ID certificate."
               if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
                 put APPLE_ID "$APPLE_ID"
@@ -134,8 +161,14 @@ jobs:
               put AZURE_CLIENT_ID "$AZURE_CLIENT_ID"
               put AZURE_CLIENT_SECRET "$AZURE_CLIENT_SECRET"
               put AZURE_TENANT_ID "$AZURE_TENANT_ID"
-              cmd="trusted-signing-cli -e $AZURE_SIGNING_ENDPOINT -a $AZURE_SIGNING_ACCOUNT -c $AZURE_SIGNING_PROFILE -d Lumio %1"
-              node -e 'require("fs").writeFileSync("src-tauri/tauri.signing.json", JSON.stringify({bundle:{windows:{signCommand:process.argv[1]}}}))' "$cmd"
+              # The command and each argument are kept apart (no shell string), so a
+              # secret's value can never be read as another argument or command.
+              node -e '
+                const [endpoint, account, profile] = process.argv.slice(1);
+                require("fs").writeFileSync("src-tauri/tauri.signing.json", JSON.stringify({ bundle: { windows: { signCommand: {
+                  cmd: "artifact-signing-cli",
+                  args: ["-e", endpoint, "-a", account, "-c", profile, "%1"],
+                } } } }));' "$AZURE_SIGNING_ENDPOINT" "$AZURE_SIGNING_ACCOUNT" "$AZURE_SIGNING_PROFILE"
               cfgs+=("src-tauri/tauri.signing.json")
               echo "WINDOWS_SIGN=1" >> "$GITHUB_ENV"
               echo "Windows: signing with Azure Artifact Signing."
@@ -153,20 +186,95 @@ jobs:
             echo "SIGNING_ARGS=--config src-tauri/tauri.ci.json" >> "$GITHUB_ENV"
           fi
 
-      - name: Install the Azure signing tool
+      - name: Install the Azure signing tool (pinned)
         if: env.WINDOWS_SIGN == '1'
-        run: cargo install trusted-signing-cli --locked
+        run: cargo install artifact-signing-cli --version 0.12.0 --locked
 
-      - uses: tauri-apps/tauri-action@v0
+      # The release text is this version's CHANGELOG.md section (the update window shows it).
+      - name: Release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo "body<<END_OF_NOTES"
+            node scripts/release-notes.mjs || echo "See CHANGELOG.md for what's new."
+            echo
+            echo "Download the installer for your computer below. SHA256SUMS.txt lists the checksums."
+            echo "END_OF_NOTES"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          tagName: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || 'v__VERSION__' }}
           releaseName: Lumio v__VERSION__
-          releaseBody: See the assets below to download and install Lumio for your computer.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }} ${{ env.SIGNING_ARGS }}
           # latest.json tells installed copies about the new version (only written when
           # the updater key is set, see above).
           includeUpdaterJson: true
+
+      - name: List the installers
+        id: built
+        shell: bash
+        env:
+          ARTIFACTS: ${{ steps.tauri.outputs.artifactPaths }}
+        run: |
+          node -e '
+            const paths = JSON.parse(process.env.ARTIFACTS || "[]").filter((p) => require("fs").statSync(p).isFile());
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "paths<<END_OF_PATHS\n" + paths.join("\n") + "\nEND_OF_PATHS\n");'
+
+      - name: Build provenance
+        if: steps.built.outputs.paths != ''
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: ${{ steps.built.outputs.paths }}
+
+  # Adds SHA256SUMS.txt and copies of the installers under names that never change,
+  # so https://github.com/Light-Alley/Lumio/releases/latest/download/<name> always
+  # points at the newest version once the release is published.
+  stable-names:
+    name: Checksums and fixed-name copies
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write # upload SHA256SUMS.txt and the copies to the draft release
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Add checksums and fixed-name copies
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then tag="$INPUT_TAG"
+          elif [ "$REF_TYPE" = "tag" ]; then tag="$REF_NAME"
+          else tag="v$(node -p 'require("./package.json").version')"; fi
+          mkdir dist && cd dist
+          gh release download "$tag" --pattern '*'
+          copy() { # pattern fixed-name
+            local f
+            f=$(find . -maxdepth 1 -name "$1" ! -name 'Lumio-*-latest*' | head -n 1)
+            if [ -n "$f" ]; then cp "$f" "$2"; echo "$2 <- $f"; fi
+          }
+          copy '*_aarch64.dmg' Lumio-macOS-AppleSilicon.dmg
+          copy '*_x64.dmg' Lumio-macOS-Intel.dmg
+          copy '*_x64-setup.exe' Lumio-Windows-x64-setup.exe
+          copy '*_x64_en-US.msi' Lumio-Windows-x64.msi
+          copy '*_amd64.AppImage' Lumio-Linux-x86_64.AppImage
+          copy '*_amd64.deb' Lumio-Linux-amd64.deb
+          copy '*.x86_64.rpm' Lumio-Linux-x86_64.rpm
+          rm -f SHA256SUMS.txt
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' ! -name '*.sig' ! -name 'latest.json' -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$tag" --clobber SHA256SUMS.txt Lumio-*

@@ -15,7 +15,12 @@ struct FileLog {
 
 impl FileLog {
     fn open(&self) -> Option<File> {
-        OpenOptions::new().create(true).append(true).open(&self.path).ok()
+        let mut o = OpenOptions::new();
+        o.create(true).append(true);
+        // Only the owner may read the log (it names files and folders).
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+        o.open(&self.path).ok()
     }
 }
 
@@ -28,12 +33,7 @@ impl log::Log for FileLog {
         if !self.enabled(r.metadata()) {
             return;
         }
-        let line = format!(
-            "{} {:<5} {}\n",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-            r.level(),
-            r.args()
-        );
+        let line = format!("{} {:<5} {}\n", jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S"), r.level(), r.args());
         if cfg!(debug_assertions) {
             eprint!("{line}");
         }
@@ -61,5 +61,45 @@ pub fn init(path: PathBuf) {
     let logger = Box::new(FileLog { path, file: Mutex::new(None) });
     if log::set_boxed_logger(logger).is_ok() {
         log::set_max_level(log::LevelFilter::Info);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use log::Log;
+
+    fn record(log: &FileLog, target: &str, msg: &str) {
+        log.log(&log::Record::builder().target(target).level(log::Level::Info).args(format_args!("{msg}")).build());
+        log.flush();
+    }
+
+    #[test]
+    fn writes_only_lumios_lines_and_keeps_them_private() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("lumio.log");
+        let log = FileLog { path: path.clone(), file: Mutex::new(None) };
+        record(&log, "lumio_lib::indexer", "indexed 3 files");
+        record(&log, "hyper::client", "noise from a library");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("indexed 3 files"));
+        assert!(!text.contains("noise"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+    }
+
+    #[test]
+    fn a_full_log_starts_again_and_keeps_one_old_copy() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("lumio.log");
+        std::fs::write(&path, vec![b'x'; (MAX_BYTES + 10) as usize]).unwrap();
+        let log = FileLog { path: path.clone(), file: Mutex::new(None) };
+        record(&log, "lumio", "first");
+        record(&log, "lumio", "second");
+        assert!(std::fs::metadata(&path).unwrap().len() < 1000);
+        assert!(path.with_extension("log.1").exists());
     }
 }

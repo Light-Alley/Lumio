@@ -1,5 +1,6 @@
 // Application state (Svelte 5 runes) and the actions the UI performs.
 import { SvelteSet } from "svelte/reactivity";
+import { isInside } from "./paths";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, errText, type PhotoLite, type Root, type Edit, type OpReport, type Turn, type PendingMove, type PendingReport, type HistoryEntry, type Collection, type RuleSet } from "./api";
@@ -357,7 +358,8 @@ export function isClosedStack(p: PhotoLite) {
 
 /** The ids plus every hidden photo in closed stacks among them (so groups move together). */
 export function withStacks(ids: number[]): number[] {
-  const stacks = new Set(app.photos.filter((p) => ids.includes(p.id) && isClosedStack(p)).map((p) => p.stack_id));
+  const want = new Set(ids);
+  const stacks = new Set(app.photos.filter((p) => want.has(p.id) && isClosedStack(p)).map((p) => p.stack_id));
   if (!stacks.size) return ids;
   const out = new Set(ids);
   for (const p of app.allPhotos) if (p.stack_id != null && stacks.has(p.stack_id)) out.add(p.id);
@@ -446,10 +448,8 @@ function scheduleRefresh() {
   if (refreshTimer) return;
   refreshTimer = setTimeout(async () => {
     refreshTimer = null;
-    await loadRoots();
-    await loadPhotos();
-    await loadPending();
-    await loadCollections();
+    // Independent reloads, so they run side by side.
+    await Promise.all([loadRoots(), loadPhotos(), loadPending(), loadCollections()]);
     app.folderVersion++;
   }, 600);
 }
@@ -537,8 +537,9 @@ export async function removeRoot(root: Root) {
 export async function applyEdit(ids: number[], edit: Edit, quiet = false) {
   if (!ids.length) return;
   // Optimistic update for rating/label so the grid reacts immediately.
+  const want = new Set(ids);
   for (const p of app.photos) {
-    if (!ids.includes(p.id)) continue;
+    if (!want.has(p.id)) continue;
     if (edit.rating !== undefined) p.rating = edit.rating;
     if (edit.label !== undefined) p.label = edit.label || null;
     if (edit.gps) { p.lat = edit.gps[0]; p.lon = edit.gps[1]; }
@@ -613,11 +614,12 @@ export async function trashPhotos(ids: number[], message?: string): Promise<bool
         true,
       );
       if (again) {
-        // Look the photos up by id: they may not be in the current view (e.g. from the duplicate finder).
-        const failedNames = new Set(r.failed.map(([f]) => f));
-        const retry = (await api.getPhotos(ids)).filter((p) => failedNames.has(p.filename)).map((p) => p.id);
+        // Retry exactly the photos that failed, by id: two photos in different folders
+        // can share a file name, and the wrong one must never be deleted permanently.
+        const retry = r.failed_ids ?? [];
+        if (retry.length !== r.failed.length) throw new Error("Lumio could not tell which photos failed; nothing more was deleted.");
         const r2 = await api.deletePhotos(retry, true);
-        r = { done: r.done + r2.done, failed: r2.failed, outside_library: false };
+        r = { done: r.done + r2.done, failed: r2.failed, failed_ids: r2.failed_ids, outside_library: false };
       }
     }
     reportResult(r, "deleted");
@@ -645,7 +647,8 @@ export async function renamePhoto(p: PhotoLite) {
 /** Rename what is selected: one photo by typing a name, several with the batch rename window. */
 export function renameSelected(ids = selectedIds()) {
   if (!ids.length) return;
-  const offline = app.photos.some((p) => ids.includes(p.id) && !rootOnline(p.root_id));
+  const want = new Set(ids);
+  const offline = app.photos.some((p) => want.has(p.id) && !rootOnline(p.root_id));
   if (offline) { toast("Connect the drive these photos are on to rename them.", "info"); return; }
   if (ids.length === 1) {
     const p = app.photos.find((x) => x.id === ids[0]);
@@ -687,6 +690,7 @@ export async function trashFolder(path: string, name: string) {
     true,
   );
   if (!ok) return;
+  let permanent = false;
   try {
     await api.deleteFolder(path, false);
   } catch (e) {
@@ -702,9 +706,10 @@ export async function trashFolder(path: string, name: string) {
     } catch (e2) {
       return errorToast(e2);
     }
+    permanent = true;
   }
-  if (app.scope.kind === "folder" && app.scope.path.startsWith(path)) setScope({ kind: "all" });
-  toast(`“${name}” moved to the Trash.`, "success");
+  if (app.scope.kind === "folder" && isInside(app.scope.path, path)) setScope({ kind: "all" });
+  toast(permanent ? `“${name}” deleted permanently.` : `“${name}” moved to the Trash.`, "success");
   app.folderVersion++;
   loadHistory();
 }
@@ -717,7 +722,7 @@ export async function dropOnFolder(dest: string, e: DragEvent) {
     const ids = JSON.parse(photoData) as number[];
     await moveOrCopy(ids, copy, dest);
   } else if (folderData) {
-    if (folderData === dest || dest.startsWith(folderData)) return;
+    if (isInside(dest, folderData)) return;
     try {
       const r = await api.moveFolder(folderData, dest, copy);
       if (r.done) offerUndo(r.history, `Folder ${copy ? "copied" : "moved"}.`);
@@ -981,52 +986,5 @@ export async function dropOnView(e: DragEvent) {
   await moveOrCopy(ids, e.altKey, dest);
 }
 
-// ------------------------------------------------------------------ smart collections
-
-/** Open the editor for a new collection, optionally starting from some rules. */
-export function newCollection(name = "", rules: RuleSet = { any: false, rules: [] }) {
-  app.collectionEdit = { id: null, name, rules: $state.snapshot(rules) as RuleSet };
-}
-
-export function editCollection(c: Collection) {
-  app.collectionEdit = { id: c.id, name: c.name, rules: $state.snapshot(c.rules) as RuleSet };
-}
-
-/** Save the collection in the editor and show it. */
-export async function saveCollection(id: number | null, name: string, rules: RuleSet): Promise<boolean> {
-  try {
-    const saved = await api.saveCollection(id, name, rules);
-    app.collectionEdit = null;
-    await loadCollections();
-    const now = { kind: "collection", id: saved, name: name.trim() } as const;
-    // Tabs showing this collection pick up a new name.
-    app.tabs.forEach((t) => { if (t.scope.kind === "collection" && t.scope.id === saved) t.scope = { ...now }; });
-    if (app.scope.kind === "collection" && app.scope.id === saved) { app.scope = { ...now }; loadPhotos(); saveTabs(); }
-    else setScope(now);
-    return true;
-  } catch (e) {
-    errorToast(e);
-    return false;
-  }
-}
-
-export async function deleteCollection(c: Collection) {
-  const ok = await confirm(`Delete the collection “${c.name}”?`, "Only the saved rules are deleted. Your photos stay exactly as they are.", "Delete");
-  if (!ok) return;
-  try {
-    await api.deleteCollection(c.id);
-    await loadCollections();
-    if (app.scope.kind === "collection" && app.scope.id === c.id) setScope({ kind: "all" });
-  } catch (e) {
-    errorToast(e);
-  }
-}
-
-export function duplicateCollection(c: Collection) {
-  newCollection(`${c.name} copy`, c.rules);
-}
-
-/** Open the duplicate finder for the whole library, or for one folder and its subfolders. */
-export function findDuplicates(folder: string | null = null, name = "") {
-  app.dupes = { folder, name };
-}
+// Smart collections and the duplicate finder live in collections.svelte.ts.
+export { newCollection, editCollection, saveCollection, deleteCollection, duplicateCollection, findDuplicates } from "./collections.svelte";

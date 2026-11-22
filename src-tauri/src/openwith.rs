@@ -21,11 +21,47 @@ pub fn list(file: &Path) -> Vec<AppInfo> {
     v
 }
 
+/// Opens `file` with `app_id`, which must be one of the applications the operating system
+/// itself offers for that file (see `list`). The id comes from the user interface, so it
+/// is never trusted on its own: anything else is refused, whatever it points at.
 pub fn open_with(file: &Path, app_id: &str) -> Result<()> {
     if !file.exists() {
         bail!("The file is not available (is its drive connected?)");
     }
+    if !list(file).iter().any(|a| a.id == app_id) {
+        bail!("That application is not offered for this file.");
+    }
     imp::open_with(file, app_id)
+}
+
+/// Opens `file` with an application the person picked themselves in the system file
+/// dialog (shown by Rust, so the path never comes from the user interface).
+pub fn open_with_chosen(file: &Path, chosen: &Path) -> Result<()> {
+    if !file.exists() {
+        bail!("The file is not available (is its drive connected?)");
+    }
+    if !chosen_app_ok(chosen) {
+        bail!("That is not an application.");
+    }
+    imp::open_with(file, &chosen.to_string_lossy())
+}
+
+/// What may be picked as "another application": an .app bundle on macOS, an .exe on
+/// Windows, an installed .desktop entry or an executable file on Linux.
+fn chosen_app_ok(p: &Path) -> bool {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        if cfg!(target_os = "macos") {
+            ext == "app" && p.is_dir()
+        } else {
+            ext == "exe" && p.is_file()
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        imp::chosen_ok(p)
+    }
 }
 
 // ---------------------------------------------------------------- macOS
@@ -35,7 +71,7 @@ mod imp {
     use anyhow::Result;
     use core_foundation::array::{CFArray, CFArrayRef};
     use core_foundation::base::TCFType;
-    use core_foundation::url::{CFURL, CFURLRef};
+    use core_foundation::url::{CFURLRef, CFURL};
     use std::path::{Path, PathBuf};
 
     #[link(name = "CoreServices", kind = "framework")]
@@ -54,7 +90,11 @@ mod imp {
         let mut out = vec![];
         let default: Option<PathBuf> = unsafe {
             let r = LSCopyDefaultApplicationURLForURL(url.as_concrete_TypeRef(), ROLES_ALL, std::ptr::null_mut());
-            if r.is_null() { None } else { CFURL::wrap_under_create_rule(r).to_path() }
+            if r.is_null() {
+                None
+            } else {
+                CFURL::wrap_under_create_rule(r).to_path()
+            }
         };
         unsafe {
             let arr = LSCopyApplicationURLsForURL(url.as_concrete_TypeRef(), ROLES_ALL);
@@ -75,6 +115,12 @@ mod imp {
     }
 
     pub fn open_with(file: &Path, app: &str) -> Result<()> {
+        // The file path is absolute (it starts with "/"), so it can never be read as an
+        // option of `open`; `app` is one of the bundles Launch Services listed or one the
+        // person picked.
+        if !file.is_absolute() {
+            anyhow::bail!("not a file path");
+        }
         std::process::Command::new("/usr/bin/open").arg("-a").arg(app).arg(file).spawn()?;
         Ok(())
     }
@@ -86,16 +132,29 @@ mod imp {
     use super::AppInfo;
     use anyhow::{anyhow, Result};
     use std::path::Path;
-    use windows::core::{HSTRING, PCWSTR};
+    use windows::core::HSTRING;
     use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, IDataObject, COINIT_APARTMENTTHREADED};
     use windows::Win32::UI::Shell::{
         BHID_DataObject, IAssocHandler, IShellItem, SHAssocEnumHandlers, SHCreateItemFromParsingName,
         ASSOC_FILTER_RECOMMENDED,
     };
 
+    /// Undoes CoInitializeEx when dropped, if it succeeded.
+    struct ComGuard(bool);
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                unsafe { windows::Win32::System::Com::CoUninitialize() };
+            }
+        }
+    }
+
+    fn com() -> ComGuard {
+        ComGuard(unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_ok())
+    }
+
     fn handlers(file: &Path) -> Result<Vec<IAssocHandler>> {
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             let ext = format!(".{}", file.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default());
             let en = SHAssocEnumHandlers(&HSTRING::from(ext), ASSOC_FILTER_RECOMMENDED)?;
             let mut out = vec![];
@@ -120,6 +179,7 @@ mod imp {
     }
 
     pub fn list(file: &Path) -> Result<Vec<AppInfo>> {
+        let _com = com();
         let mut out = vec![];
         for h in handlers(file)? {
             unsafe {
@@ -138,6 +198,7 @@ mod imp {
 
     pub fn open_with(file: &Path, app: &str) -> Result<()> {
         // Prefer invoking through the shell (works for Store apps such as Photos).
+        let _com = com();
         for h in handlers(file)? {
             unsafe {
                 let id = h.GetName().map(|p| take_pwstr(p)).unwrap_or_default();
@@ -149,8 +210,7 @@ mod imp {
                 }
             }
         }
-        // Otherwise treat it as a path to an .exe chosen by the user.
-        let _ = PCWSTR::null();
+        // Otherwise it is an .exe the person picked in the file dialog (see `open_with_chosen`).
         std::process::Command::new(app).arg(file).spawn().map_err(|e| anyhow!("could not start {app}: {e}"))?;
         Ok(())
     }
@@ -181,8 +241,45 @@ mod imp {
             "raf" => "image/x-fuji-raf",
             "orf" => "image/x-olympus-orf",
             "rw2" => "image/x-panasonic-rw2",
+            "mp4" | "m4v" => "video/mp4",
+            "mov" => "video/quicktime",
+            "avi" => "video/x-msvideo",
+            "mkv" => "video/x-matroska",
+            "webm" => "video/webm",
+            "mts" | "m2ts" => "video/mp2t",
+            "3gp" => "video/3gpp",
+            "wmv" => "video/x-ms-wmv",
+            _ if crate::metadata::is_video(
+                &file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase(),
+            ) =>
+            {
+                "video/*"
+            }
             _ => "image/x-raw",
         }
+    }
+
+    /// The broad family ("image/*" or "video/*") an application may declare instead.
+    fn family(mime: &str) -> &'static str {
+        if mime.starts_with("video/") {
+            "video/*"
+        } else {
+            "image/*"
+        }
+    }
+
+    /// True when `p` is a .desktop entry inside one of the system's application folders.
+    fn trusted_desktop(p: &Path) -> bool {
+        let Ok(canon) = std::fs::canonicalize(p) else { return false };
+        app_dirs().iter().filter_map(|d| std::fs::canonicalize(d).ok()).any(|d| canon.parent() == Some(d.as_path()))
+    }
+
+    pub fn chosen_ok(p: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        if p.extension().and_then(|e| e.to_str()) == Some("desktop") {
+            return trusted_desktop(p);
+        }
+        std::fs::metadata(p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
     }
 
     fn app_dirs() -> Vec<PathBuf> {
@@ -218,14 +315,22 @@ mod imp {
             if !in_entry {
                 continue;
             }
-            if let Some(v) = line.strip_prefix("Name=") { name.get_or_insert(v.to_string()); }
-            if let Some(v) = line.strip_prefix("Exec=") { exec = Some(v.to_string()); }
+            if let Some(v) = line.strip_prefix("Name=") {
+                name.get_or_insert(v.to_string());
+            }
+            if let Some(v) = line.strip_prefix("Exec=") {
+                exec = Some(v.to_string());
+            }
             if let Some(v) = line.strip_prefix("MimeType=") {
                 mimes = v.split(';').filter(|s| !s.is_empty()).map(String::from).collect();
             }
-            if line == "NoDisplay=true" || line == "Hidden=true" { hidden = true; }
+            if line == "NoDisplay=true" || line == "Hidden=true" {
+                hidden = true;
+            }
         }
-        if hidden { return None; }
+        if hidden {
+            return None;
+        }
         Some(Desktop { name: name?, exec: exec?, mimes })
     }
 
@@ -237,11 +342,15 @@ mod imp {
             let Ok(rd) = std::fs::read_dir(&dir) else { continue };
             for e in rd.flatten() {
                 let p = e.path();
-                if p.extension().and_then(|x| x.to_str()) != Some("desktop") { continue; }
+                if p.extension().and_then(|x| x.to_str()) != Some("desktop") {
+                    continue;
+                }
                 let fname = p.file_name().unwrap().to_string_lossy().to_string();
-                if !seen.insert(fname) { continue; }
+                if !seen.insert(fname) {
+                    continue;
+                }
                 if let Some(d) = parse(&p) {
-                    if d.mimes.iter().any(|m| m == mime || m == "image/*") {
+                    if d.mimes.iter().any(|m| m == mime || m == family(mime)) {
                         out.push(AppInfo { name: d.name, id: p.to_string_lossy().to_string(), is_default: false });
                     }
                 }
@@ -253,23 +362,64 @@ mod imp {
     pub fn open_with(file: &Path, app: &str) -> Result<()> {
         let f = file.to_string_lossy().to_string();
         if app.ends_with(".desktop") {
+            if !trusted_desktop(Path::new(app)) {
+                return Err(anyhow!("that application entry is not installed on this computer"));
+            }
             let d = parse(Path::new(app)).ok_or_else(|| anyhow!("cannot read {app}"))?;
             let words = shell_words::split(&d.exec)?;
             let mut args: Vec<String> = vec![];
             let mut used = false;
             for w in words {
                 match w.as_str() {
-                    "%f" | "%F" | "%u" | "%U" => { args.push(f.clone()); used = true; }
+                    "%f" | "%F" | "%u" | "%U" => {
+                        args.push(f.clone());
+                        used = true;
+                    }
                     "%i" | "%c" | "%k" => {}
                     _ => args.push(w.replace("%%", "%")),
                 }
             }
-            if !used { args.push(f); }
+            if !used {
+                args.push(f);
+            }
             let (prog, rest) = args.split_first().ok_or_else(|| anyhow!("empty Exec line"))?;
             std::process::Command::new(prog).args(rest).spawn()?;
         } else {
             std::process::Command::new(app).arg(&f).spawn()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(all(test, unix, not(target_os = "macos")))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn only_programs_and_installed_launchers_can_be_chosen() {
+        let d = tempfile::tempdir().unwrap();
+        let prog = d.path().join("viewer");
+        std::fs::write(&prog, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(chosen_app_ok(&prog));
+        let data = d.path().join("photo.jpg");
+        std::fs::write(&data, b"x").unwrap();
+        assert!(!chosen_app_ok(&data), "a plain file is not a program");
+        // A launcher outside the system's application folders could run anything.
+        let desk = d.path().join("evil.desktop");
+        std::fs::write(&desk, b"[Desktop Entry]\nExec=rm -rf ~\n").unwrap();
+        std::fs::set_permissions(&desk, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!chosen_app_ok(&desk));
+        assert!(!chosen_app_ok(d.path()), "a folder is not a program");
+    }
+
+    #[test]
+    fn open_with_refuses_apps_it_did_not_list() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("a.jpg");
+        std::fs::write(&f, b"x").unwrap();
+        assert!(open_with(&f, "/bin/sh").is_err());
+        assert!(open_with(&f, "../../evil.desktop").is_err());
     }
 }

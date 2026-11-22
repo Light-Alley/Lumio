@@ -89,51 +89,67 @@
     if (i >= 0 && i < app.photos.length) app.viewerIndex = i;
   }
 
+  const RATING_KEY = /^[0-5]$/;
+  const LABEL_KEY = /^[6-9]$/;
+
   function onKey(e: KeyboardEvent) {
     if (app.dialog) return;
+    // Only keys the viewer used stop here; others (such as ⌘Q or menu shortcuts) carry on.
+    if (handleKey(e)) e.stopPropagation();
+  }
+
+  /** Act on a key. Returns whether the viewer used it. */
+  function handleKey(e: KeyboardEvent): boolean {
     const meta = e.metaKey || e.ctrlKey;
     switch (e.key) {
       case "Escape":
         // The first Esc leaves full screen, the next one closes the viewer.
         if (app.fullscreen) { ownFullscreen = false; setFullscreen(false); } else close();
-        break;
+        return true;
       case "f": case "F":
-        if (!meta) fullscreen();
-        break;
+        if (meta) return false;
+        fullscreen();
+        return true;
       case "p": case "P":
-        if (!meta) { e.preventDefault(); slideshow(); }
-        break;
-      case "ArrowRight": case "ArrowDown": go(1); break;
-      case "ArrowLeft": case "ArrowUp": go(-1); break;
+        if (meta) return false;
+        e.preventDefault(); slideshow();
+        return true;
+      case "ArrowRight": case "ArrowDown": go(1); return true;
+      case "ArrowLeft": case "ArrowUp": go(-1); return true;
       case " ":
         e.preventDefault();
         if (video && player) player.toggle(); else go(1);
-        break;
-      case "k": if (video) player?.toggle(); break;
-      case "j": if (video) player?.skip(-10); break;
-      case "l": if (video) player?.skip(10); break;
-      case "m": if (video) player?.toggleMute(); break;
-      case "i": showInfo = !showInfo; break;
-      case "z": if (!video) toggleZoom(); break;
+        return true;
+      case "k": if (!video || meta) return false; player?.toggle(); return true;
+      case "j": if (!video || meta) return false; player?.skip(-10); return true;
+      case "l": if (!video || meta) return false; player?.skip(10); return true;
+      case "m": if (!video || meta) return false; player?.toggleMute(); return true;
+      case "i": if (meta) return false; showInfo = !showInfo; return true;
+      case "z": if (video || meta) return false; toggleZoom(); return true;
       case "b": {
+        if (meta) return false;
         const i = BGS.findIndex((b) => b.id === app.viewerBg);
         setBg(BGS[(i + 1) % BGS.length].id);
-        break;
+        return true;
       }
       case "[": case "]":
-        if (meta && p && !video) { e.preventDefault(); rotatePhotos([p.id], e.key === "]" ? "right" : "left"); }
-        break;
+        if (!(meta && p && !video)) return false;
+        e.preventDefault(); rotatePhotos([p.id], e.key === "]" ? "right" : "left");
+        return true;
       case "Delete": case "Backspace":
-        if (e.key === "Delete" || meta) { e.preventDefault(); if (p) trashPhotos([p.id]); }
-        break;
+        if (!(e.key === "Delete" || meta)) return false;
+        e.preventDefault(); if (p) trashPhotos([p.id]);
+        return true;
       default:
-        if (p && !meta && /^[0-5]$/.test(e.key)) rate([p.id], Number(e.key));
-        if (p && !meta && /^[6-9]$/.test(e.key)) {
+        if (!p || meta) return false;
+        if (RATING_KEY.test(e.key)) { rate([p.id], Number(e.key)); return true; }
+        if (LABEL_KEY.test(e.key)) {
           const l = LABELS[Number(e.key) - 6].name;
           setLabel([p.id], p.label === l ? "" : l);
+          return true;
         }
+        return false;
     }
-    e.stopPropagation();
   }
 
   function setBg(b: Bg) { app.viewerBg = b; saveSetting("viewer_bg", b); }
@@ -203,8 +219,7 @@
       onmousedown={down}
       ondblclick={(e) => toggleZoom(e)}
       oncontextmenu={(e) => showMenu(e, photoMenu(p))}
-      role="img"
-      aria-label={p.filename}
+      role="presentation"
       class:grab={zoom > 1}
     >
       {#if video && !offline}

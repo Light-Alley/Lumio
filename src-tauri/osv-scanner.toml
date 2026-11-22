@@ -1,0 +1,45 @@
+# OSV-Scanner reads this next to Cargo.lock. Each entry is an advisory with no fix Lumio
+# can take: they all come from Tauri's own Linux stack (GTK 0.18 bindings and zbus), are
+# notices that a crate is unmaintained (not a vulnerability), or affect code Lumio
+# doesn't call. Every entry expires, so it is looked at again; remove it once Tauri
+# updates the dependency. cargo audit lists the same notices in the Check log.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0429"
+ignoreUntil = 2027-02-28
+reason = "glib 0.18 VariantStrIter unsoundness; comes in through Tauri's GTK 0.18 stack (no 0.20 release of Tauri's Linux backend yet), and Lumio never iterates GVariant strings"
+
+[[IgnoredVulns]]
+id = "GHSA-wrw7-89jp-8q8g"
+ignoreUntil = 2027-02-28
+reason = "Same glib 0.18 advisory as RUSTSEC-2024-0429"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+ignoreUntil = 2027-02-28
+reason = "chrono marked unmaintained; Lumio itself moved to jiff, chrono remains only through dependencies"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0436"
+ignoreUntil = 2027-02-28
+reason = "paste unmaintained (build-time macro crate used by dependencies)"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+ignoreUntil = 2027-02-28
+reason = "proc-macro-error unmaintained (build-time macro crate used by GTK bindings)"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0370"
+ignoreUntil = 2027-02-28
+reason = "zvariant unmaintained notice; used by zbus inside keyring/Tauri on Linux"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0371"
+ignoreUntil = 2027-02-28
+reason = "zbus_names unmaintained notice; used by zbus inside keyring/Tauri on Linux"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0372"
+ignoreUntil = 2027-02-28
+reason = "zvariant_derive unmaintained notice; used by zbus inside keyring/Tauri on Linux"

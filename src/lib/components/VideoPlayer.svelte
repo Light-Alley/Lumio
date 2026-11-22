@@ -84,7 +84,7 @@
     </div>
   {:else}
     {#key src}
-      <!-- svelte-ignore a11y_media_has_caption -->
+      <!-- Home videos have no caption files; the empty track marks that. -->
       <video
         bind:this={video}
         {src}
@@ -100,7 +100,7 @@
         ondurationchange={() => { if (video && isFinite(video.duration)) duration = video.duration; }}
         onerror={() => (unsupported = true)}
         onclick={toggle}
-      ></video>
+      ><track kind="captions" /></video>
     {/key}
     <div class="bar" class:show={paused} role="toolbar" aria-label="Video controls" tabindex="-1" ondblclick={(e) => e.stopPropagation()}>
       <button class="ghost icon" onclick={() => skip(-SKIP)} disabled={!ready} title={`Back ${SKIP} seconds (J)`} aria-label={`Back ${SKIP} seconds`}><Rewind size={16} /></button>

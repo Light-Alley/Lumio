@@ -10,7 +10,7 @@ Lumio moves, renames and deletes real files when you ask it to, and writes ratin
 
 ## 2. Install
 
-Download the installer for your computer from the [Releases page](https://github.com/LIght-Alley/Lumio/releases/latest):
+Download the installer for your computer from the [Releases page](https://github.com/Light-Alley/Lumio/releases/latest):
 
 | System | File |
 |---|---|
@@ -131,8 +131,8 @@ Lumio tells you when a new version is out: a notice appears in the corner a few 
 | A folder is greyed out | The drive isn't connected or isn't answering. Connect it, or wait: Lumio checks again every minute and when the window comes to the front. |
 | Indexing stopped part-way | Usually the computer slept or the network drive dropped out. Lumio pauses and carries on when the drive answers again. If it seems stuck, quit and reopen Lumio. |
 | A thumbnail looks wrong or old | Right-click → **Re-read metadata & thumbnail**. For a whole folder, right-click it → **Rescan folder**. |
-| A RAW file shows "file not readable" | Some older or unusual RAW files have no preview Lumio can read. Open it in your editor, or [open an issue](https://github.com/LIght-Alley/Lumio/issues) with the camera model. |
-| Something else | Open an [issue](https://github.com/LIght-Alley/Lumio/issues) and attach `lumio.log` from the folder above. Remove anything in it you'd rather not share. |
+| A RAW file shows "file not readable" | Some older or unusual RAW files have no preview Lumio can read. Open it in your editor, or [open an issue](https://github.com/Light-Alley/Lumio/issues) with the camera model. |
+| Something else | Open an [issue](https://github.com/Light-Alley/Lumio/issues) and attach `lumio.log` from the folder above. Remove anything in it you'd rather not share. |
 
 ## Keyboard shortcuts
 

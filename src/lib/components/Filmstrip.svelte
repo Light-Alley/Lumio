@@ -123,6 +123,8 @@
   function tileClass(p: PhotoLite) { return selection.has(p.id); }
   /** Rotate what's selected, or the photo on the stage. */
   function turnIds() { const ids = selectedIds(); return ids.length ? ids : current ? [current.id] : []; }
+  // Stars and labels go to the whole selection when the shown photo is part of it (as in the grid and list).
+  function editIds(id: number) { return selection.has(id) ? selectedIds() : [id]; }
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -166,9 +168,9 @@
         </span>
         {/if}
         {#each LABELS as l, i}
-          <button class="sw" class:on={current.label === l.name} style:--c={l.color} title={`${l.name} (${i + 6})`} aria-label={l.name} onclick={() => setLabel([current.id], current.label === l.name ? "" : l.name)}></button>
+          <button class="sw" class:on={current.label === l.name} style:--c={l.color} title={`${l.name} (${i + 6})`} aria-label={l.name} onclick={() => setLabel(editIds(current.id), current.label === l.name ? "" : l.name)}></button>
         {/each}
-        <Stars value={current.rating} size={14} onchange={(r) => rate([current.id], r)} />
+        <Stars value={current.rating} size={14} onchange={(r) => rate(editIds(current.id), r)} />
       {/if}
     </span>
   </div>
@@ -203,7 +205,7 @@
           role="option"
           tabindex="-1"
           aria-selected={sel}
-          draggable={rootOnline(p.root_id)}
+          draggable="true"
           ondragstart={(e) => photoDragStart(e, p)}
           ondragend={photoDragEnd}
           onmousedown={(e) => { if (e.button === 0 && !(sel && !e.shiftKey && !e.metaKey && !e.ctrlKey)) clickSelect(p.id, e); }}

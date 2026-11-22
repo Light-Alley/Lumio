@@ -7,6 +7,7 @@
 //! for files SmugMug can't take as they are.
 
 use crate::db::{self, Photo};
+use crate::exiftool;
 use crate::indexer;
 use crate::metadata;
 use crate::state::AppState;
@@ -63,29 +64,33 @@ pub fn render_jpeg(state: &AppState, p: &Photo, opts: &ExportOptions, dest: &Pat
     if state.et.available() {
         // The pixels are already upright, so the orientation tag and any embedded
         // thumbnails/previews (which would be the wrong size or way round) stay behind.
-        let mut args: Vec<String> = [
-            "-overwrite_original", "-m", "-codedcharacterset=utf8", "-TagsFromFile",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-        args.push(p.path.clone());
-        for a in ["-all:all", "--Orientation", "--ThumbnailImage", "--PreviewImage", "--JpgFromRaw", "--MakerNotes:all"] {
+        // -TagsFromFile expands '%' codes, so a source with '%' in its path goes through a
+        // stand-in (see ExifTool::plain).
+        let source = state.et.plain(src)?;
+        let mut args: Vec<String> = ["-overwrite_original", "-m", "-codedcharacterset=utf8", "-TagsFromFile"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        args.push(exiftool::fmt_path_arg(source.path())?);
+        for a in ["-all:all", "--Orientation", "--ThumbnailImage", "--PreviewImage", "--JpgFromRaw", "--MakerNotes:all"]
+        {
             args.push(a.into());
         }
         // Titles, captions and keywords edited in Lumio may only be in an XMP sidecar.
-        if let Some(xmp) = indexer::find_sidecar(src) {
+        let sidecar = indexer::find_sidecar(src).map(|x| state.et.plain(&x)).transpose()?;
+        if let Some(xmp) = &sidecar {
             args.push("-TagsFromFile".into());
-            args.push(xmp.to_string_lossy().into_owned());
+            args.push(exiftool::fmt_path_arg(xmp.path())?);
             args.push("-XMP:all".into());
         }
-        args.push(dest.to_string_lossy().into_owned());
+        args.push(exiftool::path_arg(dest)?);
         if let Err(e) = state.et.run(&args) {
             log::info!("could not copy metadata to {}: {e:#}", dest.display());
         }
-        // Excluding GPS while copying doesn't catch every tag, so remove it afterwards.
+        // Excluding GPS while copying doesn't catch every tag, so remove it afterwards:
+        // coordinates and the place names (city, region, country, sub-location).
         if opts.strip_location {
-            state.et.write(dest, &["-GPS:all=".into(), "-XMP:GPS*=".into()])?;
+            state.et.write(dest, &metadata::strip_location_args())?;
         }
     }
     Ok(())
@@ -102,6 +107,9 @@ fn free_name(dir: &Path, stem: &str) -> PathBuf {
 
 pub fn export(state: &AppState, ids: &[i64], folder: &Path, opts: &ExportOptions) -> Result<ExportReport> {
     CANCEL.store(false, Ordering::Relaxed);
+    if !folder.is_absolute() || folder.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(anyhow!("That folder is not usable."));
+    }
     if !folder.is_dir() {
         return Err(anyhow!("That folder is not available."));
     }
@@ -109,9 +117,14 @@ pub fn export(state: &AppState, ids: &[i64], folder: &Path, opts: &ExportOptions
     let (videos, photos): (Vec<Photo>, Vec<Photo>) = photos.into_iter().partition(|p| metadata::is_video(&p.ext));
     let total = photos.len();
     let done = AtomicUsize::new(0);
-    let mut report = ExportReport { skipped_videos: videos.len(), folder: folder.to_string_lossy().into_owned(), ..Default::default() };
+    let mut report = ExportReport {
+        skipped_videos: videos.len(),
+        folder: folder.to_string_lossy().into_owned(),
+        ..Default::default()
+    };
     let emit = |n: usize, name: &str| {
-        let _ = state.app.emit("web-export-progress", serde_json::json!({ "done": n, "total": total, "current": name }));
+        let _ =
+            state.app.emit("web-export-progress", serde_json::json!({ "done": n, "total": total, "current": name }));
     };
     emit(0, "");
     // One at a time keeps memory low for large RAW files and gives unique names safely.
@@ -120,7 +133,10 @@ pub fn export(state: &AppState, ids: &[i64], folder: &Path, opts: &ExportOptions
             report.cancelled = true;
             break;
         }
-        let stem = Path::new(&p.filename).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| format!("photo-{}", p.id));
+        let stem = Path::new(&p.filename)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("photo-{}", p.id));
         let dest = free_name(folder, &stem);
         match render_jpeg(state, p, opts, &dest) {
             Ok(()) => report.done += 1,
@@ -142,7 +158,12 @@ pub mod cmd {
     use tauri::State;
 
     #[tauri::command]
-    pub async fn web_export(state: State<'_, Arc<AppState>>, ids: Vec<i64>, folder: String, opts: ExportOptions) -> Result<ExportReport, String> {
+    pub async fn web_export(
+        state: State<'_, Arc<AppState>>,
+        ids: Vec<i64>,
+        folder: String,
+        opts: ExportOptions,
+    ) -> Result<ExportReport, String> {
         let st = state.inner().clone();
         tauri::async_runtime::spawn_blocking(move || export(&st, &ids, Path::new(&folder), &opts))
             .await

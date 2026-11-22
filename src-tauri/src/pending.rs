@@ -36,9 +36,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 
 /// Where the file for a photo with a waiting move really is.
 pub fn source_of(conn: &Connection, photo_id: i64) -> Result<Option<String>> {
-    Ok(conn
-        .query_row("SELECT src FROM pending_moves WHERE photo_id = ?1", [photo_id], |r| r.get(0))
-        .optional()?)
+    Ok(conn.query_row("SELECT src FROM pending_moves WHERE photo_id = ?1", [photo_id], |r| r.get(0)).optional()?)
 }
 
 /// Files that are waiting to be moved, by where they really are. The indexer must not
@@ -95,7 +93,9 @@ fn free_target(conn: &Connection, dir: &Path, name: &str, photo_id: i64, sidecar
 pub fn queue_move(conn: &Connection, photo: &db::Photo, dest: &Path, name: &str, dest_root: i64) -> Result<PathBuf> {
     let src = source_of(conn, photo.id)?.unwrap_or_else(|| photo.path.clone());
     // Moving it back to where the file really is cancels the move.
-    if Path::new(&src).parent() == Some(dest) && Path::new(&src).file_name().is_some_and(|n| n.to_string_lossy() == name) {
+    if Path::new(&src).parent() == Some(dest)
+        && Path::new(&src).file_name().is_some_and(|n| n.to_string_lossy() == name)
+    {
         cancel_one(conn, photo.id)?;
         return Ok(PathBuf::from(src));
     }
@@ -109,7 +109,7 @@ pub fn queue_move(conn: &Connection, photo: &db::Photo, dest: &Path, name: &str,
     tx.execute(
         "INSERT INTO pending_moves (photo_id, src, created) VALUES (?1, ?2, ?3)
          ON CONFLICT(photo_id) DO UPDATE SET attempts = 0, error = NULL",
-        params![photo.id, src, chrono::Utc::now().timestamp_millis()],
+        params![photo.id, src, crate::db::now_ms()],
     )?;
     tx.commit()?;
     Ok(target)
@@ -336,11 +336,7 @@ mod tests {
         }
     }
     fn tempdir() -> Tmp {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static N: AtomicU32 = AtomicU32::new(0);
-        let p = std::env::temp_dir().join(format!("lumio-pending-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-        std::fs::create_dir_all(&p).unwrap();
-        Tmp(p)
+        Tmp(tempfile::Builder::new().prefix("lumio-pending-").tempdir().unwrap().keep())
     }
 
     fn setup(dir: &Path) -> Connection {

@@ -91,22 +91,29 @@ fn apply_case(s: &str, c: Case) -> String {
 
 /// Make text taken from metadata safe to use in a file name.
 fn clean(s: &str) -> String {
-    let s: String = s
-        .chars()
-        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { '-' } else { c })
-        .collect();
+    let s: String =
+        s.chars()
+            .map(|c| {
+                if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() {
+                    '-'
+                } else {
+                    c
+                }
+            })
+            .collect();
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// The date and time a photo was taken, or failing that when the file was last changed
 /// (the catalogue keeps that in milliseconds).
-fn when(p: &Photo) -> Option<chrono::NaiveDateTime> {
+fn when(p: &Photo) -> Option<jiff::civil::DateTime> {
     if let Some(t) = &p.taken_at {
-        if let Ok(d) = chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S") {
+        if let Ok(d) = jiff::civil::DateTime::strptime("%Y-%m-%dT%H:%M:%S", t) {
             return Some(d);
         }
     }
-    chrono::DateTime::from_timestamp_millis(p.mtime).map(|d| d.with_timezone(&chrono::Local).naive_local())
+    let ts = jiff::Timestamp::from_millisecond(p.mtime).ok()?;
+    Some(ts.to_zoned(jiff::tz::TimeZone::system()).datetime())
 }
 
 pub const TOKENS: &[&str] = &["name", "n", "date", "time", "year", "month", "day", "folder", "camera", "title"];
@@ -120,12 +127,16 @@ fn expand(pattern: &str, p: &Photo, stem: &str, n: i64, digits: u32) -> Result<S
         let j = after.find('}').ok_or_else(|| anyhow!("A \"{{\" in the pattern has no closing \"}}\"."))?;
         let token = after[..j].trim().to_lowercase();
         let d = when(p);
-        let fmt = |f: &str| d.map(|d| d.format(f).to_string()).unwrap_or_default();
+        let fmt = |f: &str| d.map(|d| d.strftime(f).to_string()).unwrap_or_default();
         let v = match token.as_str() {
             "name" => stem.to_string(),
             "n" | "#" => {
                 let w = digits.clamp(1, 9) as usize;
-                if n < 0 { format!("-{:0w$}", -n) } else { format!("{n:0w$}") }
+                if n < 0 {
+                    format!("-{:0w$}", -n)
+                } else {
+                    format!("{n:0w$}")
+                }
             }
             "date" => fmt("%Y-%m-%d"),
             "time" => fmt("%H%M%S"),
@@ -135,7 +146,10 @@ fn expand(pattern: &str, p: &Photo, stem: &str, n: i64, digits: u32) -> Result<S
             "folder" => Path::new(&p.folder).file_name().map(|s| clean(&s.to_string_lossy())).unwrap_or_default(),
             "camera" => clean(p.model.as_deref().unwrap_or("")),
             "title" => clean(p.title.as_deref().unwrap_or("")),
-            other => bail!("\"{{{other}}}\" is not something Lumio can put in a name. Use one of: {}.", TOKENS.iter().map(|t| format!("{{{t}}}")).collect::<Vec<_>>().join(", ")),
+            other => bail!(
+                "\"{{{other}}}\" is not something Lumio can put in a name. Use one of: {}.",
+                TOKENS.iter().map(|t| format!("{{{t}}}")).collect::<Vec<_>>().join(", ")
+            ),
         };
         out.push_str(&v);
         rest = &after[j + 1..];
@@ -229,7 +243,10 @@ pub fn plan(photos: &[Photo], o: &BatchOptions) -> Result<Vec<PlannedName>> {
             if let Some(side) = find_sidecar(Path::new(&p.path)) {
                 let t = sidecar_target(&dst, &side);
                 if t.exists() && !same_place(&t, &side) && !batch_sides.contains(&t.to_string_lossy().to_lowercase()) {
-                    out[i].problem = Some(format!("Its sidecar would be named \"{}\", which is already in the folder", t.file_name().unwrap_or_default().to_string_lossy()));
+                    out[i].problem = Some(format!(
+                        "Its sidecar would be named \"{}\", which is already in the folder",
+                        t.file_name().unwrap_or_default().to_string_lossy()
+                    ));
                 }
             }
         }
@@ -253,7 +270,28 @@ fn check_new_name(name: &str) -> Result<()> {
     if name.chars().any(|c| c.is_control()) {
         bail!("The name contains characters that can't be used in a file name.");
     }
+    if is_reserved_on_windows(name) {
+        bail!("Windows keeps \"{}\" for devices, so it can't be used as a file name.", reserved_word(name));
+    }
     Ok(())
+}
+
+/// The part of a name Windows looks at for device names: "con.tar.jpg" -> "con".
+fn reserved_word(name: &str) -> &str {
+    let stem = name.split('.').next().unwrap_or(name);
+    stem.trim_end_matches(' ')
+}
+
+/// CON, PRN, AUX, NUL, COM1 to COM9 and LPT1 to LPT9 (also with superscript digits),
+/// with any extension: Windows opens the device instead of the file.
+fn is_reserved_on_windows(name: &str) -> bool {
+    let w = reserved_word(name).to_ascii_uppercase();
+    if matches!(w.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") {
+        return true;
+    }
+    let (head, tail) = (w.get(..3), w.get(3..));
+    matches!(head, Some("COM") | Some("LPT"))
+        && matches!(tail, Some("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "\u{b9}" | "\u{b2}" | "\u{b3}"))
 }
 
 /// The name to use when a person types a new name for one photo. Keeps the photo's
@@ -326,7 +364,8 @@ pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Re
     work.retain(|w| {
         let freed_by_batch = sources_lc.contains(&w.dst.to_string_lossy().to_lowercase());
         if w.dst.exists() && !freed_by_batch {
-            rep.failed.push((w.photo.filename.clone(), format!("a file named \"{}\" is already in the folder", w.name)));
+            rep.failed
+                .push((w.photo.filename.clone(), format!("a file named \"{}\" is already in the folder", w.name)));
             false
         } else {
             true
@@ -350,7 +389,10 @@ pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Re
         if t.exists() && !same_place(&t, s) && !moving_sides.contains(&t.to_string_lossy().to_lowercase()) {
             rep.failed.push((
                 w.photo.filename.clone(),
-                format!("its sidecar would be named \"{}\", and a file with that name is already in the folder", t.file_name().unwrap_or_default().to_string_lossy()),
+                format!(
+                    "its sidecar would be named \"{}\", and a file with that name is already in the folder",
+                    t.file_name().unwrap_or_default().to_string_lossy()
+                ),
             ));
             false
         } else {
@@ -361,23 +403,32 @@ pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Re
     // 2. Move aside, under a hidden temporary name, every file whose current name another
     //    photo in the batch is about to take (including a file that only changes case,
     //    which many drives treat as the same name).
-    let pid = std::process::id();
+    //    The temporary names are random and are only ever taken, never replaced
+    //    (`place_new`), so nothing else in the folder can be overwritten by them.
     let wanted: Vec<PathBuf> = work.iter().map(|w| w.dst.clone()).collect();
-    for (i, w) in work.iter_mut().enumerate() {
+    for w in work.iter_mut() {
         if !wanted.iter().any(|d| same_place(d, &w.src)) {
             continue;
         }
         let dir = w.src.parent().unwrap_or(Path::new("."));
-        let tmp = dir.join(format!(".lumio-rename-{pid}-{i}.tmp"));
-        if let Err(e) = std::fs::rename(&w.src, &tmp) {
-            rep.failed.push((w.photo.filename.clone(), format!("could not rename: {e}")));
+        let tag = match crate::secure::random_hex(8) {
+            Ok(t) => t,
+            Err(e) => {
+                rep.failed.push((w.photo.filename.clone(), format!("could not rename: {e:#}")));
+                w.dst = PathBuf::new();
+                continue;
+            }
+        };
+        let tmp = dir.join(format!(".lumio-rename-{tag}.tmp"));
+        if let Err(e) = crate::fileops::place_new(&w.src, &tmp) {
+            rep.failed.push((w.photo.filename.clone(), format!("could not rename: {e:#}")));
             w.dst = PathBuf::new();
             continue;
         }
         w.parked = Some(tmp);
         if let Some((s, false)) = &w.side {
-            let ts = dir.join(format!(".lumio-rename-{pid}-{i}.xmp.tmp"));
-            if std::fs::rename(s, &ts).is_ok() {
+            let ts = dir.join(format!(".lumio-rename-{tag}.xmp.tmp"));
+            if crate::fileops::place_new(s, &ts).is_ok() {
                 w.parked_side = Some(ts);
             }
         }
@@ -393,14 +444,10 @@ pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Re
             let target = sidecar_target(&w.dst, s);
             let from_side = w.parked_side.clone().unwrap_or_else(|| s.clone());
             // A shared sidecar whose name only changes case is already "there" on drives
-            // that ignore case; copying it onto itself would destroy it.
-            if *shared && same_place(&target, s) && target.exists() {
-                None
-            } else if !from_side.exists() {
-                None // its pair partner in this batch took it already
-            } else {
-                Some((from_side, target, *shared))
-            }
+            // that ignore case; copying it onto itself would destroy it. And a sidecar
+            // that is gone was taken already by its pair partner in this batch.
+            let already_there = *shared && same_place(&target, s) && target.exists();
+            (!already_there && from_side.exists()).then_some((from_side, target, *shared))
         });
         let res: Result<()> = (|| {
             if w.dst.exists() {
@@ -408,10 +455,16 @@ pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Re
             }
             if let Some((from_side, target, _)) = &side_move {
                 if target.exists() && !same_place(target, from_side) {
-                    bail!("a file named \"{}\" is already in the folder", target.file_name().unwrap_or_default().to_string_lossy());
+                    bail!(
+                        "a file named \"{}\" is already in the folder",
+                        target.file_name().unwrap_or_default().to_string_lossy()
+                    );
                 }
             }
-            std::fs::rename(&from, &w.dst).with_context(|| format!("could not rename {}", w.photo.filename))?;
+            // Takes the name only if it is still free, even if another app made a file
+            // with it since the check above.
+            crate::fileops::place_new(&from, &w.dst)
+                .with_context(|| format!("could not rename {}", w.photo.filename))?;
             Ok(())
         })();
         if let Err(e) = res {
@@ -428,7 +481,11 @@ pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Re
             continue;
         }
         if let Some((from_side, target, shared)) = &side_move {
-            let r = if *shared { crate::fileops::copy_verified(from_side, target) } else { std::fs::rename(from_side, target).map_err(Into::into) };
+            let r = if *shared {
+                crate::fileops::copy_verified(from_side, target)
+            } else {
+                std::fs::rename(from_side, target).map_err(Into::into)
+            };
             if let Err(e) = r {
                 log::warn!("renamed {} but not its sidecar: {e:#}", w.dst.display());
             }
@@ -505,6 +562,16 @@ mod tests {
     }
 
     #[test]
+    fn windows_device_names_are_refused() {
+        for bad in ["CON.jpg", "con.JPG", "Nul.tar.jpg", "com1.jpg", "LPT9.cr2", "aux", "COM\u{b9}.jpg", "PRN .jpg"] {
+            assert!(check_new_name(bad).is_err(), "{bad} should be refused");
+        }
+        for ok in ["Console.jpg", "COM10.jpg", "COM0.jpg", "LPT.jpg", "icon.jpg", "CONFIRM.jpg"] {
+            assert!(check_new_name(ok).is_ok(), "{ok} should be allowed");
+        }
+    }
+
+    #[test]
     fn pattern_tokens() {
         let ps = vec![photo(1, "/x/Iceland", "IMG_0001.JPG"), photo(2, "/x/Iceland", "IMG_0002.JPG")];
         let r = plan(&ps, &opts("{date} {folder} {n}")).unwrap();
@@ -545,7 +612,13 @@ mod tests {
     #[test]
     fn replace_and_case() {
         let ps = vec![photo(1, "/x", "DSC_0042.NEF")];
-        let o = BatchOptions { mode: Mode::Replace, find: "dsc_".into(), replace: "Kenya ".into(), ext_case: Case::Lower, ..Default::default() };
+        let o = BatchOptions {
+            mode: Mode::Replace,
+            find: "dsc_".into(),
+            replace: "Kenya ".into(),
+            ext_case: Case::Lower,
+            ..Default::default()
+        };
         assert_eq!(plan(&ps, &o).unwrap()[0].new, "Kenya 0042.nef");
         let o = BatchOptions { match_case: true, ..o };
         assert_eq!(plan(&ps, &o).unwrap()[0].new, "DSC_0042.nef");
@@ -562,11 +635,12 @@ mod tests {
     // ---- renaming real files -------------------------------------------------------
 
     fn setup(files: &[&str]) -> (PathBuf, Mutex<Connection>, Vec<i64>) {
-        let dir = std::env::temp_dir().join(format!("lumio-rename-test-{}-{}", std::process::id(), rand_suffix()));
+        let dir = tempfile::Builder::new().prefix("lumio-rename-test-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let conn = Connection::open_in_memory().unwrap();
         db::migrate(&conn).unwrap();
-        conn.execute("INSERT INTO roots (id, path, name, added_at) VALUES (1, ?1, 'r', 0)", [dir.to_string_lossy()]).unwrap();
+        conn.execute("INSERT INTO roots (id, path, name, added_at) VALUES (1, ?1, 'r', 0)", [dir.to_string_lossy()])
+            .unwrap();
         let mut ids = vec![];
         for f in files {
             let p = dir.join(f);
@@ -584,12 +658,9 @@ mod tests {
         (dir, Mutex::new(conn), ids)
     }
 
-    fn rand_suffix() -> u128 {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-    }
-
     fn names(dir: &Path) -> Vec<String> {
-        let mut v: Vec<String> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        let mut v: Vec<String> =
+            std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
         v.sort();
         v
     }
@@ -600,7 +671,9 @@ mod tests {
 
     fn catalogue(conn: &Mutex<Connection>, id: i64) -> (String, String, i64) {
         conn.lock()
-            .query_row("SELECT path, filename, rating FROM photos WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .query_row("SELECT path, filename, rating FROM photos WHERE id = ?1", [id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
             .unwrap()
     }
 
@@ -625,7 +698,8 @@ mod tests {
     #[test]
     fn swapping_names_and_changing_case() {
         let (dir, conn, ids) = setup(&["a.jpg", "b.jpg", "c.jpg"]);
-        let r = rename_in(&conn, &[(ids[0], "b.jpg".into()), (ids[1], "a.jpg".into()), (ids[2], "C.JPG".into())]).unwrap();
+        let r =
+            rename_in(&conn, &[(ids[0], "b.jpg".into()), (ids[1], "a.jpg".into()), (ids[2], "C.JPG".into())]).unwrap();
         assert_eq!(r.done, 3, "{:?}", r.failed);
         assert_eq!(names(&dir), ["C.JPG", "a.jpg", "b.jpg"]);
         assert_eq!(content(&dir, "b.jpg"), "a.jpg");
@@ -708,7 +782,8 @@ mod tests {
     fn a_batch_where_some_fail_still_renames_the_rest_and_undo_restores_them() {
         let (dir, conn, ids) = setup(&["1.jpg", "2.jpg", "3.jpg", "taken.jpg"]);
         std::fs::remove_file(dir.join("2.jpg")).unwrap(); // drive hiccup: one file is missing
-        let r = rename_in(&conn, &[(ids[0], "A.jpg".into()), (ids[1], "B.jpg".into()), (ids[2], "taken.jpg".into())]).unwrap();
+        let r = rename_in(&conn, &[(ids[0], "A.jpg".into()), (ids[1], "B.jpg".into()), (ids[2], "taken.jpg".into())])
+            .unwrap();
         assert_eq!((r.done, r.failed.len()), (1, 2));
         assert_eq!(names(&dir), ["3.jpg", "A.jpg", "taken.jpg"]);
         assert_eq!(content(&dir, "taken.jpg"), "taken.jpg");

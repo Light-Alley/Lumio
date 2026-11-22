@@ -64,7 +64,7 @@ fn share_root(state: &AppState) -> Result<PathBuf> {
 /// a copy some time after we hand it over, so only folders older than a day go.
 fn clean_old(root: &Path) {
     let Ok(rd) = std::fs::read_dir(root) else { return };
-    let cutoff = SystemTime::now() - Duration::from_secs(24 * 3600);
+    let Some(cutoff) = SystemTime::now().checked_sub(Duration::from_secs(24 * 3600)) else { return };
     for e in rd.flatten() {
         let old = e.metadata().and_then(|m| m.modified()).map(|t| t < cutoff).unwrap_or(false);
         if old {
@@ -105,23 +105,44 @@ pub fn prepare(state: &AppState, ids: &[i64]) -> Result<Vec<PathBuf>> {
         if !src.exists() {
             bail!("{} is not available (is its drive connected?)", p.filename);
         }
-        if metadata::is_video(&p.ext) || (!small && web_friendly(&p.ext)) {
+        if !small && (metadata::is_video(&p.ext) || web_friendly(&p.ext)) {
             out.push(src.to_path_buf());
             continue;
         }
         let d = match &dir {
             Some(d) => d.clone(),
             None => {
-                let stamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+                let stamp =
+                    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
                 let d = root.join(stamp.to_string());
                 std::fs::create_dir_all(&d)?;
                 dir = Some(d.clone());
                 d
             }
         };
-        out.push(convert(state, p, small, &d)?);
+        if metadata::is_video(&p.ext) {
+            out.push(video_copy(state, p, &d)?);
+        } else {
+            out.push(convert(state, p, small, &d)?);
+        }
     }
     Ok(out)
+}
+
+/// "Small copies" promise copies without the original's details. Videos aren't made
+/// smaller, but the copy loses its location (coordinates and place names), as the
+/// photo copies do (they are re-encoded without any metadata).
+fn video_copy(state: &AppState, p: &Photo, dir: &Path) -> Result<PathBuf> {
+    let src = Path::new(&p.path);
+    let stem = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "video".into());
+    let ext = src.extension().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| p.ext.clone());
+    let dest = unique(dir, &stem, &ext);
+    std::fs::copy(src, &dest).map_err(|e| anyhow!("Could not copy {}: {e}", p.filename))?;
+    if let Err(e) = state.et.write(&dest, &metadata::strip_location_args()) {
+        let _ = std::fs::remove_file(&dest);
+        bail!("Could not remove the location from {}: {e}", p.filename);
+    }
+    Ok(dest)
 }
 
 fn convert(state: &AppState, p: &Photo, small: bool, dir: &Path) -> Result<PathBuf> {
@@ -133,14 +154,16 @@ fn convert(state: &AppState, p: &Photo, small: bool, dir: &Path) -> Result<PathB
     } else {
         img
     };
-    let stem = Path::new(&p.filename).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "photo".into());
+    let stem =
+        Path::new(&p.filename).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "photo".into());
     let dest = unique(dir, &stem, "jpg");
     std::fs::write(&dest, thumbs::encode_jpeg(&img, 90)?)?;
     Ok(dest)
 }
 
 fn count(files: &[PathBuf]) -> String {
-    let videos = files.iter().filter(|f| metadata::is_video(f.extension().and_then(|e| e.to_str()).unwrap_or(""))).count();
+    let videos =
+        files.iter().filter(|f| metadata::is_video(f.extension().and_then(|e| e.to_str()).unwrap_or(""))).count();
     match (files.len(), videos) {
         (1, 1) => "The video".into(),
         (1, _) => "The photo".into(),
@@ -173,7 +196,8 @@ pub fn copy(files: &[PathBuf]) -> Result<Copied> {
     }
     let cb = guard.as_mut().unwrap();
     if files.len() == 1 && is_still_image(&files[0]) {
-        let img = image::ImageReader::open(&files[0])?.with_guessed_format()?.decode()?;
+        // Upright, as the photo is shown (a portrait JPEG must not paste sideways).
+        let img = crate::thumbs::open_upright(&files[0])?;
         let img = if img.width().max(img.height()) > CLIPBOARD_EDGE {
             img.resize(CLIPBOARD_EDGE, CLIPBOARD_EDGE, image::imageops::FilterType::Triangle)
         } else {
@@ -190,7 +214,11 @@ pub fn copy(files: &[PathBuf]) -> Result<Copied> {
 }
 
 fn paste_key() -> &'static str {
-    if cfg!(target_os = "macos") { "⌘V" } else { "Ctrl+V" }
+    if cfg!(target_os = "macos") {
+        "⌘V"
+    } else {
+        "Ctrl+V"
+    }
 }
 
 fn file_manager() -> &'static str {
@@ -217,8 +245,12 @@ pub fn copy_only(state: &AppState, ids: &[i64]) -> Result<Outcome> {
     let files = prepare(state, ids)?;
     let what = count(&files);
     match copy(&files)? {
-        Copied::Picture => Ok(done(format!("{what} is copied. Paste it with {} into a chat, email or post.", paste_key()))),
-        Copied::Files => Ok(done(format!("{what} copied. Paste them with {} into a chat, email or folder.", paste_key()))),
+        Copied::Picture => {
+            Ok(done(format!("{what} is copied. Paste it with {} into a chat, email or post.", paste_key())))
+        }
+        Copied::Files => {
+            Ok(done(format!("{what} copied. Paste them with {} into a chat, email or folder.", paste_key())))
+        }
     }
 }
 
@@ -287,23 +319,17 @@ fn url_escape(s: &str) -> String {
 pub fn whatsapp(state: &AppState, ids: &[i64], web: bool) -> Result<Outcome> {
     let files = prepare(state, ids)?;
     log::info!("share: WhatsApp{} with {} file(s)", if web { " Web" } else { "" }, files.len());
-    if !web {
-        // macOS: WhatsApp's own share extension takes the files straight into a chat.
-        if imp::whatsapp_direct(state, &files)? {
-            return Ok(done("Choose a chat in WhatsApp to send to."));
+    if !web && imp::whatsapp_installed() {
+        // The photo also goes on the clipboard, in case the app doesn't take the files.
+        let copied = copy(&files)?;
+        if imp::open_whatsapp_with(&files)? {
+            return Ok(done(format!(
+                "{} is opening in WhatsApp. Choose a chat and press Send. (If it doesn't appear, open a chat and press {}.)",
+                count(&files),
+                paste_key()
+            )));
         }
-        if imp::whatsapp_installed() {
-            // The photo also goes on the clipboard, in case the app doesn't take the files.
-            let copied = copy(&files)?;
-            if imp::open_whatsapp_with(&files)? {
-                return Ok(done(format!(
-                    "{} is opening in WhatsApp. Choose a chat and press Send. (If it doesn't appear, open a chat and press {}.)",
-                    count(&files),
-                    paste_key()
-                )));
-            }
-            return Ok(done(pasted_hint("WhatsApp", copied, &files)));
-        }
+        return Ok(done(pasted_hint("WhatsApp", copied, &files)));
     }
     let copied = copy(&files)?;
     if copied == Copied::Files {
@@ -345,7 +371,7 @@ pub fn sheet(state: &AppState, ids: &[i64], x: f64, y: f64) -> Result<Outcome> {
 }
 
 /// Run `f` on the main (interface) thread and wait for its answer.
-#[allow(dead_code)]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn on_main<T: Send + 'static>(state: &AppState, f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
     let (tx, rx) = std::sync::mpsc::channel();
     state.app.run_on_main_thread(move || {
@@ -383,16 +409,24 @@ mod imp {
     }
 
     pub fn sheet(state: &AppState, files: &[PathBuf], x: f64, y: f64) -> Result<()> {
-        let window = state.app.get_webview_window("main").ok_or_else(|| anyhow!("no window"))?;
-        let view_ptr = window.ns_view()? as usize;
         let files = files.to_vec();
+        let app = state.app.clone();
         on_main(state, move || {
-            // SAFETY: Tauri gives us the window's content view, and we are on the main thread.
+            // The window and its view are looked up here, on the main thread, so the view
+            // can't be closed and freed between the lookup and its use.
+            let window = app.get_webview_window("main").ok_or_else(|| anyhow!("no window"))?;
+            let view_ptr = window.ns_view()?;
+            if view_ptr.is_null() {
+                bail!("no window");
+            }
+            // SAFETY: Tauri gives us the live content view of a window that exists right
+            // now, and we are on the main thread, where AppKit objects may be used.
             let view: &NSView = unsafe { &*(view_ptr as *const NSView) };
             let b = view.bounds();
             let y = if view.isFlipped() { y } else { b.size.height - y };
             let rect = NSRect::new(NSPoint::new(x, y), NSSize::new(1.0, 1.0));
-            let picker = unsafe { NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items(&files)) };
+            let picker =
+                unsafe { NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items(&files)) };
             picker.showRelativeToRect_ofView_preferredEdge(rect, view, NSRectEdge::MinY);
             PICKER.with(|p| *p.borrow_mut() = Some(picker));
             Ok(())
@@ -415,23 +449,6 @@ mod imp {
         })
     }
 
-    /// Send straight through WhatsApp's share extension, when it is installed.
-    pub fn whatsapp_direct(state: &AppState, files: &[PathBuf]) -> Result<bool> {
-        let files = files.to_vec();
-        on_main(state, move || {
-            let items = items(&files);
-            #[allow(deprecated)]
-            let services = unsafe { NSSharingService::sharingServicesForItems(&items) };
-            for s in services.iter() {
-                if s.title().to_string().to_lowercase().contains("whatsapp") {
-                    unsafe { s.performWithItems(&items) };
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        })
-    }
-
     pub fn whatsapp_installed() -> bool {
         std::process::Command::new("/usr/bin/open")
             .args(["-Ra", "WhatsApp"])
@@ -445,6 +462,10 @@ mod imp {
     /// WhatsApp for Mac has no share extension, but it opens images and videos handed
     /// to it (it declares `public.image` and `public.movie`), showing a chat picker.
     pub fn open_whatsapp_with(files: &[PathBuf]) -> Result<bool> {
+        // Absolute paths can never be read as options of `open`.
+        if files.iter().any(|f| !f.is_absolute()) {
+            bail!("not a file path");
+        }
         let status = std::process::Command::new("/usr/bin/open").args(["-a", "WhatsApp"]).args(files).status()?;
         Ok(status.success())
     }
@@ -467,14 +488,42 @@ mod imp {
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED};
     use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
     use windows::Win32::System::Mapi::{MapiFileDescW, MapiMessageW};
-    use windows::Win32::UI::Shell::{AssocQueryStringW, IDataTransferManagerInterop, ASSOCF_IS_PROTOCOL, ASSOCSTR_FRIENDLYAPPNAME};
+    use windows::Win32::UI::Shell::{
+        AssocQueryStringW, IDataTransferManagerInterop, ASSOCF_IS_PROTOCOL, ASSOCSTR_FRIENDLYAPPNAME,
+    };
 
     static TOKEN: parking_lot::Mutex<Option<(isize, i64)>> = parking_lot::const_mutex(None);
 
-    /// Storage files are "agile" WinRT objects that any thread may use, but the
-    /// bindings don't mark them so. This carries them to the interface thread.
-    struct Agile<T>(T);
-    unsafe impl<T> Send for Agile<T> {}
+    /// Storage items, carried to the interface thread. Only this one type is marked Send
+    /// (not any T): StorageFile objects are "agile" WinRT objects (they implement
+    /// IAgileObject), which any thread may use, but the bindings don't say so.
+    struct AgileItems(Vec<Option<IStorageItem>>);
+    // SAFETY: see above; IStorageItem from StorageFile is agile, so moving the references
+    // to another thread and using them there is allowed.
+    unsafe impl Send for AgileItems {}
+
+    /// Undoes CoInitializeEx when dropped, if it succeeded.
+    struct ComGuard(bool);
+    impl ComGuard {
+        fn sta() -> ComGuard {
+            ComGuard(unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_ok())
+        }
+    }
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                unsafe { windows::Win32::System::Com::CoUninitialize() };
+            }
+        }
+    }
+
+    /// Frees a loaded DLL when dropped.
+    struct Library(windows::Win32::Foundation::HMODULE);
+    impl Drop for Library {
+        fn drop(&mut self) {
+            let _ = unsafe { windows::Win32::Foundation::FreeLibrary(self.0) };
+        }
+    }
 
     fn hwnd(state: &AppState) -> Result<isize> {
         let window = state.app.get_webview_window("main").ok_or_else(|| anyhow!("no window"))?;
@@ -484,14 +533,17 @@ mod imp {
     pub fn sheet(state: &AppState, files: &[PathBuf], _x: f64, _y: f64) -> Result<()> {
         // Look the files up before showing the sheet: the lookup waits on the disk,
         // which must not happen on the interface thread.
-        let storage: Agile<Vec<Option<IStorageItem>>> = {
+        let storage: AgileItems = {
+            // Joins this worker thread to the process-wide multithreaded apartment. It is
+            // deliberately not left again: the share sheet uses these items after this
+            // function returns, and leaving the last MTA thread would tear it down.
             let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
             let mut v = vec![];
             for f in files {
                 let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(f.as_os_str()))?.get()?;
                 v.push(Some(windows::core::Interface::cast::<IStorageItem>(&file)?));
             }
-            Agile(v)
+            AgileItems(v)
         };
         let count = files.len();
         let h = hwnd(state)?;
@@ -505,12 +557,13 @@ mod imp {
                     let _ = dtm.RemoveDataRequested(EventRegistrationToken { Value: t });
                 }
             }
-            let storage = Agile(storage.0);
-            let token = dtm.DataRequested(&TypedEventHandler::new(
-                move |_, args: &Option<DataRequestedEventArgs>| {
+            let storage = AgileItems(storage.0);
+            let token =
+                dtm.DataRequested(&TypedEventHandler::new(move |_, args: &Option<DataRequestedEventArgs>| {
                     let Some(args) = args else { return Ok(()) };
                     let data = args.Request()?.Data()?;
-                    let title = if count == 1 { "Photo from Lumio".to_string() } else { format!("{count} photos from Lumio") };
+                    let title =
+                        if count == 1 { "Photo from Lumio".to_string() } else { format!("{count} photos from Lumio") };
                     data.Properties()?.SetTitle(&HSTRING::from(title))?;
                     let list: IIterable<IStorageItem> = {
                         let s = &storage; // the whole wrapper, so the closure stays Send
@@ -518,8 +571,7 @@ mod imp {
                     };
                     data.SetStorageItemsReadOnly(&list)?;
                     Ok(())
-                },
-            ))?;
+                }))?;
             *TOKEN.lock() = Some((h, token.Value));
             interop.ShowShareUIForWindow(hwnd)?;
             Ok(())
@@ -541,14 +593,18 @@ mod imp {
         // sent, so it gets its own thread.
         std::thread::spawn(move || {
             let r = (|| -> Result<()> {
+                let _com = ComGuard::sta();
                 unsafe {
-                    let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-                    let lib = LoadLibraryW(w!("MAPI32.DLL")).map_err(|_| anyhow!("no email program is set up"))?;
-                    let f = GetProcAddress(lib, windows::core::s!("MAPISendMailW")).ok_or_else(|| anyhow!("no MAPISendMailW"))?;
+                    let lib =
+                        Library(LoadLibraryW(w!("MAPI32.DLL")).map_err(|_| anyhow!("no email program is set up"))?);
+                    let f = GetProcAddress(lib.0, windows::core::s!("MAPISendMailW"))
+                        .ok_or_else(|| anyhow!("no MAPISendMailW"))?;
                     let send: SendMailW = std::mem::transmute(f);
                     let mut paths: Vec<Vec<u16>> = files.iter().map(|f| wide(&f.to_string_lossy())).collect();
-                    let mut names: Vec<Vec<u16>> =
-                        files.iter().map(|f| wide(&f.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default())).collect();
+                    let mut names: Vec<Vec<u16>> = files
+                        .iter()
+                        .map(|f| wide(&f.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()))
+                        .collect();
                     let mut descs: Vec<MapiFileDescW> = paths
                         .iter_mut()
                         .zip(names.iter_mut())
@@ -588,15 +644,19 @@ mod imp {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    pub fn whatsapp_direct(_state: &AppState, _files: &[PathBuf]) -> Result<bool> {
-        Ok(false)
-    }
-
     pub fn whatsapp_installed() -> bool {
         let mut buf = [0u16; 260];
         let mut len = buf.len() as u32;
         unsafe {
-            AssocQueryStringW(ASSOCF_IS_PROTOCOL, ASSOCSTR_FRIENDLYAPPNAME, w!("whatsapp"), PCWSTR::null(), PWSTR(buf.as_mut_ptr()), &mut len).is_ok()
+            AssocQueryStringW(
+                ASSOCF_IS_PROTOCOL,
+                ASSOCSTR_FRIENDLYAPPNAME,
+                w!("whatsapp"),
+                PCWSTR::null(),
+                PWSTR(buf.as_mut_ptr()),
+                &mut len,
+            )
+            .is_ok()
         }
     }
 
@@ -633,10 +693,6 @@ mod imp {
         Ok(())
     }
 
-    pub fn whatsapp_direct(_state: &AppState, _files: &[PathBuf]) -> Result<bool> {
-        Ok(false)
-    }
-
     pub fn whatsapp_installed() -> bool {
         Command::new("xdg-mime")
             .args(["query", "default", "x-scheme-handler/whatsapp"])
@@ -671,7 +727,7 @@ mod tests {
 
     #[test]
     fn unique_names() {
-        let d = std::env::temp_dir().join(format!("lumio-share-test-{}", std::process::id()));
+        let d = tempfile::Builder::new().prefix("lumio-share-test-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("a.jpg"), b"x").unwrap();
         assert_eq!(unique(&d, "a", "jpg"), d.join("a (2).jpg"));

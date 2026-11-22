@@ -138,7 +138,7 @@ pub fn backfill_chunk(state: &AppState, conn: &Connection) -> Result<bool> {
     if rp.policy.mode == Mode::Off {
         return Ok(false);
     }
-    let roots: Vec<(i64, PathBuf)> = db::list_roots(conn)?
+    let roots: Vec<(i64, PathBuf)> = db::roots(conn)?
         .into_iter()
         .filter(|r| rp.wanted.get(&r.id).copied().unwrap_or(false))
         .map(|r| (r.id, PathBuf::from(r.path)))
@@ -176,7 +176,12 @@ pub fn backfill_chunk(state: &AppState, conn: &Connection) -> Result<bool> {
     let (left, _) = counts(conn, &rp)?;
     let _ = state.app.emit(
         "index-progress",
-        indexer::Progress { active: true, done: 0, total: 0, message: format!("Saving previews for offline viewing ({} to go)", left) },
+        indexer::Progress {
+            active: true,
+            done: 0,
+            total: 0,
+            message: format!("Saving previews for offline viewing ({} to go)", left),
+        },
     );
     let size = rp.policy.size;
     let results: Vec<(i64, Result<(), bool>)> = todo
@@ -256,7 +261,7 @@ pub fn stats(state: &AppState) -> Result<Stats> {
         let rp = RootPolicy::load(&conn)?;
         let (waiting, _) = counts(&conn, &rp)?;
         let saved: i64 = conn.query_row("SELECT COUNT(*) FROM photos WHERE preview > 0", [], |r| r.get(0))?;
-        let drives = db::list_roots(&conn)?
+        let drives = db::roots(&conn)?
             .into_iter()
             .filter(|r| rp.wanted.get(&r.id).copied().unwrap_or(false))
             .map(|r| r.name)

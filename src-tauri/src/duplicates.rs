@@ -238,7 +238,7 @@ fn find_exact(c: &mut [Candidate], progress: &(dyn Fn(usize, usize, &str) + Sync
         .par_iter()
         .map(|&i| {
             let n = done.fetch_add(1, Ordering::Relaxed);
-            if n % 25 == 0 {
+            if n.is_multiple_of(25) {
                 progress(n, total, "Comparing files");
             }
             if CANCEL.load(Ordering::Relaxed) {
@@ -262,7 +262,8 @@ fn find_exact(c: &mut [Candidate], progress: &(dyn Fn(usize, usize, &str) + Sync
         c[i].quick = q;
     }
     // Same size and same quick fingerprint: read those in full.
-    let maybe: Vec<usize> = groups_by(&online, |i| c[i].quick.clone().map(|q| (c[i].size, q))).into_iter().flatten().collect();
+    let maybe: Vec<usize> =
+        groups_by(&online, |i| c[i].quick.clone().map(|q| (c[i].size, q))).into_iter().flatten().collect();
     let total = maybe.len();
     done.store(0, Ordering::Relaxed);
     let full: Vec<(usize, Option<String>)> = maybe
@@ -349,22 +350,82 @@ fn alike(a: &Candidate, b: &Candidate, max: u32) -> Option<u32> {
     Some(d)
 }
 
+/// For each usable photo (by position in `usable`), the later ones that look alike.
+///
+/// Fingerprints within `max` bits of each other agree exactly on at least one of `max + 1`
+/// slices of the 64 bits (if every slice differed, at least `max + 1` bits would). So
+/// only photos sharing a slice value are compared, which keeps large libraries near
+/// linear. With wide tolerances the slices are too short to narrow much, and every
+/// pair is compared instead (in parallel).
+fn neighbours(c: &[Candidate], usable: &[usize], max: u32) -> Vec<Vec<(usize, u32)>> {
+    let hash = |k: usize| c[usable[k]].dhash.unwrap_or(0) as u64;
+    if max >= 8 {
+        return usable
+            .par_iter()
+            .enumerate()
+            .map(|(k, &i)| {
+                if CANCEL.load(Ordering::Relaxed) {
+                    return vec![];
+                }
+                usable[k + 1..].iter().filter_map(|&j| alike(&c[i], &c[j], max).map(|d| (j, d))).collect()
+            })
+            .collect();
+    }
+    let bands = bands(max);
+    let slice = |h: u64, (start, width): (u32, u32)| (h >> start) & u64::MAX.checked_shr(64 - width).unwrap_or(0);
+    let buckets: Vec<HashMap<u64, Vec<usize>>> = bands
+        .iter()
+        .map(|&b| {
+            let mut m: HashMap<u64, Vec<usize>> = HashMap::new();
+            for k in 0..usable.len() {
+                m.entry(slice(hash(k), b)).or_default().push(k);
+            }
+            m
+        })
+        .collect();
+    (0..usable.len())
+        .into_par_iter()
+        .map(|k| {
+            if CANCEL.load(Ordering::Relaxed) {
+                return vec![];
+            }
+            let h = hash(k);
+            let mut out = vec![];
+            for (n, &b) in bands.iter().enumerate() {
+                for &l in buckets[n].get(&slice(h, b)).map(Vec::as_slice).unwrap_or(&[]) {
+                    // Each pair once: from its first photo, in the first slice it shares.
+                    if l <= k || bands[..n].iter().any(|&e| slice(h, e) == slice(hash(l), e)) {
+                        continue;
+                    }
+                    if let Some(d) = alike(&c[usable[k]], &c[usable[l]], max) {
+                        out.push((usable[l], d));
+                    }
+                }
+            }
+            out.sort_unstable();
+            out
+        })
+        .collect()
+}
+
+/// `max + 1` slices covering the 64 bits, as (first bit, width).
+fn bands(max: u32) -> Vec<(u32, u32)> {
+    let n = max + 1;
+    let mut out = vec![];
+    let mut start = 0;
+    for i in 0..n {
+        let width = 64 / n + u32::from(i < 64 % n);
+        out.push((start, width));
+        start += width;
+    }
+    out
+}
+
 /// Group look-alikes. Each group is one photo and everything close to *it*, so a long
 /// chain of slightly different photos never ends up as one huge group.
 fn group_alike(c: &[Candidate], max: u32) -> Vec<Vec<(usize, u32)>> {
     let usable: Vec<usize> = (0..c.len()).filter(|&i| c[i].dhash.is_some_and(|h| !too_plain(h as u64))).collect();
-    // Neighbours of each photo, worked out in parallel (55,000 photos is ~1.5 billion
-    // comparisons, about a second).
-    let near: Vec<Vec<(usize, u32)>> = usable
-        .par_iter()
-        .enumerate()
-        .map(|(k, &i)| {
-            if CANCEL.load(Ordering::Relaxed) {
-                return vec![];
-            }
-            usable[k + 1..].iter().filter_map(|&j| alike(&c[i], &c[j], max).map(|d| (j, d))).collect()
-        })
-        .collect();
+    let near = neighbours(c, &usable, max);
     let mut adj: HashMap<usize, Vec<(usize, u32)>> = HashMap::new();
     for (k, list) in near.into_iter().enumerate() {
         let i = usable[k];
@@ -395,7 +456,12 @@ fn group_alike(c: &[Candidate], max: u32) -> Vec<Vec<(usize, u32)>> {
     out
 }
 
-fn find_alike(state: &AppState, c: &mut [Candidate], max: u32, progress: &(dyn Fn(usize, usize, &str) + Sync)) -> (Vec<Vec<(usize, u32)>>, usize) {
+fn find_alike(
+    state: &AppState,
+    c: &mut [Candidate],
+    max: u32,
+    progress: &(dyn Fn(usize, usize, &str) + Sync),
+) -> (Vec<Vec<(usize, u32)>>, usize) {
     let total = c.len();
     let done = AtomicUsize::new(0);
     let missing = AtomicUsize::new(0);
@@ -403,7 +469,7 @@ fn find_alike(state: &AppState, c: &mut [Candidate], max: u32, progress: &(dyn F
         .par_iter()
         .map(|x| {
             let n = done.fetch_add(1, Ordering::Relaxed);
-            if n % 100 == 0 {
+            if n.is_multiple_of(100) {
                 progress(n, total, "Reading thumbnails");
             }
             if CANCEL.load(Ordering::Relaxed) {
@@ -472,7 +538,9 @@ pub fn find(state: &AppState, opts: &Options) -> Result<Report> {
     let similar = opts.mode == "similar";
     let max = opts.distance.min(16);
     let emit = |done: usize, total: usize, message: &str| {
-        let _ = state.app.emit("duplicates-progress", serde_json::json!({ "done": done, "total": total, "message": message }));
+        let _ = state
+            .app
+            .emit("duplicates-progress", serde_json::json!({ "done": done, "total": total, "message": message }));
     };
     emit(0, 0, "Looking through the catalogue");
     let mut c = candidates(&state.conn.lock(), opts, similar)?;
@@ -514,9 +582,14 @@ pub fn find(state: &AppState, opts: &Options) -> Result<Report> {
                 .into_iter()
                 .zip(dist)
                 .enumerate()
-                .map(|(k, (p, distance))| Member { online: Path::new(&p.path).exists(), keep: k == keep, distance, photo: p })
+                .map(|(k, (p, distance))| Member { online: false, keep: k == keep, distance, photo: p })
                 .collect(),
         });
+    }
+    // Asking the drives can be slow (network drives), so it happens without the lock.
+    drop(conn);
+    for m in report.groups.iter_mut().flat_map(|g| g.members.iter_mut()) {
+        m.online = Path::new(&m.photo.path).exists();
     }
     Ok(report)
 }
@@ -565,6 +638,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn slicing_finds_exactly_what_comparing_every_pair_finds() {
+        let mut x: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        // Clusters of near copies (a few bits flipped) among unrelated pictures.
+        let mut c = vec![];
+        for g in 0..150 {
+            let base = next();
+            for m in 0..4 {
+                let mut h = base;
+                for _ in 0..(m * 2) {
+                    h ^= 1 << (next() % 64);
+                }
+                c.push(cand(c.len() as i64, &format!("/f{g}"), &format!("{m}.jpg"), h, 1.5));
+            }
+        }
+        let usable: Vec<usize> = (0..c.len()).filter(|&i| c[i].dhash.is_some_and(|h| !too_plain(h as u64))).collect();
+        for max in 0..8 {
+            let brute: Vec<Vec<(usize, u32)>> = usable
+                .iter()
+                .enumerate()
+                .map(|(k, &i)| {
+                    usable[k + 1..].iter().filter_map(|&j| alike(&c[i], &c[j], max).map(|d| (j, d))).collect()
+                })
+                .collect();
+            assert_eq!(neighbours(&c, &usable, max), brute, "max {max}");
+        }
+        let total: u32 = bands(5).iter().map(|b| b.1).sum();
+        assert_eq!(total, 64);
+    }
+
     fn picture(w: u32, h: u32, seed: u32) -> DynamicImage {
         DynamicImage::ImageRgb8(RgbImage::from_fn(w, h, |x, y| {
             let v = ((x * 7 + y * 3 + seed * 50) % 256) as u8;
@@ -591,10 +700,10 @@ mod tests {
         let base: u64 = 0x5a5a_5a5a_0f0f_3c3c;
         let c = vec![
             cand(1, "/a", "IMG_1.CR3", base, 1.5),
-            cand(2, "/a", "IMG_1.JPG", base, 1.5),            // its RAW + JPEG partner: not a duplicate
+            cand(2, "/a", "IMG_1.JPG", base, 1.5), // its RAW + JPEG partner: not a duplicate
             cand(3, "/b", "IMG_1 export.jpg", base ^ 0b11, 1.5), // 2 bits away: a look-alike
             cand(4, "/c", "far.jpg", base ^ 0b1111_1100, 1.5), // 6 from 1, 4 from 3
-            cand(5, "/d", "portrait.jpg", base, 0.66),         // same hash, other shape
+            cand(5, "/d", "portrait.jpg", base, 0.66), // same hash, other shape
         ];
         let g = group_alike(&c, 4);
         assert_eq!(g.len(), 1);
@@ -609,7 +718,7 @@ mod tests {
 
     #[test]
     fn exact_hashes() {
-        let dir = std::env::temp_dir().join(format!("lumio-dupes-{}", std::process::id()));
+        let dir = tempfile::Builder::new().prefix("lumio-dupes-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let big: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
         let mut changed_middle = big.clone();
@@ -662,7 +771,7 @@ mod tests {
 
     #[test]
     fn same_file_through_two_paths_is_not_a_copy() {
-        let dir = std::env::temp_dir().join(format!("lumio-links-{}", std::process::id()));
+        let dir = tempfile::Builder::new().prefix("lumio-links-").tempdir().unwrap().keep();
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         std::fs::write(dir.join("real.jpg"), vec![7u8; 1000]).unwrap();
         std::fs::write(dir.join("copy.jpg"), vec![7u8; 1000]).unwrap();
@@ -674,7 +783,7 @@ mod tests {
 
     #[test]
     fn exact_search_end_to_end() {
-        let dir = std::env::temp_dir().join(format!("lumio-exact-{}", std::process::id()));
+        let dir = tempfile::Builder::new().prefix("lumio-exact-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let data: Vec<u8> = (0..200_000u32).map(|i| (i % 253) as u8).collect();
         let mut middle = data.clone();

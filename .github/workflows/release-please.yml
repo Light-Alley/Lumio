@@ -1,0 +1,95 @@
+# Automatic versions and changelog. On every push to main, release-please keeps a
+# "chore(main): release X.Y.Z" pull request up to date: it bumps the version in
+# package.json, package-lock.json, Cargo.toml, Cargo.lock and tauri.conf.json, and adds
+# the new commits to CHANGELOG.md. Merging that pull request makes a draft release and
+# builds its installers (release.yml, started with workflow_dispatch); pressing Publish on the draft releases it.
+#
+# Needs: Settings > Actions > General > "Allow GitHub Actions to create and approve pull
+# requests". Commit messages follow Conventional Commits (CONTRIBUTING.md).
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  # A version set by hand (as 2.0.0 was) is built as a draft the first time it reaches
+  # main; release-please takes over once that release is published.
+  current:
+    name: Is the current version released?
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read # read the manifest and the releases
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      published: ${{ steps.check.outputs.published }}
+      drafted: ${{ steps.check.outputs.drafted }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="v$(node -p 'require("./.release-please-manifest.json")["."]')"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          state=$(gh release view "$tag" --json isDraft --jq 'if .isDraft then "draft" else "published" end' 2>/dev/null || echo none)
+          echo "published=$([ "$state" = published ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "drafted=$([ "$state" = draft ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "$tag: $state"
+
+  first-build:
+    name: Build the hand-set version
+    needs: current
+    if: needs.current.outputs.published == 'false' && needs.current.outputs.drafted == 'false'
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: write # start the Build installers workflow
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.current.outputs.tag }}
+        run: gh workflow run release.yml --ref main -f tag="$TAG"
+
+  release-please:
+    name: Release pull request
+    needs: current
+    if: needs.current.outputs.published == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write # update the release branch, tag and draft release
+      pull-requests: write # open and update the release pull request
+    outputs:
+      created: ${{ steps.rp.outputs.release_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build:
+    name: Build the new release
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: write # start the Build installers workflow
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag }}
+        run: gh workflow run release.yml --ref "$TAG" -f tag="$TAG"

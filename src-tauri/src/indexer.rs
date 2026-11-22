@@ -64,7 +64,12 @@ impl std::error::Error for Offline {}
 /// Can the folder still be listed? Network drives and sync clients (pCloud, Dropbox, SMB)
 /// stop answering when the computer sleeps or the connection drops.
 pub fn reachable(dir: &Path) -> bool {
-    std::fs::read_dir(dir).map(|mut rd| { let _ = rd.next(); true }).unwrap_or(false)
+    std::fs::read_dir(dir)
+        .map(|mut rd| {
+            let _ = rd.next();
+            true
+        })
+        .unwrap_or(false)
 }
 
 /// Can we actually read the start of the file?
@@ -87,9 +92,9 @@ impl KeepAwake {
                 .stderr(std::process::Stdio::null())
                 .spawn()
                 .ok();
-            return KeepAwake(child);
+            KeepAwake(child)
         }
-        #[allow(unreachable_code)]
+        #[cfg(not(target_os = "macos"))]
         KeepAwake(None)
     }
 }
@@ -109,7 +114,10 @@ pub fn is_hidden(p: &Path) -> bool {
         .map(|n| {
             n.starts_with('.')
                 || n.starts_with("._")
-                || matches!(n, "$RECYCLE.BIN" | "System Volume Information" | "@eaDir" | "#recycle" | "#snapshot" | "node_modules")
+                || matches!(
+                    n,
+                    "$RECYCLE.BIN" | "System Volume Information" | "@eaDir" | "#recycle" | "#snapshot" | "node_modules"
+                )
         })
         .unwrap_or(false)
 }
@@ -169,17 +177,97 @@ fn has_sibling(p: &Path, owners_only: bool) -> bool {
     })
 }
 
+/// The names in folders, read once per folder, so finding sidecars and RAW/JPEG twins
+/// for thousands of photos doesn't ask the drive about every possible name (dozens of
+/// lookups per photo, which is slow on network drives).
+#[derive(Default)]
+pub struct DirNames {
+    dirs: HashMap<PathBuf, Listing>,
+}
+
+#[derive(Default)]
+struct Listing {
+    /// Lower-case file name -> the name as it is on disk.
+    names: HashMap<String, std::ffi::OsString>,
+    /// Lower-case stem -> lower-case extensions of the files with that stem.
+    stems: HashMap<String, Vec<String>>,
+}
+
+impl DirNames {
+    fn listing(&mut self, dir: &Path) -> &Listing {
+        self.dirs.entry(dir.to_path_buf()).or_insert_with(|| {
+            let mut l = Listing::default();
+            for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let name = e.file_name();
+                let lower = name.to_string_lossy().to_lowercase();
+                let pb = Path::new(&lower);
+                let stem = pb.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                let ext = pb.extension().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                l.stems.entry(stem).or_default().push(ext);
+                l.names.insert(lower, name);
+            }
+            l
+        })
+    }
+
+    /// The file in `dir` called `name` (in any case), if there is one.
+    fn find(&mut self, dir: &Path, name: &str) -> Option<PathBuf> {
+        let l = self.listing(dir);
+        l.names.get(&name.to_lowercase()).map(|n| dir.join(n))
+    }
+
+    /// The same as [`find_sidecar`], from the folder listing.
+    pub fn sidecar(&mut self, p: &Path) -> Option<PathBuf> {
+        let dir = p.parent()?;
+        let file = p.file_name()?.to_string_lossy().into_owned();
+        let stem = p.file_stem()?.to_string_lossy().into_owned();
+        let owns_stem = metadata::is_raw(&ext_of(p)) || metadata::video_needs_sidecar(&ext_of(p));
+        let full = self.find(dir, &format!("{file}.xmp"));
+        if !owns_stem && full.is_some() {
+            return full;
+        }
+        if let Some(st) = self.find(dir, &format!("{stem}.xmp")) {
+            if owns_stem || !self.has_sibling(p, true) {
+                return Some(st);
+            }
+        }
+        full
+    }
+
+    fn has_sibling(&mut self, p: &Path, owners_only: bool) -> bool {
+        let (Some(dir), Some(stem)) = (p.parent(), p.file_stem()) else { return false };
+        let me = ext_of(p);
+        let stem = stem.to_string_lossy().to_lowercase();
+        let l = self.listing(dir);
+        l.stems.get(&stem).is_some_and(|exts| {
+            exts.iter().any(|e| {
+                *e != me
+                    && metadata::is_supported(e)
+                    && (!owners_only || metadata::is_raw(e) || metadata::video_needs_sidecar(e))
+            })
+        })
+    }
+}
+
+/// Size of the photo, and the newest modification time of the photo and its XMP sidecar.
+/// The catalogue stores this time, so an edit to either file (by Lumio or another app)
+/// is noticed, and a photo Lumio just edited isn't indexed again for nothing.
+pub fn stat_with_sidecar(p: &Path) -> Option<(i64, i64)> {
+    let (size, mtime) = stat(p)?;
+    Some((size, mtime.max(sidecar_mtime(find_sidecar(p).as_deref()))))
+}
+
+fn sidecar_mtime(side: Option<&Path>) -> i64 {
+    side.and_then(stat).map(|(_, sm)| sm).unwrap_or(0)
+}
+
 fn stat(p: &Path) -> Option<(i64, i64)> {
     let m = std::fs::metadata(p).ok()?;
     if !m.is_file() {
         return None;
     }
-    let mtime = m
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+    let mtime =
+        m.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
     Some((m.len() as i64, mtime))
 }
 
@@ -208,7 +296,10 @@ pub fn run_worker(state: Arc<AppState>, rx: Receiver<Job>) {
         };
         let mins = [1u64, 2, 5, 10, 15][(n - 1).min(4)];
         log::warn!("{off}; indexing paused, retrying in {mins} min");
-        let msg = format!("{} isn't reachable. Lumio will carry on when it's back (next try in {mins} min).", off.root.display());
+        let msg = format!(
+            "{} isn't reachable. Lumio will carry on when it's back (next try in {mins} min).",
+            off.root.display()
+        );
         emit_progress(&state, false, 0, 0, &msg);
         *notice.lock() = msg;
         if pending.lock().insert(off.root_id) {
@@ -319,10 +410,7 @@ fn dedup(v: Vec<PathBuf>) -> Vec<PathBuf> {
 }
 
 fn emit_progress(state: &AppState, active: bool, done: usize, total: usize, msg: &str) {
-    let _ = state.app.emit(
-        "index-progress",
-        Progress { active, done, total, message: msg.to_string() },
-    );
+    let _ = state.app.emit("index-progress", Progress { active, done, total, message: msg.to_string() });
 }
 
 fn handle_removed(state: &AppState, conn: &Connection, paths: &[PathBuf]) -> Result<()> {
@@ -373,10 +461,7 @@ fn scan_root(state: &AppState, conn: &Connection, root_id: i64) -> Result<()> {
         return Ok(()); // offline: keep catalogue as is
     }
     scan_dir(state, conn, &p, root_id)?;
-    conn.execute(
-        "UPDATE roots SET last_scan = ?1 WHERE id = ?2",
-        params![chrono::Utc::now().timestamp_millis(), root_id],
-    )?;
+    conn.execute("UPDATE roots SET last_scan = ?1 WHERE id = ?2", params![crate::db::now_ms(), root_id])?;
     Ok(())
 }
 
@@ -434,7 +519,11 @@ fn scan_dir(state: &AppState, conn: &Connection, dir: &Path, _root_id: i64) -> R
     };
     if !gone.is_empty() {
         if walk_errors > 0 {
-            log::warn!("{} photos below {} not found, but some folders could not be read; keeping them", gone.len(), dir.display());
+            log::warn!(
+                "{} photos below {} not found, but some folders could not be read; keeping them",
+                gone.len(),
+                dir.display()
+            );
         } else {
             delete_ids(state, conn, &gone)?;
         }
@@ -449,17 +538,19 @@ struct Pending {
     size: i64,
     mtime: i64,
     existing: Option<i64>,
+    sidecar: Option<PathBuf>,
 }
+
+/// How often a long scan tells the window that the library changed.
+const TELL_EVERY: Duration = Duration::from_secs(3);
 
 /// Index the given files (skipping ones whose size and mtime are unchanged unless `force`).
 pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, force: bool) -> Result<()> {
-    let roots: Vec<(i64, PathBuf)> = db::list_roots(conn)?
-        .into_iter()
-        .map(|r| (r.id, PathBuf::from(r.path)))
-        .collect();
+    let roots: Vec<(i64, PathBuf)> = db::roots(conn)?.into_iter().map(|r| (r.id, PathBuf::from(r.path))).collect();
     // Files waiting to be moved are already in the catalogue at their new place.
     let moving = crate::pending::sources(conn)?;
     let previews = crate::offline::RootPolicy::load(conn)?;
+    let mut names = DirNames::default();
     let mut todo: Vec<Pending> = vec![];
     for p in paths {
         let ext = ext_of(&p);
@@ -474,25 +565,25 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
         else {
             continue;
         };
-        let Some((size, mtime)) = stat(&p) else { continue };
+        // The time covers the sidecar too, so a changed sidecar makes it differ.
+        let Some((size, own_mtime)) = stat(&p) else { continue };
+        let sidecar = names.sidecar(&p);
+        let mtime = own_mtime.max(sidecar_mtime(sidecar.as_deref()));
         let ps = p.to_string_lossy().to_string();
         let existing = db::photo_by_path(conn, &ps)?;
         if let Some((_, s, m)) = existing {
             if !force && s == size && m == mtime {
-                // Also refresh when the sidecar is newer than our last index.
-                let side_newer = find_sidecar(&p)
-                    .and_then(|sc| stat(&sc))
-                    .map(|(_, sm)| sm > m)
-                    .unwrap_or(false);
                 let (thumb, tries): (i64, i64) = conn
-                    .query_row("SELECT thumb, thumb_tries FROM photos WHERE path = ?1", [&ps], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .query_row("SELECT thumb, thumb_tries FROM photos WHERE path = ?1", [&ps], |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })
                     .unwrap_or((1, 0));
-                if !side_newer && (thumb != 0 || tries >= MAX_THUMB_TRIES) {
+                if thumb != 0 || tries >= MAX_THUMB_TRIES {
                     continue;
                 }
             }
         }
-        todo.push(Pending { path: p, ext, root_id, size, mtime, existing: existing.map(|e| e.0) });
+        todo.push(Pending { path: p, ext, root_id, size, mtime, existing: existing.map(|e| e.0), sidecar });
     }
     let total = todo.len();
     if total == 0 {
@@ -501,18 +592,20 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
     let mut done = 0;
     let mut failed = 0usize;
     let root_path = |id: i64| roots.iter().find(|(r, _)| *r == id).map(|(_, p)| p.clone()).unwrap_or_default();
+    let mut last_told = std::time::Instant::now();
     for chunk in todo.chunks(24) {
-        // Before each batch, make sure the drive is still there.
-        for c in chunk {
-            let rp = root_path(c.root_id);
+        // Before each batch, make sure the drive is still there (once per library folder).
+        let batch_roots: HashSet<i64> = chunk.iter().map(|c| c.root_id).collect();
+        for id in batch_roots {
+            let rp = root_path(id);
             if !reachable(&rp) {
-                return Err(Offline { root_id: c.root_id, root: rp }.into());
+                return Err(Offline { root_id: id, root: rp }.into());
             }
         }
         emit_progress(state, true, done, total, &format!("Indexing {} of {}", done + 1, total));
         // 1. Metadata (image files plus any XMP sidecars), in one ExifTool call.
         let mut files: Vec<PathBuf> = chunk.iter().map(|c| c.path.clone()).collect();
-        let sidecars: Vec<Option<PathBuf>> = chunk.iter().map(|c| find_sidecar(&c.path)).collect();
+        let sidecars: Vec<Option<PathBuf>> = chunk.iter().map(|c| c.sidecar.clone()).collect();
         files.extend(sidecars.iter().flatten().cloned());
         let mut by_path: HashMap<String, Meta> = HashMap::new();
         if state.et.available() {
@@ -520,7 +613,10 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
                 Ok(vals) => {
                     for v in vals {
                         if let Some(err) = v.get("Error").and_then(|s| s.as_str()) {
-                            log::warn!("exiftool: {}: {err}", v.get("SourceFile").and_then(|s| s.as_str()).unwrap_or("?"));
+                            log::warn!(
+                                "exiftool: {}: {err}",
+                                v.get("SourceFile").and_then(|s| s.as_str()).unwrap_or("?")
+                            );
                             continue;
                         }
                         if let Some(src) = v.get("SourceFile").and_then(|s| s.as_str()) {
@@ -551,7 +647,7 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
             }
         }
         // 2. Upsert rows.
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = crate::db::now_ms();
         let mut ids: Vec<(i64, PathBuf, String, Option<i64>, i64)> = vec![];
         {
             let tx = conn.unchecked_transaction()?;
@@ -564,7 +660,9 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
                 if got.is_none() {
                     if let Some(id) = c.existing {
                         // Keep what we already know; just try the thumbnail again.
-                        let o: Option<i64> = tx.query_row("SELECT orientation FROM photos WHERE id = ?1", [id], |r| r.get(0)).unwrap_or(None);
+                        let o: Option<i64> = tx
+                            .query_row("SELECT orientation FROM photos WHERE id = ?1", [id], |r| r.get(0))
+                            .unwrap_or(None);
                         ids.push((id, c.path.clone(), c.ext.clone(), o, c.root_id));
                         continue;
                     }
@@ -613,7 +711,11 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
                     Ok(made) => (*id, Ok(made), size),
                     Err(e) => {
                         let ok = readable(path);
-                        log::warn!("thumbnail failed for {}: {e:#}{}", path.display(), if ok { "" } else { " (file not readable)" });
+                        log::warn!(
+                            "thumbnail failed for {}: {e:#}{}",
+                            path.display(),
+                            if ok { "" } else { " (file not readable)" }
+                        );
                         (*id, Err(ok), size)
                     }
                 }
@@ -660,7 +762,12 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
             }
         }
         done += chunk.len();
-        let _ = state.app.emit("library-changed", ());
+        // The window reloads what it shows on this, so during a long scan it is told every
+        // few seconds rather than after every batch (and always after the last one).
+        if done == total || last_told.elapsed() >= TELL_EVERY {
+            last_told = std::time::Instant::now();
+            let _ = state.app.emit("library-changed", ());
+        }
     }
     log::info!("indexed {total} files, {failed} without a thumbnail");
     emit_progress(state, true, total, total, "Done");
@@ -681,10 +788,37 @@ mod sidecar_tests {
     use super::*;
 
     fn dir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("lumio-sidecar-{name}-{}", std::process::id()));
+        tempfile::Builder::new().prefix(&format!("lumio-sidecar-{name}-")).tempdir().unwrap().keep()
+    }
+
+    #[test]
+    fn the_folder_listing_finds_the_same_sidecars() {
+        let d = dir("listing");
+        for f in [
+            "IMG_1.CR2",
+            "IMG_1.JPG",
+            "IMG_1.xmp",
+            "A.jpg",
+            "A.xmp",
+            "B.heic",
+            "B.mov",
+            "B.mov.xmp",
+            "C.JPG",
+            "C.JPG.xmp",
+            "D.dng",
+            "D.XMP",
+            "2024.07 Iceland.jpg",
+        ] {
+            std::fs::write(d.join(f), b"x").unwrap();
+        }
+        let mut names = DirNames::default();
+        for f in ["IMG_1.CR2", "IMG_1.JPG", "A.jpg", "B.heic", "B.mov", "C.JPG", "D.dng", "2024.07 Iceland.jpg"] {
+            let p = d.join(f);
+            let want = find_sidecar(&p).map(|s| s.to_string_lossy().to_lowercase());
+            let got = names.sidecar(&p).map(|s| s.to_string_lossy().to_lowercase());
+            assert_eq!(got, want, "{f}");
+        }
         let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
     }
 
     #[test]
