@@ -61,7 +61,8 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.tag || github.ref }}
+          # The commit this run was started on. The tag may not exist yet: tauri-action
+          # creates it with the draft release.
 
       - name: Linux build dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -247,7 +248,6 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.tag || github.ref }}
       - name: Add checksums and fixed-name copies
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
