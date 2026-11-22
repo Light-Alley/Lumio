@@ -203,8 +203,7 @@
       onmousedown={down}
       ondblclick={(e) => toggleZoom(e)}
       oncontextmenu={(e) => showMenu(e, photoMenu(p))}
-      role="img"
-      aria-label={p.filename}
+      role="presentation"
       class:grab={zoom > 1}
     >
       {#if video && !offline}

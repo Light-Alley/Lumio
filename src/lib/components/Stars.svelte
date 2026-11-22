@@ -4,7 +4,7 @@
   let hover = $state(0);
 </script>
 
-<div class="stars" class:interactive={!!onchange} class:mixed role="radiogroup" aria-label="Rating" onmouseleave={() => (hover = 0)}>
+<div class="stars" class:interactive={!!onchange} class:mixed role="group" aria-label="Rating" onmouseleave={() => (hover = 0)}>
   {#each [1, 2, 3, 4, 5] as n}
     <button
       type="button"
