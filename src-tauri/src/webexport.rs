@@ -106,6 +106,9 @@ fn free_name(dir: &Path, stem: &str) -> PathBuf {
 
 pub fn export(state: &AppState, ids: &[i64], folder: &Path, opts: &ExportOptions) -> Result<ExportReport> {
     CANCEL.store(false, Ordering::Relaxed);
+    if !folder.is_absolute() || folder.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(anyhow!("That folder is not usable."));
+    }
     if !folder.is_dir() {
         return Err(anyhow!("That folder is not available."));
     }

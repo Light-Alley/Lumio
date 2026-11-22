@@ -86,10 +86,79 @@ pub struct OpReport {
 
 // ------------------------------------------------------------------ safe file primitives
 
-/// Do two paths name the same place? Compared without case, because the drives most
-/// photos live on (macOS, Windows, exFAT cards) ignore case.
+/// Do two paths name the same place? Names that differ only in case are the same place
+/// on drives that ignore case (macOS, Windows, exFAT cards) and different files on the
+/// case-sensitive drives Linux usually has. When both exist the drive itself answers;
+/// otherwise the usual behaviour of the system decides.
 pub(crate) fn same_place(a: &Path, b: &Path) -> bool {
-    a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    if a == b {
+        return true;
+    }
+    if a.to_string_lossy().to_lowercase() != b.to_string_lossy().to_lowercase() {
+        return false;
+    }
+    same_file(a, b).unwrap_or(cfg!(any(target_os = "macos", target_os = "windows")))
+}
+
+/// `Some(true)` when both paths exist and are the same file or folder.
+fn same_file(a: &Path, b: &Path) -> Option<bool> {
+    let (ma, mb) = (std::fs::metadata(a).ok()?, std::fs::metadata(b).ok()?);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(ma.dev() == mb.dev() && ma.ino() == mb.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (ma, mb);
+        Some(std::fs::canonicalize(a).ok()? == std::fs::canonicalize(b).ok()?)
+    }
+}
+
+/// Is `path` really inside `root` once links are followed? A link inside a library folder
+/// that points elsewhere must not let folder commands reach outside the library. For a
+/// path that doesn't exist yet the nearest existing parent is checked. When the root
+/// itself isn't reachable (drive unplugged) there is nothing a link could lead to.
+pub fn inside_root(root: &Path, path: &Path) -> Result<()> {
+    let Ok(croot) = std::fs::canonicalize(root) else { return Ok(()) };
+    let mut probe = path.to_path_buf();
+    let mut rest: Vec<std::ffi::OsString> = vec![];
+    let real = loop {
+        match std::fs::canonicalize(&probe) {
+            Ok(c) => break rest.iter().rev().fold(c, |acc, n| acc.join(n)),
+            Err(_) => {
+                let (Some(name), Some(parent)) = (probe.file_name().map(|n| n.to_os_string()), probe.parent().map(Path::to_path_buf)) else {
+                    bail!("\"{}\" is not a folder in your library.", path.display());
+                };
+                rest.push(name);
+                probe = parent;
+            }
+        }
+    };
+    if !real.starts_with(&croot) {
+        bail!("\"{}\" leads outside your library (through a link), so Lumio won't change it.", path.display());
+    }
+    Ok(())
+}
+
+/// Refuses a path that is itself a symbolic link (deleting, renaming or moving one would
+/// act on whatever it points at, or surprise the person).
+pub fn not_a_link(path: &Path) -> Result<()> {
+    if std::fs::symlink_metadata(path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+        bail!("\"{}\" is a link to another place, so Lumio won't change it.", path.display());
+    }
+    Ok(())
+}
+
+/// Did `rename` fail only because source and target are on different drives?
+fn crosses_devices(e: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    let code = 18; // EXDEV
+    #[cfg(windows)]
+    let code = 17; // ERROR_NOT_SAME_DEVICE
+    #[cfg(not(any(unix, windows)))]
+    let code = -1;
+    e.raw_os_error() == Some(code)
 }
 
 fn numbered(name: &str, i: u32) -> String {
@@ -248,15 +317,21 @@ pub fn move_file(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Copies a folder tree. Only folders and ordinary files are copied: links (which could
+/// pull in files from outside the library) and special files (pipes, devices, which could
+/// hang the copy) are left out.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst)?;
     for e in std::fs::read_dir(src)? {
         let e = e?;
         let t = dst.join(e.file_name());
-        if e.file_type()?.is_dir() {
+        let ft = e.file_type()?;
+        if ft.is_dir() {
             copy_dir_recursive(&e.path(), &t)?;
-        } else {
+        } else if ft.is_file() {
             copy_verified(&e.path(), &t)?;
+        } else {
+            log::info!("not copying {} (a link or special file)", e.path().display());
         }
     }
     Ok(())
@@ -540,7 +615,12 @@ pub fn move_folder<H: Host + ?Sized>(h: &H, src: &Path, dest_parent: &Path, copy
             let _ = std::fs::remove_dir_all(&dst); // only what this copy made: `dst` was a new name
             return Err(e);
         }
-    } else if std::fs::rename(src, &dst).is_err() {
+    } else if let Err(err) = std::fs::rename(src, &dst) {
+        // Only a move to another drive needs copy-then-remove. Any other failure (no
+        // permission, file in use…) is reported, never "fixed" by deleting the original.
+        if !crosses_devices(&err) {
+            return Err(anyhow::Error::from(err).context(format!("moving {}", src.display())));
+        }
         if let Err(e) = copy_dir_recursive(src, &dst) {
             let _ = std::fs::remove_dir_all(&dst);
             return Err(e.context("copying the folder (the original is untouched)"));
@@ -715,12 +795,8 @@ pub(crate) mod testing {
     pub struct Tmp(pub PathBuf);
     impl Tmp {
         pub fn new(tag: &str) -> Tmp {
-            use std::sync::atomic::{AtomicU32, Ordering};
-            static N: AtomicU32 = AtomicU32::new(0);
-            let p = std::env::temp_dir().join(format!("lumio-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-            let _ = std::fs::remove_dir_all(&p);
-            std::fs::create_dir_all(&p).unwrap();
-            Tmp(p)
+            // A fresh folder with an unguessable name (removed by Drop below).
+            Tmp(tempfile::Builder::new().prefix(&format!("lumio-{tag}-")).tempdir().unwrap().keep())
         }
         /// `t.join("a/b.jpg")` with the platform's separator, so paths compare equal to
         /// the ones Lumio builds (on Windows "a\\b.jpg", not "a/b.jpg").
@@ -801,6 +877,84 @@ pub(crate) mod testing {
 mod tests {
     use super::testing::*;
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn links_out_of_a_root_are_refused() {
+        let lib = Tmp::new("lib");
+        let outside = Tmp::new("outside");
+        std::fs::write(outside.join("secret.txt"), "x").unwrap();
+        std::fs::create_dir_all(lib.join("Trip")).unwrap();
+        std::os::unix::fs::symlink(&outside.0, lib.join("escape_link")).unwrap();
+        assert!(inside_root(&lib.0, &lib.join("Trip")).is_ok());
+        assert!(inside_root(&lib.0, &lib.join("Trip/New folder")).is_ok(), "a folder about to be created");
+        assert!(inside_root(&lib.0, &lib.join("escape_link")).is_err());
+        assert!(inside_root(&lib.0, &lib.join("escape_link/sub/new")).is_err());
+        assert!(not_a_link(&lib.join("escape_link")).is_err());
+        assert!(not_a_link(&lib.join("Trip")).is_ok());
+        // Unplugged drive: nothing to follow.
+        assert!(inside_root(Path::new("/nonexistent-lumio-root"), Path::new("/nonexistent-lumio-root/a")).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copying_a_folder_skips_links_and_special_files() {
+        let t = Tmp::new("copylinks");
+        let outside = Tmp::new("copyout");
+        std::fs::write(outside.join("private.txt"), "secret").unwrap();
+        std::fs::create_dir_all(t.join("src/sub")).unwrap();
+        std::fs::write(t.join("src/a.jpg"), "a").unwrap();
+        std::fs::write(t.join("src/sub/b.jpg"), "b").unwrap();
+        std::os::unix::fs::symlink(outside.join("private.txt"), t.join("src/link.txt")).unwrap();
+        std::os::unix::fs::symlink(&outside.0, t.join("src/dirlink")).unwrap();
+        let fifo = t.join("src/pipe");
+        assert!(std::process::Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+        copy_dir_recursive(&t.join("src"), &t.join("dst")).unwrap();
+        assert_eq!(names(&t.join("dst")), vec!["a.jpg", "sub"]);
+        assert_eq!(names(&t.join("dst/sub")), vec!["b.jpg"]);
+    }
+
+    #[test]
+    fn same_place_follows_the_drive() {
+        let t = Tmp::new("case");
+        std::fs::write(t.join("IMG_1.jpg"), "a").unwrap();
+        assert!(same_place(&t.join("IMG_1.jpg"), &t.join("IMG_1.jpg")));
+        assert!(!same_place(&t.join("IMG_1.jpg"), &t.join("IMG_2.jpg")));
+        let upper = t.join("IMG_1.JPG");
+        if upper.exists() {
+            // This drive ignores case: both names are the one file.
+            assert!(same_place(&t.join("IMG_1.jpg"), &upper));
+        } else {
+            std::fs::write(&upper, "b").unwrap();
+            // Case-sensitive drive: two different files.
+            assert!(!same_place(&t.join("IMG_1.jpg"), &upper));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_folder_move_never_deletes_the_original() {
+        use std::os::unix::fs::PermissionsExt;
+        let h = host();
+        let t = Tmp::new("mvfail");
+        let r = h.root(&t.0);
+        h.file(r, &t.join("A/x.jpg"), None);
+        std::fs::create_dir_all(t.join("B")).unwrap();
+        // A destination we may not write into: rename fails (not a cross-device error).
+        std::fs::set_permissions(t.join("B"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let res = move_folder(&h, &t.join("A"), &t.join("B"), false);
+        std::fs::set_permissions(t.join("B"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        if nix_is_root() {
+            return; // root ignores permissions, so the move just works
+        }
+        assert!(res.is_err());
+        assert!(t.join("A/x.jpg").exists());
+    }
+
+    #[cfg(unix)]
+    fn nix_is_root() -> bool {
+        std::process::Command::new("id").arg("-u").output().map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0").unwrap_or(false)
+    }
 
     #[test]
     fn move_file_never_replaces_an_existing_file() {

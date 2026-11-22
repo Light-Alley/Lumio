@@ -126,6 +126,8 @@ pub struct FolderNode {
 pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
     let base = path.trim_end_matches(['/', '\\']).to_string();
     let base = if base.is_empty() { path.clone() } else { base };
+    // Only folders of the library are listed, never any other folder on the computer.
+    in_library(&state, Path::new(&base), false).map_err(e)?;
     let prefix = format!("{base}{MAIN_SEPARATOR}");
     // Photo counts per immediate child, from the catalogue.
     let mut counts: HashMap<String, i64> = HashMap::new();
@@ -192,15 +194,41 @@ pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
 /// Folder commands only touch folders inside the library. `strictly` also refuses a
 /// library root itself (roots are removed from the library, never renamed, moved or
 /// trashed from Lumio). Paths with ".." are refused so they can't step outside a root.
+/// Links are followed: a link inside a library folder that points elsewhere is refused,
+/// and with `strictly` (the folder itself is changed) a link is never acted on.
 fn in_library(st: &AppState, path: &Path, strictly: bool) -> anyhow::Result<()> {
-    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-        anyhow::bail!("\"{}\" is not a folder in your library.", path.display());
-    }
-    match db::root_for_path(&st.conn.lock(), path)? {
-        Some((_, root)) if !(strictly && root == path) => Ok(()),
+    plain_path(path)?;
+    let root = db::root_for_path(&st.conn.lock(), path)?;
+    match root {
+        Some((_, root)) if !(strictly && root == path) => {
+            fileops::inside_root(&root, path)?;
+            if strictly {
+                fileops::not_a_link(path)?;
+            }
+            Ok(())
+        }
         Some(_) => anyhow::bail!("A library folder can't be changed here. Use Remove from library instead."),
         None => anyhow::bail!("\"{}\" is not a folder in your library.", path.display()),
     }
+}
+
+/// An absolute path without ".." (which could step out of wherever it seems to be).
+fn plain_path(path: &Path) -> anyhow::Result<()> {
+    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        anyhow::bail!("\"{}\" is not a usable folder.", path.display());
+    }
+    Ok(())
+}
+
+/// A destination outside the library is fine when the person picked it (Move to…, Export
+/// to…), but it must be a plain absolute folder, and one inside the library must really
+/// be inside it.
+fn usable_destination(st: &AppState, dest: &Path) -> anyhow::Result<()> {
+    plain_path(dest)?;
+    if let Some((_, root)) = db::root_for_path(&st.conn.lock(), dest)? {
+        fileops::inside_root(&root, dest)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -293,6 +321,7 @@ pub fn get_photos(state: S, ids: Vec<i64>) -> R<Vec<Photo>> {
 pub async fn move_photos(state: S<'_>, ids: Vec<i64>, dest: String, copy: bool) -> R<OpReport> {
     let st = state.inner().clone();
     blocking(move || {
+        usable_destination(&st, Path::new(&dest))?;
         let mut rep = fileops::move_photos(&*st, &ids, Path::new(&dest), copy)?;
         history::record_move(&st.conn.lock(), &mut rep, copy, Path::new(&dest))?;
         Ok(rep)
@@ -861,7 +890,11 @@ pub async fn geocode(query: String) -> R<Vec<Place>> {
 pub fn reveal(state: S, id: Option<i64>, path: Option<String>) -> R<()> {
     let p = match (id, path) {
         (Some(id), _) => db::get_photo(&state.conn.lock(), id).map_err(e)?.ok_or("photo not found")?.path,
-        (None, Some(p)) => p,
+        (None, Some(p)) => {
+            // A folder from the folder list: only ones in the library.
+            in_library(&state, Path::new(&p), false).map_err(e)?;
+            p
+        }
         _ => return Err("nothing to show".into()),
     };
     if !Path::new(&p).exists() {
