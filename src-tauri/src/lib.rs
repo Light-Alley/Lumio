@@ -8,6 +8,7 @@ mod db;
 mod duplicates;
 mod exiftool;
 mod fileops;
+mod geocode;
 mod histogram;
 mod history;
 mod indexer;
@@ -407,7 +408,7 @@ pub fn run() {
             commands::ai_set_key,
             commands::ai_chat,
             commands::ai_reset,
-            commands::geocode,
+            geocode::geocode,
             commands::reveal,
             commands::open_default,
             commands::share_options,

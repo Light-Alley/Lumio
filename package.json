@@ -13,7 +13,10 @@
     "tauri": "tauri",
     "fetch-exiftool": "node scripts/fetch-exiftool.mjs",
     "app": "tauri dev",
-    "dist": "tauri build"
+    "dist": "tauri build",
+    "test": "vitest run",
+    "verify:rules": "node scripts/verify-repo-rules.mjs",
+    "verify": "npm run verify:rules && npm run check && npm test && npm run build && cd src-tauri && cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked"
   },
   "license": "MIT",
   "dependencies": {
@@ -34,6 +37,7 @@
     "svelte": "^5.59.1",
     "svelte-check": "^4.6.0",
     "typescript": "~6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "vitest": "^5.1.1"
   }
 }

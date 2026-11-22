@@ -17,6 +17,12 @@ export default defineConfig(() => ({
     }),
   ],
 
+  // Unit tests for the plain TypeScript helpers in src/lib (`npm test`).
+  test: {
+    include: ["src/**/*.test.ts"],
+    environment: "node",
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

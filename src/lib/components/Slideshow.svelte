@@ -157,7 +157,7 @@
           <div class="missing"><CloudOff size={28} /> {l.p.filename}</div>
         {/if}
       {:else if isVideo(l.p)}
-        <!-- svelte-ignore a11y_media_has_caption -->
+        <!-- Home videos have no caption files; the empty track marks that. -->
         <video
           src={photoUrl(l.p)}
           poster={l.p.thumb ? thumbUrl(l.p) : undefined}
@@ -166,7 +166,7 @@
           onloadeddata={() => loaded(l)}
           onerror={() => { loaded(l); setTimeout(() => current?.key === l.key && go(1), 1500); }}
           onended={() => { if (playing && current?.key === l.key) go(1); }}
-        ></video>
+        ><track kind="captions" /></video>
       {:else}
         <img
           src={photoUrl(l.p)}

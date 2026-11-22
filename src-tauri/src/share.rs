@@ -727,7 +727,7 @@ mod tests {
 
     #[test]
     fn unique_names() {
-        let d = std::env::temp_dir().join(format!("lumio-share-test-{}", std::process::id()));
+        let d = tempfile::Builder::new().prefix("lumio-share-test-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("a.jpg"), b"x").unwrap();
         assert_eq!(unique(&d, "a", "jpg"), d.join("a (2).jpg"));

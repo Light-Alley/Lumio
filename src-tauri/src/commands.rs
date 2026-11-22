@@ -893,44 +893,6 @@ pub fn ai_reset(state: S) {
     ai::reset(&state)
 }
 
-// ------------------------------------------------------------ geocoding (OpenStreetMap Nominatim)
-
-#[derive(Serialize)]
-pub struct Place {
-    pub name: String,
-    pub lat: f64,
-    pub lon: f64,
-}
-
-#[tauri::command]
-pub async fn geocode(query: String) -> R<Vec<Place>> {
-    let client = reqwest::Client::builder()
-        .user_agent(concat!("Lumio/", env!("CARGO_PKG_VERSION"), " (open-source photo manager)"))
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(e)?;
-    let v: serde_json::Value = client
-        .get("https://nominatim.openstreetmap.org/search")
-        .query(&[("q", query.as_str()), ("format", "jsonv2"), ("limit", "6")])
-        .send()
-        .await
-        .map_err(e)?
-        .json()
-        .await
-        .map_err(e)?;
-    Ok(v.as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|p| {
-            Some(Place {
-                name: p["display_name"].as_str()?.to_string(),
-                lat: p["lat"].as_str()?.parse().ok()?,
-                lon: p["lon"].as_str()?.parse().ok()?,
-            })
-        })
-        .collect())
-}
-
 // ------------------------------------------------------------ system integration
 
 #[tauri::command]

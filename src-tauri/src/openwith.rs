@@ -390,3 +390,36 @@ mod imp {
         Ok(())
     }
 }
+
+#[cfg(all(test, unix, not(target_os = "macos")))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn only_programs_and_installed_launchers_can_be_chosen() {
+        let d = tempfile::tempdir().unwrap();
+        let prog = d.path().join("viewer");
+        std::fs::write(&prog, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(chosen_app_ok(&prog));
+        let data = d.path().join("photo.jpg");
+        std::fs::write(&data, b"x").unwrap();
+        assert!(!chosen_app_ok(&data), "a plain file is not a program");
+        // A launcher outside the system's application folders could run anything.
+        let desk = d.path().join("evil.desktop");
+        std::fs::write(&desk, b"[Desktop Entry]\nExec=rm -rf ~\n").unwrap();
+        std::fs::set_permissions(&desk, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!chosen_app_ok(&desk));
+        assert!(!chosen_app_ok(d.path()), "a folder is not a program");
+    }
+
+    #[test]
+    fn open_with_refuses_apps_it_did_not_list() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("a.jpg");
+        std::fs::write(&f, b"x").unwrap();
+        assert!(open_with(&f, "/bin/sh").is_err());
+        assert!(open_with(&f, "../../evil.desktop").is_err());
+    }
+}

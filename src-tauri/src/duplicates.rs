@@ -718,7 +718,7 @@ mod tests {
 
     #[test]
     fn exact_hashes() {
-        let dir = std::env::temp_dir().join(format!("lumio-dupes-{}", std::process::id()));
+        let dir = tempfile::Builder::new().prefix("lumio-dupes-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let big: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
         let mut changed_middle = big.clone();
@@ -771,7 +771,7 @@ mod tests {
 
     #[test]
     fn same_file_through_two_paths_is_not_a_copy() {
-        let dir = std::env::temp_dir().join(format!("lumio-links-{}", std::process::id()));
+        let dir = tempfile::Builder::new().prefix("lumio-links-").tempdir().unwrap().keep();
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         std::fs::write(dir.join("real.jpg"), vec![7u8; 1000]).unwrap();
         std::fs::write(dir.join("copy.jpg"), vec![7u8; 1000]).unwrap();
@@ -783,7 +783,7 @@ mod tests {
 
     #[test]
     fn exact_search_end_to_end() {
-        let dir = std::env::temp_dir().join(format!("lumio-exact-{}", std::process::id()));
+        let dir = tempfile::Builder::new().prefix("lumio-exact-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let data: Vec<u8> = (0..200_000u32).map(|i| (i % 253) as u8).collect();
         let mut middle = data.clone();

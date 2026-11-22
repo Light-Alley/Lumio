@@ -336,15 +336,7 @@ mod tests {
         }
     }
     fn tempdir() -> Tmp {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static N: AtomicU32 = AtomicU32::new(0);
-        let p = std::env::temp_dir().join(format!(
-            "lumio-pending-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&p).unwrap();
-        Tmp(p)
+        Tmp(tempfile::Builder::new().prefix("lumio-pending-").tempdir().unwrap().keep())
     }
 
     fn setup(dir: &Path) -> Connection {

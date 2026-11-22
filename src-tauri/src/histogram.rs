@@ -82,7 +82,7 @@ mod tests {
 
     #[test]
     fn reads_a_jpeg() {
-        let dir = std::env::temp_dir().join(format!("lumio-hist-{}", std::process::id()));
+        let dir = tempfile::Builder::new().prefix("lumio-hist-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("t.jpg");
         image::RgbImage::from_pixel(8, 8, image::Rgb([255, 255, 255])).save(&p).unwrap();

@@ -2,24 +2,13 @@
   import { Download, RefreshCw } from "@lucide/svelte";
   import { updates, installUpdate, openReleasePage, skipThisVersion } from "../updates.svelte";
   import { formatBytes } from "../api";
+  import { plainNotes as plain } from "../notes";
 
   let box: HTMLDivElement | undefined = $state();
   $effect(() => { if (updates.open) box?.focus(); });
 
   function close() {
     if (!updates.installing) updates.open = false;
-  }
-  /** Release notes are Markdown; show them as plain text without the # and ** marks. */
-  function plain(md: string): string {
-    return md
-      .replace(/\r/g, "")
-      .replace(/^#{1,6}\s*/gm, "")
-      .replace(/^\s*[-*]\s+/gm, "• ")
-      .replace(/\*\*(.+?)\*\*/g, "$1")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/`([^`]+)`/g, "$1")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
   }
   const notes = $derived(updates.info ? plain(updates.info.notes) : "");
   const pct = $derived(updates.total ? Math.min(100, Math.round((updates.downloaded / updates.total) * 100)) : null);

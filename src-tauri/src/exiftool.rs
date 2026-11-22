@@ -477,7 +477,7 @@ fn locate(resource_dir: Option<PathBuf>) -> Option<(PathBuf, Vec<String>)> {
 #[cfg(test)]
 pub fn test_tool() -> Option<ExifTool> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
-    let et = ExifTool::new(Some(dir)).with_scratch(std::env::temp_dir());
+    let et = ExifTool::new(Some(dir)).with_scratch(tempfile::tempdir().unwrap().keep());
     if !et.available() {
         assert!(
             std::env::var_os("LUMIO_REQUIRE_EXIFTOOL").is_none(),

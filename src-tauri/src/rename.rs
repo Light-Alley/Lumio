@@ -635,7 +635,7 @@ mod tests {
     // ---- renaming real files -------------------------------------------------------
 
     fn setup(files: &[&str]) -> (PathBuf, Mutex<Connection>, Vec<i64>) {
-        let dir = std::env::temp_dir().join(format!("lumio-rename-test-{}-{}", std::process::id(), rand_suffix()));
+        let dir = tempfile::Builder::new().prefix("lumio-rename-test-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let conn = Connection::open_in_memory().unwrap();
         db::migrate(&conn).unwrap();
@@ -656,10 +656,6 @@ mod tests {
             ids.push(conn.last_insert_rowid());
         }
         (dir, Mutex::new(conn), ids)
-    }
-
-    fn rand_suffix() -> u128 {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
     }
 
     fn names(dir: &Path) -> Vec<String> {

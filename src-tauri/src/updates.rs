@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn only_lumios_own_pages_are_opened() {
         assert!(is_project_page("https://github.com/Light-Alley/Lumio/releases/tag/v2.0.0"));
-        assert!(is_project_page("https://github.com/LIght-Alley/Lumio/issues"));
+        assert!(is_project_page("https://github.com/LIGHT-ALLEY/Lumio/issues"));
         assert!(is_project_page("https://github.com/light-alley/lumio"));
         assert!(!is_project_page("https://github.com/Light-Alley/Lumio-fake/releases"));
         assert!(!is_project_page("https://github.com.evil.example/Light-Alley/Lumio"));
