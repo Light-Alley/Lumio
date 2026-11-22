@@ -30,7 +30,7 @@ export interface PlannedName { id: number; old: string; new: string; problem: st
 /** `undo` holds [id, previous name] for every photo that was renamed. */
 export interface RenameReport { done: number; failed: [string, string][]; undo: [number, string][]; history?: number | null }
 /** `history` is the undo history entry for the change, when something changed. */
-export interface OpReport { done: number; failed: [string, string][]; outside_library: boolean; queued?: number; history?: number | null }
+export interface OpReport { done: number; failed: [string, string][]; failed_ids?: number[]; outside_library: boolean; queued?: number; history?: number | null }
 /** One change in the undo history. `at` is in milliseconds. */
 export interface HistoryEntry { id: number; at: number; label: string; kind: string; undoable: boolean; undone: boolean; note: string | null }
 export interface UndoReport { steps: number; done: number; failed: [string, string][]; label: string | null }
@@ -136,7 +136,7 @@ export interface UpdateInfo {
   current: string; latest: string; newer: boolean; name: string; notes: string;
   url: string; published: string; can_install: boolean;
 }
-export const REPO_URL = "https://github.com/LIght-Alley/Lumio";
+export const REPO_URL = "https://github.com/Light-Alley/Lumio";
 
 export const VIDEO_EXTS = ["mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv"];
 export const isVideo = (p: { ext: string } | null | undefined) => !!p && VIDEO_EXTS.includes(p.ext.toLowerCase());

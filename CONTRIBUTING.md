@@ -4,7 +4,7 @@ Thank you for wanting to help. Lumio is a small project looked after in spare ti
 
 ## Ways to help
 
-- **Report a bug** or **suggest an idea**: open an [issue](https://github.com/LIght-Alley/Lumio/issues/new/choose). The templates ask for the things we always need (Lumio version, system, what drive the photos are on).
+- **Report a bug** or **suggest an idea**: open an [issue](https://github.com/Light-Alley/Lumio/issues/new/choose). The templates ask for the things we always need (Lumio version, system, what drive the photos are on).
 - **Test a release** on a system or camera we don't have, and say how it went.
 - **Improve the docs**: the [user guide](docs/user-guide.md) and README are plain Markdown; small fixes can be made straight in GitHub.
 - **Write code**: see below.
@@ -27,7 +27,7 @@ Lumio aims to stay a **light, fast, safe photo browser**. Please keep these in m
 You need [Rust](https://rustup.rs) (stable), [Node.js](https://nodejs.org) 20 or later and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your system.
 
 ```bash
-git clone https://github.com/LIght-Alley/Lumio.git
+git clone https://github.com/Light-Alley/Lumio.git
 cd Lumio
 npm install
 npm run fetch-exiftool   # downloads ExifTool into src-tauri/resources/exiftool

@@ -53,7 +53,7 @@ Build `1.0.0-rc.1` with the workflow and test on real machines, with a **copy** 
 - [ ] Check the git history has no secrets or private photos before making the repository public (GitHub → Settings → Code security → secret scanning also helps)
 - [ ] Repository settings: make public; turn on private vulnerability reporting, Discussions (optional), and branch protection for `main` requiring the **Check** workflow
 - [ ] Add labels `bug`, `idea`, `good first issue`, `help wanted`
-- [ ] Optional: rename the organisation from "LIght-Alley" to "Light-Alley" **before** going public, so the address that gets shared is the final one. GitHub redirects the old address, but links in the README and guide should be updated
+- [ ] Optional: rename the organisation from "Light-Alley" to "Light-Alley" **before** going public, so the address that gets shared is the final one. GitHub redirects the old address, but links in the README and guide should be updated
 
 ### Release
 

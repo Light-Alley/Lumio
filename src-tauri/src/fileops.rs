@@ -68,6 +68,10 @@ pub struct OpReport {
     pub failed: Vec<(String, String)>,
     /// True when the destination is not inside any library folder.
     pub outside_library: bool,
+    /// For deletions: the photo id of each entry in `failed`, in the same order, so a
+    /// retry can never pick a different photo that happens to share a file name.
+    #[serde(default)]
+    pub failed_ids: Vec<i64>,
     /// Moves that will happen when a drive that isn't connected comes back.
     #[serde(default)]
     pub queued: usize,
@@ -212,7 +216,7 @@ fn already_there(dst: &Path) -> anyhow::Error {
 /// Give `from`, a file Lumio has just made, the name `to`, never replacing a file that is
 /// already called that. A hard link fails if the name is taken, which rename doesn't on
 /// every system; drives without hard links fall back to checking first.
-fn place_new(from: &Path, to: &Path) -> Result<()> {
+pub(crate) fn place_new(from: &Path, to: &Path) -> Result<()> {
     match std::fs::hard_link(from, to) {
         Ok(()) => {
             let _ = std::fs::remove_file(from);
@@ -741,7 +745,10 @@ pub fn delete_photos<H: Host + ?Sized>(h: &H, ids: &[i64], permanent: bool) -> R
                 crate::notify::changed([src.as_path()]);
                 h.forget(&h.conn().lock(), &[p.id])?;
             }
-            Err(e) => rep.failed.push((p.filename.clone(), e.to_string())),
+            Err(e) => {
+                rep.failed.push((p.filename.clone(), e.to_string()));
+                rep.failed_ids.push(p.id);
+            }
         }
     }
     Ok(rep)

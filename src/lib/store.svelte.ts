@@ -613,11 +613,12 @@ export async function trashPhotos(ids: number[], message?: string): Promise<bool
         true,
       );
       if (again) {
-        // Look the photos up by id: they may not be in the current view (e.g. from the duplicate finder).
-        const failedNames = new Set(r.failed.map(([f]) => f));
-        const retry = (await api.getPhotos(ids)).filter((p) => failedNames.has(p.filename)).map((p) => p.id);
+        // Retry exactly the photos that failed, by id: two photos in different folders
+        // can share a file name, and the wrong one must never be deleted permanently.
+        const retry = r.failed_ids ?? [];
+        if (retry.length !== r.failed.length) throw new Error("Lumio could not tell which photos failed; nothing more was deleted.");
         const r2 = await api.deletePhotos(retry, true);
-        r = { done: r.done + r2.done, failed: r2.failed, outside_library: false };
+        r = { done: r.done + r2.done, failed: r2.failed, failed_ids: r2.failed_ids, outside_library: false };
       }
     }
     reportResult(r, "deleted");
@@ -679,6 +680,13 @@ export async function renameFolder(path: string, current: string) {
   }
 }
 
+/** `path` is `folder` itself or somewhere inside it ("/Trip 2" is not inside "/Trip"). */
+export function isInside(path: string, folder: string): boolean {
+  if (path === folder) return true;
+  const f = folder.replace(/[\\/]+$/, "");
+  return path.startsWith(f + "/") || path.startsWith(f + "\\");
+}
+
 export async function trashFolder(path: string, name: string) {
   const ok = await confirm(
     `Move the folder “${name}” to the Trash?`,
@@ -687,6 +695,7 @@ export async function trashFolder(path: string, name: string) {
     true,
   );
   if (!ok) return;
+  let permanent = false;
   try {
     await api.deleteFolder(path, false);
   } catch (e) {
@@ -702,9 +711,10 @@ export async function trashFolder(path: string, name: string) {
     } catch (e2) {
       return errorToast(e2);
     }
+    permanent = true;
   }
-  if (app.scope.kind === "folder" && app.scope.path.startsWith(path)) setScope({ kind: "all" });
-  toast(`“${name}” moved to the Trash.`, "success");
+  if (app.scope.kind === "folder" && isInside(app.scope.path, path)) setScope({ kind: "all" });
+  toast(permanent ? `“${name}” deleted permanently.` : `“${name}” moved to the Trash.`, "success");
   app.folderVersion++;
   loadHistory();
 }
@@ -717,7 +727,7 @@ export async function dropOnFolder(dest: string, e: DragEvent) {
     const ids = JSON.parse(photoData) as number[];
     await moveOrCopy(ids, copy, dest);
   } else if (folderData) {
-    if (folderData === dest || dest.startsWith(folderData)) return;
+    if (isInside(dest, folderData)) return;
     try {
       const r = await api.moveFolder(folderData, dest, copy);
       if (r.done) offerUndo(r.history, `Folder ${copy ? "copied" : "moved"}.`);

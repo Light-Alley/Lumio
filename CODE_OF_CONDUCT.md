@@ -10,6 +10,6 @@ Lumio is a friendly project for people who love photography. Everyone who takes 
 
 Maintainers may edit or remove comments, close issues and pull requests, and block people who don't follow this.
 
-To report a problem privately, use **Report content** on the comment in GitHub, or contact the maintainers through the [Light and Alley](https://github.com/LIght-Alley) organisation profile. Reports are kept confidential.
+To report a problem privately, use **Report content** on the comment in GitHub, or contact the maintainers through the [Light and Alley](https://github.com/Light-Alley) organisation profile. Reports are kept confidential.
 
 This code is adapted in spirit from the [Contributor Covenant](https://www.contributor-covenant.org).

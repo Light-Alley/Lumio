@@ -169,6 +169,15 @@ fn has_sibling(p: &Path, owners_only: bool) -> bool {
     })
 }
 
+/// Size of the photo, and the newest modification time of the photo and its XMP sidecar.
+/// The catalogue stores this time, so an edit to either file (by Lumio or another app)
+/// is noticed, and a photo Lumio just edited isn't indexed again for nothing.
+pub fn stat_with_sidecar(p: &Path) -> Option<(i64, i64)> {
+    let (size, mtime) = stat(p)?;
+    let side = find_sidecar(p).and_then(|sc| stat(&sc)).map(|(_, sm)| sm).unwrap_or(0);
+    Some((size, mtime.max(side)))
+}
+
 fn stat(p: &Path) -> Option<(i64, i64)> {
     let m = std::fs::metadata(p).ok()?;
     if !m.is_file() {
@@ -474,20 +483,16 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
         else {
             continue;
         };
-        let Some((size, mtime)) = stat(&p) else { continue };
+        // The time covers the sidecar too, so a changed sidecar makes it differ.
+        let Some((size, mtime)) = stat_with_sidecar(&p) else { continue };
         let ps = p.to_string_lossy().to_string();
         let existing = db::photo_by_path(conn, &ps)?;
         if let Some((_, s, m)) = existing {
             if !force && s == size && m == mtime {
-                // Also refresh when the sidecar is newer than our last index.
-                let side_newer = find_sidecar(&p)
-                    .and_then(|sc| stat(&sc))
-                    .map(|(_, sm)| sm > m)
-                    .unwrap_or(false);
                 let (thumb, tries): (i64, i64) = conn
                     .query_row("SELECT thumb, thumb_tries FROM photos WHERE path = ?1", [&ps], |r| Ok((r.get(0)?, r.get(1)?)))
                     .unwrap_or((1, 0));
-                if !side_newer && (thumb != 0 || tries >= MAX_THUMB_TRIES) {
+                if thumb != 0 || tries >= MAX_THUMB_TRIES {
                     continue;
                 }
             }

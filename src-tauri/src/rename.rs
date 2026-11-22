@@ -254,7 +254,28 @@ fn check_new_name(name: &str) -> Result<()> {
     if name.chars().any(|c| c.is_control()) {
         bail!("The name contains characters that can't be used in a file name.");
     }
+    if is_reserved_on_windows(name) {
+        bail!("Windows keeps \"{}\" for devices, so it can't be used as a file name.", reserved_word(name));
+    }
     Ok(())
+}
+
+/// The part of a name Windows looks at for device names: "con.tar.jpg" -> "con".
+fn reserved_word(name: &str) -> &str {
+    let stem = name.split('.').next().unwrap_or(name);
+    stem.trim_end_matches(' ')
+}
+
+/// CON, PRN, AUX, NUL, COM1 to COM9 and LPT1 to LPT9 (also with superscript digits),
+/// with any extension: Windows opens the device instead of the file.
+fn is_reserved_on_windows(name: &str) -> bool {
+    let w = reserved_word(name).to_ascii_uppercase();
+    if matches!(w.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") {
+        return true;
+    }
+    let (head, tail) = (w.get(..3), w.get(3..));
+    matches!(head, Some("COM") | Some("LPT"))
+        && matches!(tail, Some("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "\u{b9}" | "\u{b2}" | "\u{b3}"))
 }
 
 /// The name to use when a person types a new name for one photo. Keeps the photo's
@@ -362,23 +383,32 @@ pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Re
     // 2. Move aside, under a hidden temporary name, every file whose current name another
     //    photo in the batch is about to take (including a file that only changes case,
     //    which many drives treat as the same name).
-    let pid = std::process::id();
+    //    The temporary names are random and are only ever taken, never replaced
+    //    (`place_new`), so nothing else in the folder can be overwritten by them.
     let wanted: Vec<PathBuf> = work.iter().map(|w| w.dst.clone()).collect();
-    for (i, w) in work.iter_mut().enumerate() {
+    for w in work.iter_mut() {
         if !wanted.iter().any(|d| same_place(d, &w.src)) {
             continue;
         }
         let dir = w.src.parent().unwrap_or(Path::new("."));
-        let tmp = dir.join(format!(".lumio-rename-{pid}-{i}.tmp"));
-        if let Err(e) = std::fs::rename(&w.src, &tmp) {
-            rep.failed.push((w.photo.filename.clone(), format!("could not rename: {e}")));
+        let tag = match crate::secure::random_hex(8) {
+            Ok(t) => t,
+            Err(e) => {
+                rep.failed.push((w.photo.filename.clone(), format!("could not rename: {e:#}")));
+                w.dst = PathBuf::new();
+                continue;
+            }
+        };
+        let tmp = dir.join(format!(".lumio-rename-{tag}.tmp"));
+        if let Err(e) = crate::fileops::place_new(&w.src, &tmp) {
+            rep.failed.push((w.photo.filename.clone(), format!("could not rename: {e:#}")));
             w.dst = PathBuf::new();
             continue;
         }
         w.parked = Some(tmp);
         if let Some((s, false)) = &w.side {
-            let ts = dir.join(format!(".lumio-rename-{pid}-{i}.xmp.tmp"));
-            if std::fs::rename(s, &ts).is_ok() {
+            let ts = dir.join(format!(".lumio-rename-{tag}.xmp.tmp"));
+            if crate::fileops::place_new(s, &ts).is_ok() {
                 w.parked_side = Some(ts);
             }
         }
@@ -412,7 +442,9 @@ pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Re
                     bail!("a file named \"{}\" is already in the folder", target.file_name().unwrap_or_default().to_string_lossy());
                 }
             }
-            std::fs::rename(&from, &w.dst).with_context(|| format!("could not rename {}", w.photo.filename))?;
+            // Takes the name only if it is still free, even if another app made a file
+            // with it since the check above.
+            crate::fileops::place_new(&from, &w.dst).with_context(|| format!("could not rename {}", w.photo.filename))?;
             Ok(())
         })();
         if let Err(e) = res {
@@ -503,6 +535,16 @@ mod tests {
 
     fn opts(pattern: &str) -> BatchOptions {
         BatchOptions { pattern: pattern.into(), start: 1, digits: 3, ..Default::default() }
+    }
+
+    #[test]
+    fn windows_device_names_are_refused() {
+        for bad in ["CON.jpg", "con.JPG", "Nul.tar.jpg", "com1.jpg", "LPT9.cr2", "aux", "COM\u{b9}.jpg", "PRN .jpg"] {
+            assert!(check_new_name(bad).is_err(), "{bad} should be refused");
+        }
+        for ok in ["Console.jpg", "COM10.jpg", "COM0.jpg", "LPT.jpg", "icon.jpg", "CONFIRM.jpg"] {
+            assert!(check_new_name(ok).is_ok(), "{ok} should be allowed");
+        }
     }
 
     #[test]

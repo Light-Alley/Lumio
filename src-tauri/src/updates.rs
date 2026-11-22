@@ -15,8 +15,8 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-pub const REPO_URL: &str = "https://github.com/LIght-Alley/Lumio";
-const LATEST_API: &str = "https://api.github.com/repos/LIght-Alley/Lumio/releases/latest";
+pub const REPO_URL: &str = "https://github.com/Light-Alley/Lumio";
+const LATEST_API: &str = "https://api.github.com/repos/Light-Alley/Lumio/releases/latest";
 
 /// Whether the updater plugin was set up (the build carries an updater public key).
 pub struct Installer(pub bool);
@@ -51,6 +51,23 @@ fn is_newer(latest: &str, current: &str) -> bool {
     }
 }
 
+/// A page of Lumio's own GitHub project: https, github.com, and the Light-Alley/Lumio
+/// repository (GitHub treats owner and repository names without regard to case).
+/// Parsed rather than compared as text, so "github.com.evil.example", user names in the
+/// address, or "/Light-Alley/Lumio-fake" don't pass.
+fn is_project_page(u: &str) -> bool {
+    let Ok(url) = url::Url::parse(u) else { return false };
+    if url.scheme() != "https" || url.host_str() != Some("github.com") || url.port().is_some() {
+        return false;
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    let mut parts = url.path_segments().into_iter().flatten();
+    let (owner, repo) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    owner.eq_ignore_ascii_case("Light-Alley") && repo.eq_ignore_ascii_case("Lumio")
+}
+
 /// Read GitHub's answer for the latest release.
 fn from_release(v: &serde_json::Value, current: &str, can_install: bool) -> Option<UpdateInfo> {
     let tag = v["tag_name"].as_str()?;
@@ -64,6 +81,7 @@ fn from_release(v: &serde_json::Value, current: &str, can_install: bool) -> Opti
         notes: v["body"].as_str().unwrap_or_default().chars().take(6000).collect(),
         url: v["html_url"]
             .as_str()
+            .filter(|u| is_project_page(u))
             .map(str::to_string)
             .unwrap_or_else(|| format!("{REPO_URL}/releases/latest")),
         published: v["published_at"].as_str().unwrap_or_default().to_string(),
@@ -151,7 +169,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 pub fn open_project_page(url: Option<String>) -> Result<(), String> {
     // Only ever open Lumio's own GitHub pages from here (release notes, guide, issues).
     let url = url
-        .filter(|u| u.starts_with(&format!("{REPO_URL}/")))
+        .filter(|u| is_project_page(u))
         .unwrap_or_else(|| format!("{REPO_URL}/releases/latest"));
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
@@ -160,6 +178,22 @@ pub fn open_project_page(url: Option<String>) -> Result<(), String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn only_lumios_own_pages_are_opened() {
+        assert!(is_project_page("https://github.com/Light-Alley/Lumio/releases/tag/v2.0.0"));
+        assert!(is_project_page("https://github.com/LIght-Alley/Lumio/issues"));
+        assert!(is_project_page("https://github.com/light-alley/lumio"));
+        assert!(!is_project_page("https://github.com/Light-Alley/Lumio-fake/releases"));
+        assert!(!is_project_page("https://github.com.evil.example/Light-Alley/Lumio"));
+        assert!(!is_project_page("https://user@github.com/Light-Alley/Lumio"));
+        assert!(!is_project_page("http://github.com/Light-Alley/Lumio"));
+        assert!(!is_project_page("https://github.com:8443/Light-Alley/Lumio"));
+        assert!(!is_project_page("https://github.com/Someone/Lumio"));
+        assert!(!is_project_page("javascript:alert(1)"));
+        let bad = json!({"tag_name": "v9.0.0", "html_url": "https://evil.example/download"});
+        assert_eq!(from_release(&bad, "1.0.0", false).unwrap().url, format!("{REPO_URL}/releases/latest"));
+    }
 
     #[test]
     fn versions() {
@@ -178,7 +212,7 @@ mod tests {
     fn reads_a_release() {
         let r = json!({
             "tag_name": "v1.1.0", "name": "Lumio v1.1.0", "body": "New: menu bar",
-            "html_url": "https://github.com/LIght-Alley/Lumio/releases/tag/v1.1.0",
+            "html_url": "https://github.com/Light-Alley/Lumio/releases/tag/v1.1.0",
             "published_at": "2026-12-01T10:00:00Z"
         });
         let u = from_release(&r, "1.0.0", true).unwrap();

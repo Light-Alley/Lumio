@@ -552,7 +552,8 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
                 Ok(()) => {
                     rep.done += 1;
                     let conn = st.conn.lock();
-                    if let Some(r) = edit.rating { conn.execute("UPDATE photos SET rating=?1 WHERE id=?2", params![r, p.id])?; }
+                    // The same 0 to 5 range the file was given.
+                    if let Some(r) = edit.rating { conn.execute("UPDATE photos SET rating=?1 WHERE id=?2", params![r.clamp(0, 5), p.id])?; }
                     if let Some(v) = &edit.label { conn.execute("UPDATE photos SET label=?1 WHERE id=?2", params![nz(v), p.id])?; }
                     if let Some(v) = &edit.title { conn.execute("UPDATE photos SET title=?1 WHERE id=?2", params![nz(v), p.id])?; }
                     if let Some(v) = &edit.caption { conn.execute("UPDATE photos SET caption=?1 WHERE id=?2", params![nz(v), p.id])?; }
@@ -563,9 +564,10 @@ pub async fn update_metadata(state: S<'_>, ids: Vec<i64>, edit: Edit) -> R<OpRep
                         let (la, lo) = g.map(|(a, b)| (Some(a), Some(b))).unwrap_or((None, None));
                         conn.execute("UPDATE photos SET lat=?1, lon=?2 WHERE id=?3", params![la, lo, p.id])?;
                     }
-                    if let Ok(m) = std::fs::metadata(&path) {
-                        let mtime = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
-                        conn.execute("UPDATE photos SET size=?1, mtime=?2 WHERE id=?3", params![m.len() as i64, mtime, p.id])?;
+                    // The newer of the photo and its sidecar, as the indexer stores it, so
+                    // the next scan sees nothing new.
+                    if let Some((size, mtime)) = indexer::stat_with_sidecar(&path) {
+                        conn.execute("UPDATE photos SET size=?1, mtime=?2 WHERE id=?3", params![size, mtime, p.id])?;
                     }
                 }
                 Err(err) => rep.failed.push((p.filename.clone(), err.to_string())),
@@ -615,12 +617,7 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
             match res {
                 Ok(()) => {
                     rep.done += 1;
-                    let (size, mtime) = std::fs::metadata(&path)
-                        .map(|m| {
-                            let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
-                            (m.len() as i64, t)
-                        })
-                        .unwrap_or((p.size, p.mtime));
+                    let (size, mtime) = indexer::stat_with_sidecar(&path).unwrap_or((p.size, p.mtime));
                     let swap = metadata::is_quarter_turn(p.orientation) != metadata::is_quarter_turn(Some(new_o));
                     {
                         let conn = st.conn.lock();
@@ -710,6 +707,9 @@ pub fn stack_photos(state: S, ids: Vec<i64>, top: Option<i64>) -> R<i64> {
 /// Take photos out of their stacks. With `whole`, every stack they belong to is dissolved.
 #[tauri::command]
 pub fn unstack_photos(state: S, ids: Vec<i64>, whole: bool) -> R<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
     let conn = state.conn.lock();
     let list = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
     let sql = if whole {

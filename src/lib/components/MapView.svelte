@@ -5,7 +5,7 @@
   import "leaflet.markercluster/dist/MarkerCluster.css";
   import "leaflet.markercluster/dist/MarkerCluster.Default.css";
   import { Search, MapPin, Crosshair } from "@lucide/svelte";
-  import { app, selection, clickSelect, applyEdit, openViewer, selectedIds, confirm, errorToast } from "../store.svelte";
+  import { app, selection, clickSelect, applyEdit, openViewer, selectedIds, withStacks, confirm, errorToast } from "../store.svelte";
   import { api, thumbUrl, type PhotoLite, type Place } from "../api";
   import { showMenu } from "../menu.svelte";
   import { photoMenu } from "../actions";
@@ -142,7 +142,8 @@
 
   function stripDrag(e: DragEvent, p: PhotoLite) {
     if (!selection.has(p.id)) clickSelect(p.id, e as unknown as MouseEvent);
-    e.dataTransfer?.setData("application/x-lumio-photos", JSON.stringify(selectedIds()));
+    // Closed stacks are dragged whole, so every photo in them gets the place.
+    e.dataTransfer?.setData("application/x-lumio-photos", JSON.stringify(withStacks(selectedIds())));
   }
 </script>
 

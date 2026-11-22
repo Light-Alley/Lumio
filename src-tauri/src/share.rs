@@ -105,7 +105,7 @@ pub fn prepare(state: &AppState, ids: &[i64]) -> Result<Vec<PathBuf>> {
         if !src.exists() {
             bail!("{} is not available (is its drive connected?)", p.filename);
         }
-        if metadata::is_video(&p.ext) || (!small && web_friendly(&p.ext)) {
+        if !small && (metadata::is_video(&p.ext) || web_friendly(&p.ext)) {
             out.push(src.to_path_buf());
             continue;
         }
@@ -119,9 +119,29 @@ pub fn prepare(state: &AppState, ids: &[i64]) -> Result<Vec<PathBuf>> {
                 d
             }
         };
-        out.push(convert(state, p, small, &d)?);
+        if metadata::is_video(&p.ext) {
+            out.push(video_copy(state, p, &d)?);
+        } else {
+            out.push(convert(state, p, small, &d)?);
+        }
     }
     Ok(out)
+}
+
+/// "Small copies" promise copies without the original's details. Videos aren't made
+/// smaller, but the copy loses its location (coordinates and place names), as the
+/// photo copies do (they are re-encoded without any metadata).
+fn video_copy(state: &AppState, p: &Photo, dir: &Path) -> Result<PathBuf> {
+    let src = Path::new(&p.path);
+    let stem = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "video".into());
+    let ext = src.extension().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| p.ext.clone());
+    let dest = unique(dir, &stem, &ext);
+    std::fs::copy(src, &dest).map_err(|e| anyhow!("Could not copy {}: {e}", p.filename))?;
+    if let Err(e) = state.et.write(&dest, &metadata::strip_location_args()) {
+        let _ = std::fs::remove_file(&dest);
+        bail!("Could not remove the location from {}: {e}", p.filename);
+    }
+    Ok(dest)
 }
 
 fn convert(state: &AppState, p: &Photo, small: bool, dir: &Path) -> Result<PathBuf> {

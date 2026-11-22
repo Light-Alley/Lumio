@@ -55,7 +55,7 @@ Videos: MP4, MOV, M4V and WebM play on every system; MKV, AVI, MTS, MPG, WMV and
 
 ## Installing
 
-Download the installer for your system from the **Releases** page:
+Download the installer for your system from the [**Releases** page](https://github.com/Light-Alley/Lumio/releases/latest):
 
 - **macOS**: `Lumio_x.y.z_aarch64.dmg` (Apple Silicon) or `_x64.dmg` (Intel). Open the .dmg and drag Lumio to Applications.
 - **Windows 10 or 11**: `Lumio_x.y.z_x64-setup.exe` or `.msi`.
@@ -126,7 +126,7 @@ To build installers for all three systems at once, push the repository to GitHub
 
 Lumio is a hobby project. I have a full-time and very different day job, so I fix things in my free time and replies can be slow.
 
-- **Found a problem or have an idea?** Open an [issue](https://github.com/LIght-Alley/Lumio/issues). Feedback and suggestions are welcome.
+- **Found a problem or have an idea?** Open an [issue](https://github.com/Light-Alley/Lumio/issues). Feedback and suggestions are welcome.
 - **Want to work on Lumio?** Pull requests are welcome, and so are people who would like to help maintain it. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, and open an issue to say hello. Please keep Lumio light: no pixel editing, no heavy dependencies, and every change that touches files should be safe on external and network drives.
 - **Found a security problem?** Please report it privately, as described in [SECURITY.md](SECURITY.md).
 
