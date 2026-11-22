@@ -375,7 +375,7 @@ fn scan_root(state: &AppState, conn: &Connection, root_id: i64) -> Result<()> {
     scan_dir(state, conn, &p, root_id)?;
     conn.execute(
         "UPDATE roots SET last_scan = ?1 WHERE id = ?2",
-        params![chrono::Utc::now().timestamp_millis(), root_id],
+        params![crate::db::now_ms(), root_id],
     )?;
     Ok(())
 }
@@ -551,7 +551,7 @@ pub fn index_paths(state: &AppState, conn: &Connection, paths: Vec<PathBuf>, for
             }
         }
         // 2. Upsert rows.
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = crate::db::now_ms();
         let mut ids: Vec<(i64, PathBuf, String, Option<i64>, i64)> = vec![];
         {
             let tx = conn.unchecked_transaction()?;

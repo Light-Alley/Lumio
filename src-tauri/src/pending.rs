@@ -109,7 +109,7 @@ pub fn queue_move(conn: &Connection, photo: &db::Photo, dest: &Path, name: &str,
     tx.execute(
         "INSERT INTO pending_moves (photo_id, src, created) VALUES (?1, ?2, ?3)
          ON CONFLICT(photo_id) DO UPDATE SET attempts = 0, error = NULL",
-        params![photo.id, src, chrono::Utc::now().timestamp_millis()],
+        params![photo.id, src, crate::db::now_ms()],
     )?;
     tx.commit()?;
     Ok(target)

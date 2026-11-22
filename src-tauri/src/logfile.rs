@@ -15,7 +15,12 @@ struct FileLog {
 
 impl FileLog {
     fn open(&self) -> Option<File> {
-        OpenOptions::new().create(true).append(true).open(&self.path).ok()
+        let mut o = OpenOptions::new();
+        o.create(true).append(true);
+        // Only the owner may read the log (it names files and folders).
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+        o.open(&self.path).ok()
     }
 }
 
@@ -30,7 +35,7 @@ impl log::Log for FileLog {
         }
         let line = format!(
             "{} {:<5} {}\n",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S"),
             r.level(),
             r.args()
         );

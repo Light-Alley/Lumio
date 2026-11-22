@@ -107,7 +107,7 @@ fn days(s: &str) -> Result<i64> {
 /// A `YYYY-MM-DD` date, checked so bad input can't match by accident.
 fn day(s: &str) -> Result<String> {
     let d = s.trim();
-    if chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_err() {
+    if jiff::civil::Date::strptime("%Y-%m-%d", d).is_err() {
         bail!("\"{s}\" is not a date (use YYYY-MM-DD)");
     }
     Ok(d.to_string())
@@ -189,7 +189,7 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
 
         // When Lumio first saw it.
         ("added", "last_days") => {
-            let cutoff = chrono::Utc::now().timestamp_millis().saturating_sub(days(v)? * 24 * 3600 * 1000);
+            let cutoff = crate::db::now_ms().saturating_sub(days(v)? * 24 * 3600 * 1000);
             format!("indexed_at >= {}", arg(args, cutoff.into()))
         }
 
@@ -289,7 +289,7 @@ pub fn save(conn: &Connection, id: Option<i64>, name: &str, rules: &RuleSet) -> 
             let pos: i64 = conn.query_row("SELECT ifnull(MAX(position), 0) + 1 FROM collections", [], |r| r.get(0))?;
             conn.execute(
                 "INSERT INTO collections (name, rules, position, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![name, json, pos, chrono::Utc::now().timestamp_millis()],
+                params![name, json, pos, crate::db::now_ms()],
             )?;
             Ok(conn.last_insert_rowid())
         }
@@ -371,6 +371,28 @@ mod tests {
         add("d.mp4", &lib, "mp4", "rating = 0");
         add("trips-notes.png", &format!("{lib}{SEP}Tripsy"), "png", "rating = 1, keywords = '|Italy food|'");
         conn
+    }
+
+    #[test]
+    fn bad_numbers_are_errors_not_crashes() {
+        let mut args = vec![];
+        for v in ["NaN", "inf", "Infinity", "-inf"] {
+            assert!(rule_sql(&rule("rating", "gte", v), &mut args).is_err(), "{v}");
+        }
+        // Used to overflow (and abort the app) when multiplied out to milliseconds.
+        assert!(rule_sql(&rule("added", "last_days", "1000000000000"), &mut args).is_err());
+        assert!(rule_sql(&rule("taken", "last_days", "-5"), &mut args).is_err());
+        assert!(rule_sql(&rule("added", "last_days", "30"), &mut args).unwrap().is_some());
+    }
+
+    #[test]
+    fn wildcards_in_text_are_literal() {
+        let conn = library();
+        conn.execute("UPDATE photos SET filename = '100%.jpg' WHERE filename = 'a.jpg'", []).unwrap();
+        conn.execute("UPDATE photos SET filename = '1000.jpg' WHERE filename = 'c.jpg'", []).unwrap();
+        assert_eq!(names(&conn, &all(vec![rule("filename", "contains", "100%")])), vec!["100%.jpg"]);
+        assert_eq!(names(&conn, &all(vec![rule("filename", "contains", "1_0")])), Vec::<String>::new());
+        assert_eq!(names(&conn, &all(vec![rule("filename", "starts", "100%")])), vec!["100%.jpg"]);
     }
 
     fn names(conn: &Connection, set: &RuleSet) -> Vec<String> {

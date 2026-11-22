@@ -71,7 +71,7 @@ pub struct Entry {
 }
 
 fn now() -> i64 {
-    chrono::Utc::now().timestamp_millis()
+    crate::db::now_ms()
 }
 
 fn file_name(p: &Path) -> String {

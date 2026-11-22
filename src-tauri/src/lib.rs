@@ -280,6 +280,7 @@ pub fn run() {
                 std::fs::create_dir_all(d)?;
             }
             logfile::init(data.join("lumio.log"));
+            notify::init(app.handle().clone());
             if let Err(e) = appmenu::install(app.handle()) {
                 log::warn!("menu bar could not be built: {e}");
             }

@@ -49,12 +49,17 @@ pub fn open_with_chosen(file: &Path, chosen: &Path) -> Result<()> {
 /// What may be picked as "another application": an .app bundle on macOS, an .exe on
 /// Windows, an installed .desktop entry or an executable file on Linux.
 fn chosen_app_ok(p: &Path) -> bool {
-    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    if cfg!(target_os = "macos") {
-        ext == "app" && p.is_dir()
-    } else if cfg!(target_os = "windows") {
-        ext == "exe" && p.is_file()
-    } else {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        if cfg!(target_os = "macos") {
+            ext == "app" && p.is_dir()
+        } else {
+            ext == "exe" && p.is_file()
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
         imp::chosen_ok(p)
     }
 }
@@ -106,8 +111,13 @@ mod imp {
     }
 
     pub fn open_with(file: &Path, app: &str) -> Result<()> {
-        // `--` so a file name can never be read as an option of `open`.
-        std::process::Command::new("/usr/bin/open").arg("-a").arg(app).arg("--").arg(file).spawn()?;
+        // The file path is absolute (it starts with "/"), so it can never be read as an
+        // option of `open`; `app` is one of the bundles Launch Services listed or one the
+        // person picked.
+        if !file.is_absolute() {
+            anyhow::bail!("not a file path");
+        }
+        std::process::Command::new("/usr/bin/open").arg("-a").arg(app).arg(file).spawn()?;
         Ok(())
     }
 }
@@ -125,9 +135,22 @@ mod imp {
         ASSOC_FILTER_RECOMMENDED,
     };
 
+    /// Undoes CoInitializeEx when dropped, if it succeeded.
+    struct ComGuard(bool);
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                unsafe { windows::Win32::System::Com::CoUninitialize() };
+            }
+        }
+    }
+
+    fn com() -> ComGuard {
+        ComGuard(unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_ok())
+    }
+
     fn handlers(file: &Path) -> Result<Vec<IAssocHandler>> {
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             let ext = format!(".{}", file.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default());
             let en = SHAssocEnumHandlers(&HSTRING::from(ext), ASSOC_FILTER_RECOMMENDED)?;
             let mut out = vec![];
@@ -152,6 +175,7 @@ mod imp {
     }
 
     pub fn list(file: &Path) -> Result<Vec<AppInfo>> {
+        let _com = com();
         let mut out = vec![];
         for h in handlers(file)? {
             unsafe {
@@ -170,6 +194,7 @@ mod imp {
 
     pub fn open_with(file: &Path, app: &str) -> Result<()> {
         // Prefer invoking through the shell (works for Store apps such as Photos).
+        let _com = com();
         for h in handlers(file)? {
             unsafe {
                 let id = h.GetName().map(|p| take_pwstr(p)).unwrap_or_default();

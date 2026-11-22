@@ -183,24 +183,32 @@ fn list_exact(v: &Value, key: &str) -> Vec<String> {
 }
 
 /// ExifTool dates look like "2023:07:14 18:22:05+02:00"; store ISO-like "2023-07-14T18:22:05".
+/// Anything else (text in other scripts, half-dates) gives `None`, never a panic.
 pub fn normalize_date(d: &str) -> Option<String> {
     let d = d.trim();
-    if d.len() < 10 || d.starts_with("0000") {
+    if d.starts_with("0000") {
         return None;
     }
-    let date = d[..10].replace(':', "-");
-    let time = if d.len() >= 19 { d[11..19].to_string() } else { "00:00:00".into() };
-    if !date.chars().all(|c| c.is_ascii_digit() || c == '-') {
+    let date = d.get(..10)?.replace(':', "-");
+    let b = date.as_bytes();
+    let shape = b.len() == 10 && b[4] == b'-' && b[7] == b'-' && b.iter().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit());
+    if !shape {
         return None;
     }
+    let time = match d.get(11..19) {
+        Some(t) if t.len() == 8 && t.bytes().enumerate().all(|(i, c)| if i == 2 || i == 5 { c == b':' } else { c.is_ascii_digit() }) => t.to_string(),
+        _ => "00:00:00".into(),
+    };
     Some(format!("{date}T{time}"))
 }
 
 pub fn parse(v: &Value) -> Meta {
-    let mut m = Meta::default();
-    m.width = f(v, &["ExifImageWidth", "ImageWidth"]).map(|x| x as i64);
-    m.height = f(v, &["ExifImageHeight", "ImageHeight"]).map(|x| x as i64);
-    m.orientation = f(v, &["Orientation"]).map(|x| x as i64);
+    let mut m = Meta {
+        width: f(v, &["ExifImageWidth", "ImageWidth"]).map(|x| x as i64),
+        height: f(v, &["ExifImageHeight", "ImageHeight"]).map(|x| x as i64),
+        orientation: f(v, &["Orientation"]).map(|x| x as i64),
+        ..Default::default()
+    };
     if let Some(o) = m.orientation {
         if (5..=8).contains(&o) {
             std::mem::swap(&mut m.width, &mut m.height);
@@ -714,6 +722,19 @@ mod keyword_tests {
         let mut raw = parse(&serde_json::json!({"Rating": 3, "Label": "Red"}));
         merge_sidecar(&mut raw, &parse(&serde_json::json!({"Title": "x"})));
         assert_eq!((raw.rating, raw.label.as_deref()), (3, Some("Red")));
+    }
+
+    #[test]
+    fn odd_dates_never_panic() {
+        assert_eq!(normalize_date("2023:07:14 18:22:05+02:00").as_deref(), Some("2023-07-14T18:22:05"));
+        assert_eq!(normalize_date("2023:07:14").as_deref(), Some("2023-07-14T00:00:00"));
+        // Multi-byte text where byte 10 or 19 falls inside a character used to panic.
+        assert_eq!(normalize_date("2023年07月14日 12:00:00"), None);
+        assert_eq!(normalize_date("2023:07:14 1é:00:00").as_deref(), Some("2023-07-14T00:00:00"));
+        assert_eq!(normalize_date("0000:00:00 00:00:00"), None);
+        assert_eq!(normalize_date("abc"), None);
+        assert_eq!(normalize_date("2023-7-14 xx"), None);
+        assert_eq!(normalize_date(""), None);
     }
 
     #[test]

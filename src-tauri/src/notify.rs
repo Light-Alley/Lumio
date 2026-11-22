@@ -5,6 +5,13 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+/// The app, for running on its main thread (set once at start-up).
+static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+pub fn init(app: tauri::AppHandle) {
+    let _ = APP.set(app);
+}
+
 /// Notify about changes in these folders (and the folders containing these files).
 pub fn changed<P: AsRef<Path>>(paths: impl IntoIterator<Item = P>) {
     let mut dirs: HashSet<PathBuf> = HashSet::new();
@@ -29,17 +36,22 @@ mod imp {
     use objc2_foundation::NSString;
     use std::path::PathBuf;
 
+    /// Finder still refreshes on `noteFileSystemChanged:`, though it is no longer
+    /// documented. AppKit objects belong on the main thread, so the call goes there
+    /// (callers are worker threads), and nothing waits for it.
     pub fn notify(dirs: &[PathBuf]) {
-        unsafe {
+        let Some(app) = super::APP.get() else { return };
+        let dirs: Vec<String> = dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect();
+        let _ = app.run_on_main_thread(move || unsafe {
             let ws: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
             if ws.is_null() {
                 return;
             }
-            for d in dirs {
-                let s = NSString::from_str(&d.to_string_lossy());
+            for d in &dirs {
+                let s = NSString::from_str(d);
                 let _: () = msg_send![ws, noteFileSystemChanged: &*s];
             }
-        }
+        });
     }
 }
 

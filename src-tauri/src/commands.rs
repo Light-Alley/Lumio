@@ -57,7 +57,7 @@ pub fn add_root(state: S, path: String) -> R<i64> {
         let tx = conn.unchecked_transaction().map_err(e)?;
         tx.execute(
             "INSERT INTO roots (path, name, added_at) VALUES (?1, ?2, ?3)",
-            params![path, name, chrono::Utc::now().timestamp_millis()],
+            params![path, name, crate::db::now_ms()],
         )
         .map_err(e)?;
         let id = tx.last_insert_rowid();

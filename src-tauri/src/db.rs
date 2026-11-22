@@ -6,6 +6,11 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 
+/// Milliseconds since 1970 (UTC), as the catalogue stores times.
+pub fn now_ms() -> i64 {
+    jiff::Timestamp::now().as_millisecond()
+}
+
 pub fn open(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
     conn.busy_timeout(std::time::Duration::from_secs(10))?;
@@ -315,7 +320,7 @@ pub fn query_photos(conn: &Connection, q: &Query) -> Result<Vec<PhotoLite>> {
             wh.push(format!("id IN ({})", list.join(",")));
         }
         "recent" => {
-            let cutoff = chrono::Utc::now().timestamp_millis() - 30 * 24 * 3600 * 1000;
+            let cutoff = crate::db::now_ms() - 30 * 24 * 3600 * 1000;
             args.push(cutoff.into());
             wh.push(format!("indexed_at >= ?{}", args.len()));
         }
@@ -482,6 +487,9 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
 
 /// Replace a folder prefix in every photo path below it (used after folder moves/renames).
 pub fn rewrite_prefix(conn: &Connection, old: &str, new: &str, new_root: Option<i64>) -> Result<usize> {
+    // The same form folder_clause matches with: no trailing separator.
+    let old = old.trim_end_matches(['/', '\\']);
+    let new = new.trim_end_matches(['/', '\\']);
     let mut args = vec![];
     let clause = folder_clause(old, true, &mut args);
     let mut stmt = conn.prepare(&format!("SELECT id, path, folder FROM photos WHERE {clause}"))?;
@@ -490,8 +498,9 @@ pub fn rewrite_prefix(conn: &Connection, old: &str, new: &str, new_root: Option<
         .collect::<rusqlite::Result<_>>()?;
     let tx = conn.unchecked_transaction()?;
     for (id, path, folder) in &rows {
-        let np = format!("{}{}", new, &path[old.len()..]);
-        let nf = format!("{}{}", new, &folder[old.len()..]);
+        let (Some(pr), Some(fr)) = (path.strip_prefix(old), folder.strip_prefix(old)) else { continue };
+        let np = format!("{new}{pr}");
+        let nf = format!("{new}{fr}");
         match new_root {
             Some(r) => tx.execute(
                 "UPDATE photos SET path = ?1, folder = ?2, root_id = ?3 WHERE id = ?4",
@@ -502,4 +511,77 @@ pub fn rewrite_prefix(conn: &Connection, old: &str, new: &str, new_root: Option<
     }
     tx.commit()?;
     Ok(rows.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const SEP: char = MAIN_SEPARATOR;
+
+    fn lib() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute("INSERT INTO roots (id, path, name, added_at) VALUES (1, ?1, 'p', 0)", [format!("{SEP}photos")]).unwrap();
+        for (folder, name) in [("trip", "a.jpg"), ("trip", "b.jpg"), ("trip{S}day 2", "c.jpg"), ("trip 2", "d.jpg"), ("trips", "e.jpg")] {
+            let folder = format!("{SEP}photos{SEP}{}", folder.replace("{S}", &SEP.to_string()));
+            conn.execute(
+                "INSERT INTO photos (root_id, path, folder, filename, ext) VALUES (1, ?1, ?2, ?3, 'jpg')",
+                params![format!("{folder}{SEP}{name}"), folder, name],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    fn in_folder(conn: &Connection, f: &str) -> Vec<String> {
+        let mut args = vec![];
+        let c = folder_clause(f, true, &mut args);
+        let mut st = conn.prepare(&format!("SELECT filename FROM photos WHERE {c} ORDER BY filename")).unwrap();
+        st.query_map(params_from_iter(args.iter()), |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+    }
+
+    #[test]
+    fn folder_range_is_exact_and_uses_the_index() {
+        let conn = lib();
+        let trip = format!("{SEP}photos{SEP}trip");
+        assert_eq!(in_folder(&conn, &trip), vec!["a.jpg", "b.jpg", "c.jpg"]);
+        assert_eq!(in_folder(&conn, &format!("{trip}{SEP}")), vec!["a.jpg", "b.jpg", "c.jpg"]);
+        let mut args = vec![];
+        let c = folder_clause(&trip, true, &mut args);
+        let plan: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN SELECT id FROM photos WHERE {c}"))
+            .unwrap()
+            .query_map(params_from_iter(args.iter()), |r| r.get::<_, String>(3))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        let plan = plan.join(" | ");
+        assert!(plan.contains("SEARCH") && plan.contains("photos_folder") && !plan.contains("SCAN"), "{plan}");
+    }
+
+    #[test]
+    fn rewrite_prefix_accepts_a_trailing_separator() {
+        let conn = lib();
+        let old = format!("{SEP}photos{SEP}trip{SEP}");
+        let new = format!("{SEP}photos{SEP}Iceland{SEP}");
+        assert_eq!(rewrite_prefix(&conn, &old, &new, None).unwrap(), 3);
+        assert_eq!(in_folder(&conn, &format!("{SEP}photos{SEP}Iceland")), vec!["a.jpg", "b.jpg", "c.jpg"]);
+        // "trip 2" and "trips" only share the beginning of the name and stay.
+        assert_eq!(in_folder(&conn, &format!("{SEP}photos{SEP}trip 2")), vec!["d.jpg"]);
+        assert_eq!(in_folder(&conn, &format!("{SEP}photos{SEP}trips")), vec!["e.jpg"]);
+    }
+
+    #[test]
+    fn like_patterns_escape_wildcards() {
+        assert_eq!(like_escape("100%_a\\b"), "100\\%\\_a\\\\b");
+        assert_eq!(like_contains("Ice"), "%ice%");
+        let conn = Connection::open_in_memory().unwrap();
+        let hit = |text: &str, word: &str| -> bool {
+            conn.query_row("SELECT ?1 LIKE ?2 ESCAPE '\\'", params![text, like_contains(word)], |r| r.get(0)).unwrap()
+        };
+        assert!(hit("100%.jpg", "100%"));
+        assert!(!hit("1000.jpg", "100%"));
+        assert!(!hit("abc.jpg", "a_c"));
+        assert!(hit("a_c.jpg", "a_c"));
+    }
 }

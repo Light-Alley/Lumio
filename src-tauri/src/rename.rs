@@ -100,13 +100,14 @@ fn clean(s: &str) -> String {
 
 /// The date and time a photo was taken, or failing that when the file was last changed
 /// (the catalogue keeps that in milliseconds).
-fn when(p: &Photo) -> Option<chrono::NaiveDateTime> {
+fn when(p: &Photo) -> Option<jiff::civil::DateTime> {
     if let Some(t) = &p.taken_at {
-        if let Ok(d) = chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S") {
+        if let Ok(d) = jiff::civil::DateTime::strptime("%Y-%m-%dT%H:%M:%S", t) {
             return Some(d);
         }
     }
-    chrono::DateTime::from_timestamp_millis(p.mtime).map(|d| d.with_timezone(&chrono::Local).naive_local())
+    let ts = jiff::Timestamp::from_millisecond(p.mtime).ok()?;
+    Some(ts.to_zoned(jiff::tz::TimeZone::system()).datetime())
 }
 
 pub const TOKENS: &[&str] = &["name", "n", "date", "time", "year", "month", "day", "folder", "camera", "title"];
@@ -120,7 +121,7 @@ fn expand(pattern: &str, p: &Photo, stem: &str, n: i64, digits: u32) -> Result<S
         let j = after.find('}').ok_or_else(|| anyhow!("A \"{{\" in the pattern has no closing \"}}\"."))?;
         let token = after[..j].trim().to_lowercase();
         let d = when(p);
-        let fmt = |f: &str| d.map(|d| d.format(f).to_string()).unwrap_or_default();
+        let fmt = |f: &str| d.map(|d| d.strftime(f).to_string()).unwrap_or_default();
         let v = match token.as_str() {
             "name" => stem.to_string(),
             "n" | "#" => {
