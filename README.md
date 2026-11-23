@@ -4,6 +4,10 @@
 
 Lumio is for photographers who want something simple: browse folders of photos on your computer, external drives and network drives, rate and tag them, group them, put them on a map, and find them again, without importing them into a heavy catalogue or editing suite. Lumio doesn't edit pixels. It hands photos to the editor you already use and picks up the result when you save.
 
+[![Watch the Lumio video on YouTube (1.5 minutes)](docs/promo-video.jpg)](https://youtu.be/QQ-7Alhn4x4)
+
+▶ **[Watch Lumio in action on YouTube](https://youtu.be/QQ-7Alhn4x4)** (about a minute and a half).
+
 ## Download
 
 | System | Installer |
