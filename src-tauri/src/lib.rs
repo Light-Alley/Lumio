@@ -1,4 +1,4 @@
-//! Lumio – a lightweight, open-source photo browser and digital asset manager.
+//! Frameloft – a lightweight, open-source photo browser and digital asset manager.
 
 mod ai;
 mod appmenu;
@@ -51,7 +51,7 @@ fn asset_pool() -> &'static rayon::ThreadPool {
     })
 }
 
-/// Lumio's own page, when it is the one asking (only it may read pixels back).
+/// Frameloft's own page, when it is the one asking (only it may read pixels back).
 fn cors_origin(req: &tauri::http::Request<Vec<u8>>) -> Option<String> {
     req.headers()
         .get(header::ORIGIN)
@@ -195,7 +195,7 @@ fn serve_photo(state: &AppState, id: i64, range: Option<&str>, cors: Option<&str
     serve_saved(state, id, true, cors)
 }
 
-/// The saved offline preview (when `large`) or the thumbnail, from Lumio's own folders,
+/// The saved offline preview (when `large`) or the thumbnail, from Frameloft's own folders,
 /// so it works with the drive unplugged. Falls back to the thumbnail, uncached, so the
 /// sharper preview shows once it has been made.
 fn serve_saved(state: &AppState, id: i64, large: bool, cors: Option<&str>) -> Response<Vec<u8>> {
@@ -285,14 +285,14 @@ pub fn run() {
             for d in [&data, &thumbs_dir, &offline_dir, &previews_dir, &tmp_dir] {
                 std::fs::create_dir_all(d)?;
             }
-            logfile::init(data.join("lumio.log"));
+            logfile::init(data.join("frameloft.log"));
             notify::init(app.handle().clone());
             if let Err(e) = appmenu::install(app.handle()) {
                 log::warn!("menu bar could not be built: {e}");
             }
             #[cfg(target_os = "macos")]
             appmenu::mac_tidy();
-            log::info!("Lumio {} starting", app.package_info().version);
+            log::info!("Frameloft {} starting", app.package_info().version);
             clean_previews(&previews_dir);
             let db_path = data.join("catalogue.sqlite");
             let conn = db::open(&db_path)?;
@@ -300,7 +300,9 @@ pub fn run() {
             if let Err(e) = keys::migrate_plaintext(&conn) {
                 log::warn!("could not check the catalogue for old keys: {e}");
             }
-            for f in ["catalogue.sqlite", "catalogue.sqlite-wal", "catalogue.sqlite-shm", "lumio.log", "lumio.log.1"] {
+            for f in
+                ["catalogue.sqlite", "catalogue.sqlite-wal", "catalogue.sqlite-shm", "frameloft.log", "frameloft.log.1"]
+            {
                 keys::restrict(&data.join(f));
             }
             let et = Arc::new(exiftool::ExifTool::new(app.path().resource_dir().ok()).with_scratch(tmp_dir.clone()));
@@ -339,7 +341,7 @@ pub fn run() {
                 let st = state.clone();
                 std::thread::Builder::new().name("indexer".into()).spawn(move || indexer::run_worker(st, rx))?;
             }
-            // Catch up on changes made while Lumio was closed.
+            // Catch up on changes made while Frameloft was closed.
             let roots = db::roots(&state.conn.lock())?;
             for r in db::with_online(roots) {
                 if r.online {
@@ -443,7 +445,7 @@ pub fn run() {
             appmenu::show_log,
         ])
         .run(context)
-        .expect("error while running Lumio");
+        .expect("error while running Frameloft");
 }
 
 #[cfg(test)]

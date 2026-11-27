@@ -1,14 +1,14 @@
 [package]
-name = "lumio"
+name = "frameloft"
 version = "2.0.0"
-description = "Lumio – a lightweight, open-source photo browser and digital asset manager"
-authors = ["Light and Alley and Lumio contributors"]
+description = "Frameloft – a lightweight, open-source photo browser and digital asset manager"
+authors = ["Light and Alley and Frameloft contributors"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.88"
 
 [lib]
-name = "lumio_lib"
+name = "frameloft_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

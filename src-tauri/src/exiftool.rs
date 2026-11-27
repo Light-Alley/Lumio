@@ -1,7 +1,7 @@
 //! A small wrapper around ExifTool running in `-stay_open` mode.
 //!
 //! ExifTool (https://exiftool.org, Phil Harvey, Artistic/GPL licence) is the most
-//! complete open-source metadata reader/writer available. Lumio bundles a copy
+//! complete open-source metadata reader/writer available. Frameloft bundles a copy
 //! (see `scripts/fetch-exiftool.mjs`) and falls back to an `exiftool` found on PATH.
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -83,7 +83,7 @@ pub fn fmt_path_arg(p: &Path) -> Result<String> {
 }
 
 /// A `%`-free stand-in for a file: the file itself when its path has no `%`, otherwise a
-/// link to it (or, failing that, a copy) in Lumio's scratch folder, removed on drop.
+/// link to it (or, failing that, a copy) in Frameloft's scratch folder, removed on drop.
 pub struct Plain {
     path: PathBuf,
     temp: bool,
@@ -115,7 +115,7 @@ impl ExifTool {
         }
     }
 
-    /// Use `dir` (Lumio's own cache folder) for temporary files.
+    /// Use `dir` (Frameloft's own cache folder) for temporary files.
     pub fn with_scratch(mut self, dir: PathBuf) -> Self {
         self.scratch = dir;
         self
@@ -125,7 +125,7 @@ impl ExifTool {
     fn scratch_path(&self, ext: &str) -> Result<PathBuf> {
         let p = self.scratch.join(format!("et-{}{ext}", crate::secure::random_hex(12)?));
         if p.to_string_lossy().contains('%') {
-            bail!("Lumio's temporary folder has a '%' in its path ({})", self.scratch.display());
+            bail!("Frameloft's temporary folder has a '%' in its path ({})", self.scratch.display());
         }
         Ok(p)
     }
@@ -473,14 +473,14 @@ fn locate(resource_dir: Option<PathBuf>) -> Option<(PathBuf, Vec<String>)> {
 }
 
 /// The bundled ExifTool (or one on PATH) for tests. `None` skips a test locally when
-/// there is none; CI sets LUMIO_REQUIRE_EXIFTOOL so a missing ExifTool fails instead.
+/// there is none; CI sets FRAMELOFT_REQUIRE_EXIFTOOL so a missing ExifTool fails instead.
 #[cfg(test)]
 pub fn test_tool() -> Option<ExifTool> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
     let et = ExifTool::new(Some(dir)).with_scratch(tempfile::tempdir().unwrap().keep());
     if !et.available() {
         assert!(
-            std::env::var_os("LUMIO_REQUIRE_EXIFTOOL").is_none(),
+            std::env::var_os("FRAMELOFT_REQUIRE_EXIFTOOL").is_none(),
             "ExifTool is required (run npm run fetch-exiftool)"
         );
         eprintln!("ExifTool not installed; skipping");

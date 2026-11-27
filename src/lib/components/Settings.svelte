@@ -74,7 +74,7 @@
         <button class="ghost icon close" onclick={() => (app.showSettings = false)} aria-label="Close"><X size={16} /></button>
         {#if tab === "general"}
           <h3>Identity plate</h3>
-          <label class="field"><span>Your name, shown under "Lumio by Light and Alley" at the top left. Leave blank to hide it.</span>
+          <label class="field"><span>Your name, shown under "Frameloft by Light and Alley" at the top left. Leave blank to hide it.</span>
             <input type="text" placeholder="e.g. Jane Smith Photography" maxlength="60" value={app.settings.owner_name ?? ""} oninput={(e) => setOwnerName((e.target as HTMLInputElement).value)} />
           </label>
           <h3>Appearance</h3>
@@ -83,7 +83,7 @@
             <button class:active={app.theme === "light"} onclick={() => setTheme("light")}>Light</button>
           </div>
           <h3>Previews for offline viewing</h3>
-          <p class="muted">Lumio keeps a sharp copy of each photo (as well as the small thumbnail), so the large view and filmstrip look crisp straight away, even with the drive unplugged or the network drive away.</p>
+          <p class="muted">Frameloft keeps a sharp copy of each photo (as well as the small thumbnail), so the large view and filmstrip look crisp straight away, even with the drive unplugged or the network drive away.</p>
           <label class="radio"><input type="radio" name="offline" checked={(app.settings.offline_previews ?? "removable") === "removable"} onchange={() => setOffline("offline_previews", "removable")} />
             <span>For external, network and cloud drives <span class="muted">(recommended)</span></span></label>
           <label class="radio"><input type="radio" name="offline" checked={app.settings.offline_previews === "all"} onchange={() => setOffline("offline_previews", "all")} />
@@ -101,7 +101,7 @@
           {#if offline}
             <p class="muted">
               {offline.saved.toLocaleString()} saved, using {formatBytes(offline.bytes)}.
-              {#if offline.waiting}{offline.waiting.toLocaleString()} still to make; Lumio does these in the background while the drive is connected.{/if}
+              {#if offline.waiting}{offline.waiting.toLocaleString()} still to make; Frameloft does these in the background while the drive is connected.{/if}
               {#if offline.drives.length}<br />Kept for: {offline.drives.join(", ")}.{:else if (app.settings.offline_previews ?? "removable") !== "off"}<br />None of your connected library folders need them with this setting.{/if}
             </p>
             {#if offline.saved}<button onclick={clearOffline}>Delete saved previews</button>{/if}
@@ -123,18 +123,18 @@
           <label class="radio"><input type="radio" name="img" checked={(app.settings.image_write_mode ?? "embed") === "embed"} onchange={() => saveSetting("image_write_mode", "embed")} />
             <span><strong>Inside the file</strong> (recommended). Lightroom, Capture One, Bridge, Photos and Windows Explorer all see the changes. ExifTool rewrites only the metadata, not the picture.</span></label>
           <label class="radio"><input type="radio" name="img" checked={app.settings.image_write_mode === "sidecar"} onchange={() => saveSetting("image_write_mode", "sidecar")} />
-            <span><strong>XMP sidecar file</strong>, so Lumio never changes any original. Capture One and other apps that read sidecars pick these up, but Lightroom and Bridge ignore sidecars for JPEG files, so they won't see these edits.</span></label>
+            <span><strong>XMP sidecar file</strong>, so Frameloft never changes any original. Capture One and other apps that read sidecars pick these up, but Lightroom and Bridge ignore sidecars for JPEG files, so they won't see these edits.</span></label>
           <h3>Metadata engine</h3>
           {#if status}
             {#if status.exiftool}
               <p class="ok"><Check size={14} /> ExifTool found: <code>{status.exiftool_path}</code></p>
             {:else}
-              <p class="bad"><AlertTriangle size={14} /> ExifTool was not found. Lumio can browse photos but can't read or write most metadata. Install it from exiftool.org (on a Mac: <code>brew install exiftool</code>) and restart Lumio.</p>
+              <p class="bad"><AlertTriangle size={14} /> ExifTool was not found. Frameloft can browse photos but can't read or write most metadata. Install it from exiftool.org (on a Mac: <code>brew install exiftool</code>) and restart Frameloft.</p>
             {/if}
           {/if}
           <h3>Updates</h3>
           <label class="check"><input type="checkbox" checked={autoCheckOn()} onchange={(e) => saveSetting("update_check", (e.target as HTMLInputElement).checked ? "1" : "0")} />
-            <span>Tell me when a new version of Lumio is out. Lumio asks GitHub about twice a day; nothing about you or your photos is sent.</span></label>
+            <span>Tell me when a new version of Frameloft is out. Frameloft asks GitHub about twice a day; nothing about you or your photos is sent.</span></label>
           <button disabled={updates.checking} onclick={() => checkForUpdates(true)}>{updates.checking ? "Checking…" : "Check Now"}</button>
         {:else if tab === "ai" && ai}
           <h3>Provider</h3>
@@ -186,7 +186,7 @@
           {/each}
           <p class="muted">Map tiles and place search need an internet connection. Place search uses OpenStreetMap Nominatim.</p>
         {:else if tab === "about" && status}
-          <h3>Lumio {status.version} by Light and Alley</h3>
+          <h3>Frameloft {status.version} by Light and Alley</h3>
           <p class="muted">A lightweight, open-source photo browser and digital asset manager. Built with Rust and Tauri. MIT licence.</p>
           <dl>
             <dt>Photos in catalogue</dt><dd>{status.photo_count.toLocaleString()}</dd>

@@ -64,10 +64,13 @@ for (const f of md.filter((x) => x.startsWith("docs/"))) {
   if (!linked.has(normalize(f))) report(f, 0, "not linked from README.md or another document");
 }
 
-// 5. The project's address is spelled the way GitHub shows it.
-const WRONG_OWNER = "LI" + "ght-Alley";
-for (const f of files.filter((x) => !x.startsWith("build/") && x !== self && !/\.(png|jpe?g|icns|ico|gif|webp)$/i.test(x))) {
-  if (read(f).includes(WRONG_OWNER)) report(f, 0, `"${WRONG_OWNER}" should be "Light-Alley"`);
+// 5. Links use the project's current address (CHANGELOG.md keeps its history as written).
+const OLD_ADDRESSES = ["LI" + "ght-Alley", "Light-Alley" + "/Lumio", "alahmedmadina" + "/Lumio"];
+for (const f of files.filter((x) => !x.startsWith("build/") && x !== self && x !== "CHANGELOG.md" && !/\.(png|jpe?g|icns|ico|gif|webp)$/i.test(x))) {
+  const text = read(f).toLowerCase();
+  for (const old of OLD_ADDRESSES) {
+    if (text.includes(`github.com/${old.toLowerCase()}`)) report(f, 0, `link to the old address github.com/${old}; use https://github.com/frameloft/Frameloft`);
+  }
 }
 
 // 6. One version number everywhere.

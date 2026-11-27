@@ -1,5 +1,5 @@
-// "Is there a newer Lumio?" A quiet check soon after launch (and every few hours while
-// Lumio stays open), plus Lumio > Check for Updates… (Help menu on Windows and Linux).
+// "Is there a newer Frameloft?" A quiet check soon after launch (and every few hours while
+// Frameloft stays open), plus Frameloft > Check for Updates… (Help menu on Windows and Linux).
 // The check asks GitHub for the latest published release; see src-tauri/src/updates.rs.
 import { listen } from "@tauri-apps/api/event";
 import { api, errText, type UpdateInfo } from "./api";
@@ -24,7 +24,7 @@ const QUIET_GAP = 12 * 60 * 60 * 1000;
 
 /**
  * Ask GitHub whether a newer release is out. `manual` is the menu item: it always asks,
- * and says so when Lumio is up to date or the check fails. The automatic check stays
+ * and says so when Frameloft is up to date or the check fails. The automatic check stays
  * silent unless there is something new (and not a version the user chose to skip).
  */
 export async function checkForUpdates(manual: boolean) {
@@ -43,10 +43,10 @@ export async function checkForUpdates(manual: boolean) {
       updates.info = info;
       if (manual) updates.open = true;
       else if (app.settings.update_skip !== info.latest) {
-        toast(`Lumio ${info.latest} is available. You have ${info.current}.`, "info", { label: "See what's new", run: () => (updates.open = true) }, 20000);
+        toast(`Frameloft ${info.latest} is available. You have ${info.current}.`, "info", { label: "See what's new", run: () => (updates.open = true) }, 20000);
       }
     } else if (manual) {
-      toast(`You have the latest version of Lumio (${info.current}).`, "success");
+      toast(`You have the latest version of Frameloft (${info.current}).`, "success");
     }
   } catch (e) {
     if (manual) toast(errText(e), "error");
@@ -76,7 +76,7 @@ export async function installUpdate() {
     updates.total = e.payload.total;
   });
   try {
-    await api.installUpdate(); // Lumio restarts when this succeeds.
+    await api.installUpdate(); // Frameloft restarts when this succeeds.
   } catch (e) {
     toast(errText(e), "error", { label: "Open release page", run: () => openReleasePage() }, 15000);
   } finally {

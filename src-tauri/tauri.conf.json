@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Lumio",
+  "productName": "Frameloft",
   "version": "2.0.0",
   "identifier": "app.lumio.photos",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Lumio",
+        "title": "Frameloft",
         "width": 1440,
         "height": 900,
         "minWidth": 900,
@@ -31,8 +31,8 @@
     "targets": "all",
     "category": "Photography",
     "shortDescription": "Lightweight photo browser and digital asset manager",
-    "longDescription": "Lumio is a lightweight, open-source photo browser: rate, tag, geotag and organise photos across local, external and network drives, with offline thumbnails and an AI photo finder.",
-    "copyright": "\u00a9 Light and Alley and Lumio contributors, MIT licence",
+    "longDescription": "Frameloft is a lightweight, open-source photo browser: rate, tag, geotag and organise photos across local, external and network drives, with offline thumbnails and an AI photo finder.",
+    "copyright": "\u00a9 Light and Alley and Frameloft contributors, MIT licence",
     "resources": {
       "resources/exiftool": "exiftool"
     },
@@ -45,6 +45,29 @@
     ],
     "macOS": {
       "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "wix": {
+        "upgradeCode": "0a209452-5960-5f31-9759-04c09ae2904b"
+      }
+    },
+    "linux": {
+      "deb": {
+        "conflicts": [
+          "lumio"
+        ],
+        "replaces": [
+          "lumio"
+        ]
+      },
+      "rpm": {
+        "conflicts": [
+          "lumio"
+        ],
+        "obsoletes": [
+          "lumio"
+        ]
+      }
     }
   }
 }

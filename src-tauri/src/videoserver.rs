@@ -5,7 +5,7 @@
 //! plays fine over plain HTTP. So on Linux videos are served from
 //! `http://127.0.0.1:<port>/<secret>/<id>` instead. The server only listens on this
 //! computer, picks a free port, and answers only requests that carry a secret made fresh
-//! each time Lumio starts, so other programs and web pages can't read files through it.
+//! each time Frameloft starts, so other programs and web pages can't read files through it.
 //! macOS and Windows keep using `photo://`, which works there.
 
 use crate::state::AppState;
@@ -185,7 +185,7 @@ fn send_head(
         write!(w, "content-range: {r}\r\n")?;
     }
     // The frame grabber for thumbnails reads the picture back, which needs CORS, but
-    // only Lumio's own page is allowed to.
+    // only Frameloft's own page is allowed to.
     if let Some(o) = cors {
         write!(w, "access-control-allow-origin: {o}\r\nvary: origin\r\n")?;
     }
@@ -284,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn cors_only_for_lumio() {
+    fn cors_only_for_frameloft() {
         assert!(allowed_origin("tauri://localhost") && allowed_origin("http://tauri.localhost"));
         assert!(!allowed_origin("https://evil.example") && !allowed_origin("null") && !allowed_origin("*"));
         let mut out = Vec::new();

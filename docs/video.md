@@ -1,12 +1,12 @@
 # Video preview
 
-Lumio lists videos alongside photos and can play them with a small built-in player
+Frameloft lists videos alongside photos and can play them with a small built-in player
 (play/pause, back and forward 10 seconds, a position bar and volume). It is meant for a
 quick look, not as a full media player.
 
 ## Why it stays light
 
-Lumio does not bundle a video decoder (such as FFmpeg or VLC's libVLC, which would add
+Frameloft does not bundle a video decoder (such as FFmpeg or VLC's libVLC, which would add
 50–100 MB to every download). It plays videos with the HTML5 player of the web view the
 app already runs in, which uses the operating system's own video support:
 
@@ -19,10 +19,10 @@ app already runs in, which uses the operating system's own video support:
 The video file is streamed in small pieces, so starting and seeking are quick even for
 long videos on network drives, and the file is never loaded into memory whole.
 
-On macOS and Windows the player reads videos from Lumio's own `photo://` address. On
-Linux, WebKitGTK refuses to play media from such custom addresses, so there Lumio starts
+On macOS and Windows the player reads videos from Frameloft's own `photo://` address. On
+Linux, WebKitGTK refuses to play media from such custom addresses, so there Frameloft starts
 a tiny web server that only listens on the computer itself (`127.0.0.1`, a free port)
-and only answers requests carrying a secret that is made fresh each time Lumio starts.
+and only answers requests carrying a secret that is made fresh each time Frameloft starts.
 Other programs and web pages can't read files through it. See
 `src-tauri/src/videoserver.rs`.
 
@@ -37,7 +37,7 @@ Other programs and web pages can't read files through it. See
 | AVI, WMV, MPG, MTS / M2TS, 3GP | ✗ | mostly ✗ | mostly ✓ with gst-libav |
 | ProRes | ✓ | ✗ | ✗ |
 
-When a video can't be played on the current computer, Lumio says so and offers
+When a video can't be played on the current computer, Frameloft says so and offers
 **Open in video player**, which opens the file in the system's default app (for example
 VLC, if that is set as the default).
 
@@ -54,13 +54,13 @@ play MP4 and WebM. For the widest support install:
 ## Thumbnails
 
 - A preview picture saved inside the video by the camera is used when there is one.
-- **macOS**: otherwise Lumio asks Quick Look for a thumbnail, like Finder shows.
-- **Windows and Linux** (and anything Quick Look can't do): Lumio opens the video in its
+- **macOS**: otherwise Frameloft asks Quick Look for a thumbnail, like Finder shows.
+- **Windows and Linux** (and anything Quick Look can't do): Frameloft opens the video in its
   own player in the background, takes a frame about one second in, and saves that as the
   thumbnail. Videos the player can't open keep a film icon.
 
 ## Metadata
 
 Ratings, labels, titles, keywords and locations are written as XMP. MP4, M4V, MOV and 3GP
-files hold XMP themselves; for other video formats Lumio writes an XMP sidecar next to the
-file (as it does for RAW photos). Videos can't be rotated in Lumio.
+files hold XMP themselves; for other video formats Frameloft writes an XMP sidecar next to the
+file (as it does for RAW photos). Videos can't be rotated in Frameloft.

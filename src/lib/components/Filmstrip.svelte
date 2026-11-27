@@ -37,7 +37,7 @@
     if (!current && app.photos.length && !app.loading) selectOnly(app.photos[0].id);
   });
 
-  // The list is refreshed while Lumio indexes, giving a new object for the same photo.
+  // The list is refreshed while Frameloft indexes, giving a new object for the same photo.
   // Only reset when the photo or its file version really changes (see Viewer).
   const curId = $derived(current?.id ?? null);
   const bigSrc = $derived(current ? photoUrl(current) : "");

@@ -1,7 +1,7 @@
 //! The native menu bar: the macOS menu at the top of the screen, and the menu bar inside
 //! the window on Windows and Linux.
 //!
-//! Every Lumio item sends its id to the web view as a `menu` event, and `src/lib/menubar.ts`
+//! Every Frameloft item sends its id to the web view as a `menu` event, and `src/lib/menubar.ts`
 //! runs the same action as the right-click menu, toolbar button or shortcut. The web view
 //! tells us what is possible right now (`menu_sync`), so items that need a selection are
 //! greyed out and the view, panel and sort items show a tick.
@@ -102,15 +102,15 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     // ------------------------------------------------------------ app menu (macOS only)
     let about = PredefinedMenuItem::about(
         app,
-        Some("About Lumio"),
+        Some("About Frameloft"),
         Some(
             AboutMetadataBuilder::new()
-                .name(Some("Lumio"))
+                .name(Some("Frameloft"))
                 .version(Some(version.clone()))
-                .copyright(Some("© Light and Alley and Lumio contributors. MIT licence."))
+                .copyright(Some("© Light and Alley and Frameloft contributors. MIT licence."))
                 .comments(Some("A lightweight, open-source photo browser and digital asset manager."))
                 .website(Some(crate::updates::REPO_URL))
-                .website_label(Some("Lumio on GitHub"))
+                .website_label(Some("Frameloft on GitHub"))
                 .build(),
         ),
     )?;
@@ -376,11 +376,11 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     };
 
     // ------------------------------------------------------------ Help
-    let guide = c.item("help_guide", "Lumio User Guide", None, None)?;
+    let guide = c.item("help_guide", "Frameloft User Guide", None, None)?;
     let shortcuts = c.item("help_shortcuts", "Keyboard Shortcuts", Some("CmdOrCtrl+/"), None)?;
     let notes = c.item("help_releases", "Release Notes", None, None)?;
     let issue = c.item("help_issue", "Report a Problem or Suggest an Idea…", None, None)?;
-    let log = c.item("help_log", "Show Lumio's Log File", None, None)?;
+    let log = c.item("help_log", "Show Frameloft's Log File", None, None)?;
     let mut help: Vec<Box<dyn IsMenuItem<Wry>>> =
         vec![Box::new(guide), Box::new(shortcuts), Box::new(notes), Box::new(s()?), Box::new(issue), Box::new(log)];
     if !MAC {
@@ -395,7 +395,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     if MAC {
         let app_menu = sub(
             app,
-            "Lumio",
+            "Frameloft",
             &[
                 &about,
                 &check_updates,
@@ -459,17 +459,17 @@ pub fn menu_sync(state: tauri::State<'_, MenuState>, items: Vec<ItemState>) {
     }
 }
 
-/// Help > Show Lumio's Log File.
+/// Help > Show Frameloft's Log File.
 #[tauri::command]
 pub fn show_log(state: tauri::State<'_, std::sync::Arc<crate::state::AppState>>) -> Result<(), String> {
     let dir = state.db_path.parent().ok_or("no data folder")?;
-    let log = dir.join("lumio.log");
+    let log = dir.join("frameloft.log");
     let target = if log.exists() { log } else { dir.to_path_buf() };
     tauri_plugin_opener::reveal_item_in_dir(target).map_err(|e| e.to_string())
 }
 
 /// macOS adds its own "Show Tab Bar" and "Enter Full Screen" items to the View menu.
-/// Lumio has its own tabs and full-screen item, so turn those off.
+/// Frameloft has its own tabs and full-screen item, so turn those off.
 #[cfg(target_os = "macos")]
 pub fn mac_tidy() {
     use objc2::MainThreadMarker;

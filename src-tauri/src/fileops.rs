@@ -142,7 +142,7 @@ pub fn inside_root(root: &Path, path: &Path) -> Result<()> {
         }
     };
     if !real.starts_with(&croot) {
-        bail!("\"{}\" leads outside your library (through a link), so Lumio won't change it.", path.display());
+        bail!("\"{}\" leads outside your library (through a link), so Frameloft won't change it.", path.display());
     }
     Ok(())
 }
@@ -151,7 +151,7 @@ pub fn inside_root(root: &Path, path: &Path) -> Result<()> {
 /// act on whatever it points at, or surprise the person).
 pub fn not_a_link(path: &Path) -> Result<()> {
     if std::fs::symlink_metadata(path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-        bail!("\"{}\" is a link to another place, so Lumio won't change it.", path.display());
+        bail!("\"{}\" is a link to another place, so Frameloft won't change it.", path.display());
     }
     Ok(())
 }
@@ -211,14 +211,14 @@ pub(crate) fn free_name(
 /// A hidden, unpredictable name next to `dst` for a copy that isn't finished yet.
 fn part_name(dst: &Path) -> Result<PathBuf> {
     let name = dst.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    Ok(dst.with_file_name(format!(".lumio-{}-{name}.part", crate::secure::random_hex(8)?)))
+    Ok(dst.with_file_name(format!(".frameloft-{}-{name}.part", crate::secure::random_hex(8)?)))
 }
 
 fn already_there(dst: &Path) -> anyhow::Error {
     anyhow!("a file named \"{}\" is already there", dst.file_name().unwrap_or_default().to_string_lossy())
 }
 
-/// Give `from`, a file Lumio has just made, the name `to`, never replacing a file that is
+/// Give `from`, a file Frameloft has just made, the name `to`, never replacing a file that is
 /// already called that. A hard link fails if the name is taken, which rename doesn't on
 /// every system; drives without hard links fall back to checking first.
 pub(crate) fn place_new(from: &Path, to: &Path) -> Result<()> {
@@ -718,7 +718,7 @@ pub fn rename_folder<H: Host + ?Sized>(h: &H, path: &Path, new_name: &str) -> Re
     if same_place(&dst, path) {
         // Only the case changes ("trip" -> "Trip"). Drives that ignore case see the new
         // name as taken by the folder itself, so go through a temporary name.
-        let tmp = path.with_file_name(format!(".lumio-rename-{}.tmp", crate::secure::random_hex(8)?));
+        let tmp = path.with_file_name(format!(".frameloft-rename-{}.tmp", crate::secure::random_hex(8)?));
         if tmp.exists() {
             bail!("Could not rename the folder; try again.");
         }

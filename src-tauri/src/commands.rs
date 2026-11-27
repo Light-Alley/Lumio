@@ -200,7 +200,7 @@ pub fn folder_children(state: S, path: String) -> R<Vec<FolderNode>> {
 
 /// Folder commands only touch folders inside the library. `strictly` also refuses a
 /// library root itself (roots are removed from the library, never renamed, moved or
-/// trashed from Lumio). Paths with ".." are refused so they can't step outside a root.
+/// trashed from Frameloft). Paths with ".." are refused so they can't step outside a root.
 /// Links are followed: a link inside a library folder that points elsewhere is refused,
 /// and with `strictly` (the folder itself is changed) a link is never acted on.
 fn in_library(st: &AppState, path: &Path, strictly: bool) -> anyhow::Result<()> {
@@ -376,7 +376,7 @@ pub fn retry_pending_moves(state: S) -> R<()> {
     Ok(())
 }
 
-/// Colour histogram of a photo, counted from the preview or thumbnail Lumio keeps for it.
+/// Colour histogram of a photo, counted from the preview or thumbnail Frameloft keeps for it.
 #[tauri::command]
 pub async fn histogram(state: S<'_>, id: i64) -> R<crate::histogram::Histogram> {
     let st = state.inner().clone();
@@ -627,7 +627,7 @@ pub async fn rotate_photos(state: S<'_>, ids: Vec<i64>, op: String) -> R<OpRepor
                     anyhow::bail!("the file is not available (is its drive connected?)");
                 }
                 if metadata::is_video(&p.ext) {
-                    anyhow::bail!("videos can't be rotated in Lumio");
+                    anyhow::bail!("videos can't be rotated in Frameloft");
                 }
                 let use_sidecar = edits_go_to_sidecar(&p.ext, &raw_mode, &image_mode);
                 if matches!(p.ext.as_str(), "gif" | "bmp") && !use_sidecar {

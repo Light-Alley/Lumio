@@ -250,8 +250,8 @@ impl DirNames {
 }
 
 /// Size of the photo, and the newest modification time of the photo and its XMP sidecar.
-/// The catalogue stores this time, so an edit to either file (by Lumio or another app)
-/// is noticed, and a photo Lumio just edited isn't indexed again for nothing.
+/// The catalogue stores this time, so an edit to either file (by Frameloft or another app)
+/// is noticed, and a photo Frameloft just edited isn't indexed again for nothing.
 pub fn stat_with_sidecar(p: &Path) -> Option<(i64, i64)> {
     let (size, mtime) = stat(p)?;
     Some((size, mtime.max(sidecar_mtime(find_sidecar(p).as_deref()))))
@@ -297,7 +297,7 @@ pub fn run_worker(state: Arc<AppState>, rx: Receiver<Job>) {
         let mins = [1u64, 2, 5, 10, 15][(n - 1).min(4)];
         log::warn!("{off}; indexing paused, retrying in {mins} min");
         let msg = format!(
-            "{} isn't reachable. Lumio will carry on when it's back (next try in {mins} min).",
+            "{} isn't reachable. Frameloft will carry on when it's back (next try in {mins} min).",
             off.root.display()
         );
         emit_progress(&state, false, 0, 0, &msg);
@@ -788,7 +788,7 @@ mod sidecar_tests {
     use super::*;
 
     fn dir(name: &str) -> PathBuf {
-        tempfile::Builder::new().prefix(&format!("lumio-sidecar-{name}-")).tempdir().unwrap().keep()
+        tempfile::Builder::new().prefix(&format!("frameloft-sidecar-{name}-")).tempdir().unwrap().keep()
     }
 
     #[test]

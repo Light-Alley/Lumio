@@ -206,12 +206,12 @@
         <p>SmugMug asks every app that uploads photos to use its own free "API key". You only do this once, and it takes about two minutes.</p>
         <ol>
           <li>Open <button class="link" onclick={() => smugmug.open(status?.apply_url ?? "https://api.smugmug.com/api/developer/apply")}>SmugMug's API key page <ExternalLink size={12} /></button> and sign in to SmugMug if asked.</li>
-          <li>Fill in the short form. For example: name <em>Lumio (personal)</em>, type <em>Application</em>, platform <em>Desktop</em>, use <em>Personal</em>, description <em>Uploading my own photos from Lumio</em>. Accept the terms and submit.</li>
+          <li>Fill in the short form. For example: name <em>Frameloft (personal)</em>, type <em>Application</em>, platform <em>Desktop</em>, use <em>Personal</em>, description <em>Uploading my own photos from Frameloft</em>. Accept the terms and submit.</li>
           <li>SmugMug then shows a <strong>Key</strong> and a <strong>Secret</strong>. Copy both into the boxes below.</li>
         </ol>
         <label class="field"><span>API key</span><input type="text" bind:value={appKey} spellcheck="false" autocomplete="off" /></label>
         <label class="field"><span>API secret</span><input type="password" bind:value={appSecret} spellcheck="false" autocomplete="off" /></label>
-        <p class="faint small">Both are kept in your computer's keychain, never in the Lumio catalogue.</p>
+        <p class="faint small">Both are kept in your computer's keychain, never in the Frameloft catalogue.</p>
         <div class="buttons">
           <button onclick={close}>Cancel</button>
           <button class="primary" disabled={busy || !appKey.trim() || !appSecret.trim()} onclick={saveKey}>Save and continue</button>
@@ -219,7 +219,7 @@
 
       {:else if step === "signin"}
         {#if !authUrl}
-          <p>Next, let Lumio upload to your SmugMug account. Your browser will open SmugMug; click <strong>Authorize</strong> there and SmugMug will show you a six-digit code.</p>
+          <p>Next, let Frameloft upload to your SmugMug account. Your browser will open SmugMug; click <strong>Authorize</strong> there and SmugMug will show you a six-digit code.</p>
           <div class="buttons">
             <button class="ghost" onclick={() => signOut(true)}>Use a different API key</button>
             <span class="grow"></span>

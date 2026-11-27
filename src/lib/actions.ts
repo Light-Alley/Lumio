@@ -112,7 +112,7 @@ function stackItems(p: PhotoLite, ids: number[]): MenuItem[] {
 }
 
 export async function chooseApp(ids: number[]) {
-  // The file dialog is shown by Lumio's back end, so only an app picked there can be started.
+  // The file dialog is shown by Frameloft's back end, so only an app picked there can be started.
   await api.chooseAppAndOpen(ids).catch(errorToast);
 }
 

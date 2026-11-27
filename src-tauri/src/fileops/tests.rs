@@ -16,7 +16,7 @@ fn links_out_of_a_root_are_refused() {
     assert!(not_a_link(&lib.join("escape_link")).is_err());
     assert!(not_a_link(&lib.join("Trip")).is_ok());
     // Unplugged drive: nothing to follow.
-    assert!(inside_root(Path::new("/nonexistent-lumio-root"), Path::new("/nonexistent-lumio-root/a")).is_ok());
+    assert!(inside_root(Path::new("/nonexistent-frameloft-root"), Path::new("/nonexistent-frameloft-root/a")).is_ok());
 }
 
 #[cfg(unix)]

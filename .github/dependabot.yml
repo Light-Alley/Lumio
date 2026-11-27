@@ -1,6 +1,6 @@
 # Keeps dependencies (and the pinned GitHub Actions) up to date with weekly pull
 # requests. New versions wait a few days first (cooldown), so a bad release is usually
-# pulled before it reaches Lumio; security updates don't wait.
+# pulled before it reaches Frameloft; security updates don't wait.
 version: 2
 updates:
   - package-ecosystem: npm

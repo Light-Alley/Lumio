@@ -45,7 +45,7 @@ pub async fn geocode(query: String) -> Result<Vec<Place>, String> {
         return Ok(vec![]);
     }
     let client = reqwest::Client::builder()
-        .user_agent(concat!("Lumio/", env!("CARGO_PKG_VERSION"), " (open-source photo manager)"))
+        .user_agent(concat!("Frameloft/", env!("CARGO_PKG_VERSION"), " (open-source photo manager)"))
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|e| e.to_string())?;
@@ -65,8 +65,8 @@ pub async fn geocode(query: String) -> Result<Vec<Place>, String> {
     if !status.is_success() {
         return Err(format!("Place search is not available right now (OpenStreetMap answered {status})."));
     }
-    let v: serde_json::Value =
-        serde_json::from_slice(&body).map_err(|_| "Place search sent an answer Lumio couldn't read.".to_string())?;
+    let v: serde_json::Value = serde_json::from_slice(&body)
+        .map_err(|_| "Place search sent an answer Frameloft couldn't read.".to_string())?;
     Ok(places(&v))
 }
 

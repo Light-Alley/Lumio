@@ -1,5 +1,5 @@
 // Thumbnails for videos the system couldn't make one for (Windows and Linux have no
-// thumbnailer Lumio can call without bundling a video decoder). The webview's own
+// thumbnailer Frameloft can call without bundling a video decoder). The webview's own
 // player opens the video, jumps a little way in, and the frame is saved as the
 // thumbnail. One video at a time, in the background; videos the player can't open
 // keep the film icon.
@@ -36,7 +36,7 @@ function capture(p: PhotoLite): Promise<void> {
     v.muted = true;
     v.preload = "auto";
     v.playsInline = true;
-    // The video comes from Lumio's own address (photo://, or the local server on Linux);
+    // The video comes from Frameloft's own address (photo://, or the local server on Linux);
     // without this the frame could not be read back from the canvas.
     v.crossOrigin = "anonymous";
     let done = false;

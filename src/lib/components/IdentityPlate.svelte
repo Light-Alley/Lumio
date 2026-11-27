@@ -5,10 +5,10 @@
   const owner = $derived((app.settings.owner_name ?? "").trim());
 </script>
 
-<div class="plate" class:named={!!owner} data-tauri-drag-region title={owner ? `Lumio by Light and Alley · ${owner}` : "Lumio by Light and Alley"}>
-  <img src="/lumio-icon.png" alt="" draggable="false" data-tauri-drag-region />
+<div class="plate" class:named={!!owner} data-tauri-drag-region title={owner ? `Frameloft by Light and Alley · ${owner}` : "Frameloft by Light and Alley"}>
+  <img src="/frameloft-icon.png" alt="" draggable="false" data-tauri-drag-region />
   <div class="text" data-tauri-drag-region>
-    <div class="brand" data-tauri-drag-region><strong>Lumio</strong> by Light and Alley</div>
+    <div class="brand" data-tauri-drag-region><strong>Frameloft</strong> by Light and Alley</div>
     {#if owner}<div class="owner" data-tauri-drag-region>{owner}</div>{/if}
   </div>
 </div>

@@ -752,9 +752,9 @@ dependencies = [
 
 [[package]]
 name = "cookie"
-version = "0.18.2"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a373e3602691c3cdea496d2f0ee5935151e6168fe87739483c463db1b2f2f87"
+checksum = "d55f2d6c30eeec7d5c6f98bd4395d4abb1895629eab97ee6522d340623615f8a"
 dependencies = [
  "time",
  "version_check",
@@ -929,7 +929,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 3.0.10",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1485,6 +1485,50 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "frameloft"
+version = "2.0.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "base64 0.23.1",
+ "core-foundation 0.10.1",
+ "futures-util",
+ "getrandom 0.4.3",
+ "hmac 0.13.0",
+ "image",
+ "jiff 0.2.46",
+ "keyring",
+ "log",
+ "notify",
+ "notify-debouncer-full",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "parking_lot 0.13.0",
+ "percent-encoding",
+ "rayon",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha1 0.11.0",
+ "shell-words",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-updater",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "trash",
+ "url",
+ "walkdir",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -2838,50 +2882,6 @@ name = "lru-slab"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
-
-[[package]]
-name = "lumio"
-version = "2.0.0"
-dependencies = [
- "anyhow",
- "arboard",
- "base64 0.23.1",
- "core-foundation 0.10.1",
- "futures-util",
- "getrandom 0.4.3",
- "hmac 0.13.0",
- "image",
- "jiff 0.2.46",
- "keyring",
- "log",
- "notify",
- "notify-debouncer-full",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "parking_lot 0.13.0",
- "percent-encoding",
- "rayon",
- "reqwest 0.12.28",
- "rusqlite",
- "semver",
- "serde",
- "serde_json",
- "sha1 0.11.0",
- "shell-words",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-updater",
- "tempfile",
- "tokio",
- "tokio-util",
- "trash",
- "url",
- "walkdir",
- "windows 0.58.0",
-]
 
 [[package]]
 name = "markup5ever"

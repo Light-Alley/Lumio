@@ -57,7 +57,7 @@
   const bgColor = $derived(BGS.find((b) => b.id === app.viewerBg)?.color ?? "#000");
   const lightBg = $derived(app.viewerBg === "white" || app.viewerBg === "lightgrey");
 
-  // Lumio refreshes the photo list while it indexes, which hands us a new object for the
+  // Frameloft refreshes the photo list while it indexes, which hands us a new object for the
   // same photo. Only start over when the photo or its file version really changes;
   // otherwise the sharp image would be hidden again and never come back.
   const pid = $derived(p?.id ?? null);

@@ -1,6 +1,6 @@
 # Code of conduct
 
-Lumio is a friendly project for people who love photography. Everyone who takes part, in issues, pull requests, discussions or anywhere else in the project, is expected to:
+Frameloft is a friendly project for people who love photography. Everyone who takes part, in issues, pull requests, discussions or anywhere else in the project, is expected to:
 
 - be welcoming and patient, especially with people who are new to open source or to programming;
 - be respectful when you disagree, and criticise ideas, not people;
@@ -10,6 +10,6 @@ Lumio is a friendly project for people who love photography. Everyone who takes 
 
 Maintainers may edit or remove comments, close issues and pull requests, and block people who don't follow this.
 
-To report a problem privately, use **Report content** on the comment in GitHub, or contact the maintainers through the [Light and Alley](https://github.com/Light-Alley) organisation profile. Reports are kept confidential.
+To report a problem privately, use **Report content** on the comment in GitHub, or contact the maintainers through the [frameloft](https://github.com/frameloft) organisation profile on GitHub. Reports are kept confidential.
 
 This code is adapted in spirit from the [Contributor Covenant](https://www.contributor-covenant.org).

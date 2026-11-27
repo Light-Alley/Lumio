@@ -1,13 +1,13 @@
-# OSV-Scanner reads this next to Cargo.lock. Each entry is an advisory with no fix Lumio
+# OSV-Scanner reads this next to Cargo.lock. Each entry is an advisory with no fix Frameloft
 # can take: they all come from Tauri's own Linux stack (GTK 0.18 bindings and zbus), are
-# notices that a crate is unmaintained (not a vulnerability), or affect code Lumio
+# notices that a crate is unmaintained (not a vulnerability), or affect code Frameloft
 # doesn't call. Every entry expires, so it is looked at again; remove it once Tauri
 # updates the dependency. cargo audit lists the same notices in the Check log.
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2024-0429"
 ignoreUntil = 2027-02-28
-reason = "glib 0.18 VariantStrIter unsoundness; comes in through Tauri's GTK 0.18 stack (no 0.20 release of Tauri's Linux backend yet), and Lumio never iterates GVariant strings"
+reason = "glib 0.18 VariantStrIter unsoundness; comes in through Tauri's GTK 0.18 stack (no 0.20 release of Tauri's Linux backend yet), and Frameloft never iterates GVariant strings"
 
 [[IgnoredVulns]]
 id = "GHSA-wrw7-89jp-8q8g"
@@ -17,7 +17,7 @@ reason = "Same glib 0.18 advisory as RUSTSEC-2024-0429"
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0543"
 ignoreUntil = 2027-02-28
-reason = "chrono marked unmaintained; Lumio itself moved to jiff, chrono remains only through dependencies"
+reason = "chrono marked unmaintained; Frameloft itself moved to jiff, chrono remains only through dependencies"
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2024-0436"

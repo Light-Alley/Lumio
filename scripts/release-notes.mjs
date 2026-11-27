@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Prints the CHANGELOG.md section for one version (default: the version in
-// package.json). The release workflow uses it as the release text, which Lumio shows
+// package.json). The release workflow uses it as the release text, which Frameloft shows
 // in its update window. Usage: node scripts/release-notes.mjs [2.0.0]
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

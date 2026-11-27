@@ -19,7 +19,7 @@
   <div class="backdrop" role="presentation" onmousedown={(e) => e.target === e.currentTarget && close()}>
     <div class="dialog" bind:this={box} role="dialog" aria-modal="true" aria-label="Update available" tabindex="-1"
       onkeydown={(e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } }}>
-      <h3>Lumio {u.latest} is available</h3>
+      <h3>Frameloft {u.latest} is available</h3>
       <p class="muted">You have version {u.current}.{#if u.published}{" "}Released {new Date(u.published).toLocaleDateString()}.{/if}</p>
       {#if notes}
         <div class="notes">{notes}</div>
@@ -27,7 +27,7 @@
       {#if updates.installing}
         <div class="progress" aria-live="polite">
           <div class="bar"><div class="fill" style:width={pct === null ? "35%" : `${pct}%`} class:indeterminate={pct === null}></div></div>
-          <span class="muted">Downloading {formatBytes(updates.downloaded)}{#if updates.total} of {formatBytes(updates.total)}{/if}. Lumio restarts by itself when it's installed.</span>
+          <span class="muted">Downloading {formatBytes(updates.downloaded)}{#if updates.total} of {formatBytes(updates.total)}{/if}. Frameloft restarts by itself when it's installed.</span>
         </div>
       {:else if !u.can_install}
         <p class="muted small">Download the installer for your computer from the release page and install it over this copy, as you did the first time. Your library, settings and photos stay as they are.</p>

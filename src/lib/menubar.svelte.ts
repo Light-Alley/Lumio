@@ -134,7 +134,7 @@ export function runMenu(id: string) {
   }
 
   switch (id) {
-    // Lumio / File
+    // Frameloft / File
     case "settings": app.showSettings = true; break;
     case "check_updates": checkForUpdates(true); break;
     case "new_tab": newTab(); break;

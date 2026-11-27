@@ -1,4 +1,4 @@
-// Getting photos out of Lumio: SmugMug uploads and web-ready copies (e.g. for Squarespace).
+// Getting photos out of Frameloft: SmugMug uploads and web-ready copies (e.g. for Squarespace).
 // Kept apart from the main store so these features stay easy to find and change.
 import { invoke } from "@tauri-apps/api/core";
 

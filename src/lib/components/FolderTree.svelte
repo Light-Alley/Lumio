@@ -33,8 +33,8 @@
     aria-expanded={n.has_children ? !!expanded[n.path] : undefined}
     tabindex="-1"
     draggable={n.online}
-    ondragstart={(e) => { e.dataTransfer?.setData("application/x-lumio-folder", n.path); }}
-    ondragover={(e) => { if (n.online || e.dataTransfer?.types.includes("application/x-lumio-photos")) { e.preventDefault(); dropTarget = n.path; if (e.dataTransfer) e.dataTransfer.dropEffect = e.altKey ? "copy" : "move"; } }}
+    ondragstart={(e) => { e.dataTransfer?.setData("application/x-frameloft-folder", n.path); }}
+    ondragover={(e) => { if (n.online || e.dataTransfer?.types.includes("application/x-frameloft-photos")) { e.preventDefault(); dropTarget = n.path; if (e.dataTransfer) e.dataTransfer.dropEffect = e.altKey ? "copy" : "move"; } }}
     ondragleave={() => (dropTarget = null)}
     ondrop={(e) => { e.preventDefault(); dropTarget = null; dropOnFolder(n.path, e); }}
     onclick={() => select(n)}

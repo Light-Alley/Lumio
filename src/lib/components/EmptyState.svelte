@@ -9,8 +9,8 @@
   <div class="empty">
     {#if !app.roots.length}
       <img class="brand" src="/logo.png" alt="Light & Alley Photography" draggable="false" />
-      <h2>Welcome to Lumio</h2>
-      <p>Add a folder of photos to get started. It can be on this computer, an external drive or a network drive. Lumio keeps small thumbnails so you can still browse them when the drive is unplugged.</p>
+      <h2>Welcome to Frameloft</h2>
+      <p>Add a folder of photos to get started. It can be on this computer, an external drive or a network drive. Frameloft keeps small thumbnails so you can still browse them when the drive is unplugged.</p>
       <button class="primary" onclick={() => addFolderToLibrary()}><Plus size={14} /> Add a folder</button>
     {:else if folderEmptyButHasSubs}
       <FolderOpen size={40} strokeWidth={1.2} />

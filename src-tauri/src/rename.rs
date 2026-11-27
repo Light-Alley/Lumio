@@ -147,7 +147,7 @@ fn expand(pattern: &str, p: &Photo, stem: &str, n: i64, digits: u32) -> Result<S
             "camera" => clean(p.model.as_deref().unwrap_or("")),
             "title" => clean(p.title.as_deref().unwrap_or("")),
             other => bail!(
-                "\"{{{other}}}\" is not something Lumio can put in a name. Use one of: {}.",
+                "\"{{{other}}}\" is not something Frameloft can put in a name. Use one of: {}.",
                 TOKENS.iter().map(|t| format!("{{{t}}}")).collect::<Vec<_>>().join(", ")
             ),
         };
@@ -419,7 +419,7 @@ pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Re
                 continue;
             }
         };
-        let tmp = dir.join(format!(".lumio-rename-{tag}.tmp"));
+        let tmp = dir.join(format!(".frameloft-rename-{tag}.tmp"));
         if let Err(e) = crate::fileops::place_new(&w.src, &tmp) {
             rep.failed.push((w.photo.filename.clone(), format!("could not rename: {e:#}")));
             w.dst = PathBuf::new();
@@ -427,7 +427,7 @@ pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Re
         }
         w.parked = Some(tmp);
         if let Some((s, false)) = &w.side {
-            let ts = dir.join(format!(".lumio-rename-{tag}.xmp.tmp"));
+            let ts = dir.join(format!(".frameloft-rename-{tag}.xmp.tmp"));
             if crate::fileops::place_new(s, &ts).is_ok() {
                 w.parked_side = Some(ts);
             }
@@ -506,7 +506,7 @@ pub(crate) fn rename_in(conn: &Mutex<Connection>, items: &[(i64, String)]) -> Re
         let conn = conn.lock();
         let tx = conn.unchecked_transaction()?;
         for (id, _, _) in &renamed {
-            tx.execute("UPDATE photos SET path = '//lumio-renaming/' || id WHERE id = ?1", [id])?;
+            tx.execute("UPDATE photos SET path = '//frameloft-renaming/' || id WHERE id = ?1", [id])?;
         }
         for (id, dst, name) in &renamed {
             tx.execute(
@@ -635,7 +635,7 @@ mod tests {
     // ---- renaming real files -------------------------------------------------------
 
     fn setup(files: &[&str]) -> (PathBuf, Mutex<Connection>, Vec<i64>) {
-        let dir = tempfile::Builder::new().prefix("lumio-rename-test-").tempdir().unwrap().keep();
+        let dir = tempfile::Builder::new().prefix("frameloft-rename-test-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let conn = Connection::open_in_memory().unwrap();
         db::migrate(&conn).unwrap();
