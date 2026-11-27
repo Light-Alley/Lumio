@@ -9,7 +9,6 @@ New versions are listed here automatically from the commit messages (see
 
 ### Features
 
-* rename Lumio to Frameloft ([a8adfd1](https://github.com/frameloft/Frameloft/commit/a8adfd16c3ae067ef9f88a143fb1c236c4b764a2))
 * rename Lumio to Frameloft ([82c3ef8](https://github.com/frameloft/Frameloft/commit/82c3ef8c29f6839bfaeb655a7d86d2577597b656))
 
 
