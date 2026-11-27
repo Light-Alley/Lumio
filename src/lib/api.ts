@@ -126,7 +126,7 @@ export const api = {
   showLog: () => invoke<void>("show_log"),
   checkForUpdates: () => invoke<UpdateInfo>("check_for_updates"),
   installUpdate: () => invoke<void>("install_update"),
-  /** Open a page of Lumio's GitHub project (anything else opens the latest release). */
+  /** Open a page of Frameloft's GitHub project (anything else opens the latest release). */
   openProjectPage: (url?: string) => invoke<void>("open_project_page", { url: url ?? null }),
 };
 
@@ -136,7 +136,7 @@ export interface UpdateInfo {
   current: string; latest: string; newer: boolean; name: string; notes: string;
   url: string; published: string; can_install: boolean;
 }
-export const REPO_URL = "https://github.com/Light-Alley/Lumio";
+export const REPO_URL = "https://github.com/frameloft/Frameloft";
 
 export const VIDEO_EXTS = ["mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv"];
 export const isVideo = (p: { ext: string } | null | undefined) => !!p && VIDEO_EXTS.includes(p.ext.toLowerCase());
@@ -162,7 +162,7 @@ function scheme(name: string) {
 }
 type Versioned = { id: number; mtime: number; orientation?: number | null };
 export const thumbUrl = (p: Versioned) => `${scheme("thumb")}/${p.id}?m=${p.mtime}-${p.orientation ?? 1}`;
-/** The sharper preview Lumio keeps for offline viewing (about 1600 px), or the thumbnail
+/** The sharper preview Frameloft keeps for offline viewing (about 1600 px), or the thumbnail
  *  when there isn't one. Use it wherever a photo is shown large before the original loads. */
 export const previewUrl = (p: Versioned) => `${scheme("thumb")}/${p.id}?m=${p.mtime}-${p.orientation ?? 1}&s=L`;
 /** On Linux videos come from a small local server instead of photo:// (WebKitGTK won't
@@ -187,7 +187,7 @@ export const LABELS = [
   { name: "Blue", color: "#3e63dd" },
   { name: "Purple", color: "#8e4ec6" },
 ];
-/** Capture One also has orange and pink colour tags; Lumio shows them but doesn't set them. */
+/** Capture One also has orange and pink colour tags; Frameloft shows them but doesn't set them. */
 const OTHER_LABELS = [
   { name: "Orange", color: "#f76b15" },
   { name: "Pink", color: "#e93d82" },

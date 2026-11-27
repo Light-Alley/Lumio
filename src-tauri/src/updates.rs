@@ -1,4 +1,4 @@
-//! Telling people when a newer Lumio is out, and (when the release was signed for it)
+//! Telling people when a newer Frameloft is out, and (when the release was signed for it)
 //! installing it from inside the app.
 //!
 //! Two parts, so that it works before and after the updater keys exist:
@@ -6,7 +6,7 @@
 //! - **Is there a newer version?** asks GitHub for the latest published release. This
 //!   needs no keys and works for every install (drafts and pre-releases are ignored).
 //! - **Install and restart** uses Tauri's updater, which only accepts a download signed
-//!   with Lumio's updater key. The release workflow switches it on when that key is set
+//!   with Frameloft's updater key. The release workflow switches it on when that key is set
 //!   (see docs/updates.md); until then, and on Linux .deb/.rpm installs, the notice
 //!   offers the download page instead.
 //!
@@ -15,8 +15,8 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-pub const REPO_URL: &str = "https://github.com/Light-Alley/Lumio";
-const LATEST_API: &str = "https://api.github.com/repos/Light-Alley/Lumio/releases/latest";
+pub const REPO_URL: &str = "https://github.com/frameloft/Frameloft";
+const LATEST_API: &str = "https://api.github.com/repos/frameloft/Frameloft/releases/latest";
 
 /// Whether the updater plugin was set up (the build carries an updater public key).
 pub struct Installer(pub bool);
@@ -36,7 +36,7 @@ pub struct UpdateInfo {
     pub can_install: bool,
 }
 
-/// "v1.2.0", "1.2.0" or "Lumio v1.2.0" -> 1.2.0.
+/// "v1.2.0", "1.2.0" or "Frameloft v1.2.0" -> 1.2.0.
 fn parse_version(tag: &str) -> Option<semver::Version> {
     let t = tag.trim();
     let t = t.rsplit(' ').next().unwrap_or(t);
@@ -51,10 +51,10 @@ fn is_newer(latest: &str, current: &str) -> bool {
     }
 }
 
-/// A page of Lumio's own GitHub project: https, github.com, and the Light-Alley/Lumio
+/// A page of Frameloft's own GitHub project: https, github.com, and the frameloft/Frameloft
 /// repository (GitHub treats owner and repository names without regard to case).
 /// Parsed rather than compared as text, so "github.com.evil.example", user names in the
-/// address, or "/Light-Alley/Lumio-fake" don't pass.
+/// address, or "/frameloft/Frameloft-fake" don't pass.
 fn is_project_page(u: &str) -> bool {
     let Ok(url) = url::Url::parse(u) else { return false };
     if url.scheme() != "https" || url.host_str() != Some("github.com") || url.port().is_some() {
@@ -65,7 +65,7 @@ fn is_project_page(u: &str) -> bool {
     }
     let mut parts = url.path_segments().into_iter().flatten();
     let (owner, repo) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-    owner.eq_ignore_ascii_case("Light-Alley") && repo.eq_ignore_ascii_case("Lumio")
+    owner.eq_ignore_ascii_case("frameloft") && repo.eq_ignore_ascii_case("Frameloft")
 }
 
 /// Read GitHub's answer for the latest release.
@@ -101,12 +101,12 @@ pub async fn check_for_updates(app: AppHandle) -> Result<UpdateInfo, String> {
     let current = app.package_info().version.to_string();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
-        .user_agent(format!("Lumio/{current}"))
+        .user_agent(format!("Frameloft/{current}"))
         .build()
         .map_err(|e| e.to_string())?;
-    // Development builds can point at a test server: LUMIO_UPDATE_API=http://127.0.0.1:8000/latest.json
+    // Development builds can point at a test server: FRAMELOFT_UPDATE_API=http://127.0.0.1:8000/latest.json
     let api = if cfg!(debug_assertions) {
-        std::env::var("LUMIO_UPDATE_API").unwrap_or_else(|_| LATEST_API.into())
+        std::env::var("FRAMELOFT_UPDATE_API").unwrap_or_else(|_| LATEST_API.into())
     } else {
         LATEST_API.into()
     };
@@ -118,7 +118,7 @@ pub async fn check_for_updates(app: AppHandle) -> Result<UpdateInfo, String> {
         .map_err(|e| format!("Could not reach GitHub to check for updates. Are you online? ({e})"))?;
     let status = resp.status();
     if status == reqwest::StatusCode::NOT_FOUND {
-        return Err("No published Lumio release was found on GitHub yet.".into());
+        return Err("No published Frameloft release was found on GitHub yet.".into());
     }
     if !status.is_success() {
         return Err(format!("GitHub didn't answer the update check (HTTP {}). Try again later.", status.as_u16()));
@@ -133,12 +133,14 @@ struct Progress {
     total: Option<u64>,
 }
 
-/// Download the update, check its signature, install it and restart Lumio.
+/// Download the update, check its signature, install it and restart Frameloft.
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
     if !install_supported(&app) {
-        return Err("This copy of Lumio can't update itself. Download the new version from the release page.".into());
+        return Err(
+            "This copy of Frameloft can't update itself. Download the new version from the release page.".into()
+        );
     }
     let updater = app.updater().map_err(|e| e.to_string())?;
     let update = updater
@@ -164,7 +166,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn open_project_page(url: Option<String>) -> Result<(), String> {
-    // Only ever open Lumio's own GitHub pages from here (release notes, guide, issues).
+    // Only ever open Frameloft's own GitHub pages from here (release notes, guide, issues).
     let url = url.filter(|u| is_project_page(u)).unwrap_or_else(|| format!("{REPO_URL}/releases/latest"));
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
@@ -175,16 +177,16 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn only_lumios_own_pages_are_opened() {
-        assert!(is_project_page("https://github.com/Light-Alley/Lumio/releases/tag/v2.0.0"));
-        assert!(is_project_page("https://github.com/LIGHT-ALLEY/Lumio/issues"));
-        assert!(is_project_page("https://github.com/light-alley/lumio"));
-        assert!(!is_project_page("https://github.com/Light-Alley/Lumio-fake/releases"));
-        assert!(!is_project_page("https://github.com.evil.example/Light-Alley/Lumio"));
-        assert!(!is_project_page("https://user@github.com/Light-Alley/Lumio"));
-        assert!(!is_project_page("http://github.com/Light-Alley/Lumio"));
-        assert!(!is_project_page("https://github.com:8443/Light-Alley/Lumio"));
-        assert!(!is_project_page("https://github.com/Someone/Lumio"));
+    fn only_framelofts_own_pages_are_opened() {
+        assert!(is_project_page("https://github.com/frameloft/Frameloft/releases/tag/v2.0.0"));
+        assert!(is_project_page("https://github.com/frameloft/Frameloft/issues"));
+        assert!(is_project_page("https://github.com/frameloft/Frameloft"));
+        assert!(!is_project_page("https://github.com/frameloft/Frameloft-fake/releases"));
+        assert!(!is_project_page("https://github.com.evil.example/frameloft/Frameloft"));
+        assert!(!is_project_page("https://user@github.com/frameloft/Frameloft"));
+        assert!(!is_project_page("http://github.com/frameloft/Frameloft"));
+        assert!(!is_project_page("https://github.com:8443/frameloft/Frameloft"));
+        assert!(!is_project_page("https://github.com/Someone/Frameloft"));
         assert!(!is_project_page("javascript:alert(1)"));
         let bad = json!({"tag_name": "v9.0.0", "html_url": "https://evil.example/download"});
         assert_eq!(from_release(&bad, "1.0.0", false).unwrap().url, format!("{REPO_URL}/releases/latest"));
@@ -194,7 +196,7 @@ mod tests {
     fn versions() {
         assert!(is_newer("v1.0.1", "1.0.0"));
         assert!(is_newer("1.1.0", "1.0.9"));
-        assert!(is_newer("Lumio v2.0.0", "1.9.9"));
+        assert!(is_newer("Frameloft v2.0.0", "1.9.9"));
         assert!(!is_newer("v1.0.0", "1.0.0"));
         assert!(!is_newer("v0.3.8", "1.0.0"));
         assert!(!is_newer("nightly", "1.0.0"));
@@ -206,8 +208,8 @@ mod tests {
     #[test]
     fn reads_a_release() {
         let r = json!({
-            "tag_name": "v1.1.0", "name": "Lumio v1.1.0", "body": "New: menu bar",
-            "html_url": "https://github.com/Light-Alley/Lumio/releases/tag/v1.1.0",
+            "tag_name": "v1.1.0", "name": "Frameloft v1.1.0", "body": "New: menu bar",
+            "html_url": "https://github.com/frameloft/Frameloft/releases/tag/v1.1.0",
             "published_at": "2026-12-01T10:00:00Z"
         });
         let u = from_release(&r, "1.0.0", true).unwrap();

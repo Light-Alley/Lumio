@@ -517,7 +517,7 @@ export async function addFolderToLibrary(path?: string) {
 export async function removeRoot(root: Root) {
   const ok = await confirm(
     `Remove “${root.name}” from the library?`,
-    "Lumio forgets this folder and its thumbnails. Your photos stay where they are on disk.",
+    "Frameloft forgets this folder and its thumbnails. Your photos stay where they are on disk.",
     "Remove",
   );
   if (!ok) return;
@@ -617,7 +617,7 @@ export async function trashPhotos(ids: number[], message?: string): Promise<bool
         // Retry exactly the photos that failed, by id: two photos in different folders
         // can share a file name, and the wrong one must never be deleted permanently.
         const retry = r.failed_ids ?? [];
-        if (retry.length !== r.failed.length) throw new Error("Lumio could not tell which photos failed; nothing more was deleted.");
+        if (retry.length !== r.failed.length) throw new Error("Frameloft could not tell which photos failed; nothing more was deleted.");
         const r2 = await api.deletePhotos(retry, true);
         r = { done: r.done + r2.done, failed: r2.failed, failed_ids: r2.failed_ids, outside_library: false };
       }
@@ -716,8 +716,8 @@ export async function trashFolder(path: string, name: string) {
 
 export async function dropOnFolder(dest: string, e: DragEvent) {
   const copy = e.altKey;
-  const photoData = e.dataTransfer?.getData("application/x-lumio-photos");
-  const folderData = e.dataTransfer?.getData("application/x-lumio-folder");
+  const photoData = e.dataTransfer?.getData("application/x-frameloft-photos");
+  const folderData = e.dataTransfer?.getData("application/x-frameloft-folder");
   if (photoData) {
     const ids = JSON.parse(photoData) as number[];
     await moveOrCopy(ids, copy, dest);
@@ -977,7 +977,7 @@ export async function dropOnTab(i: number, e: DragEvent) {
 /** Photos dropped onto the photo area go into the folder this tab is showing. */
 export async function dropOnView(e: DragEvent) {
   if (app.scope.kind !== "folder") return;
-  const data = e.dataTransfer?.getData("application/x-lumio-photos");
+  const data = e.dataTransfer?.getData("application/x-frameloft-photos");
   if (!data) return;
   const ids = JSON.parse(data) as number[];
   const dest = app.scope.path;

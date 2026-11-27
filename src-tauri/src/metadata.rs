@@ -10,7 +10,7 @@ pub const RAW_EXTS: &[&str] = &[
     "iiq", "erf", "mef", "mos", "kdc", "dcr", "rwl",
 ];
 
-/// Video files. Lumio catalogues them like photos and plays them in the webview's own
+/// Video files. Frameloft catalogues them like photos and plays them in the webview's own
 /// player, so which ones actually play depends on the system (see docs/video.md).
 pub const VIDEO_EXTS: &[&str] =
     &["mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "mts", "m2ts", "mpg", "mpeg", "wmv", "ogv"];
@@ -308,7 +308,7 @@ pub fn merge_sidecar(base: &mut Meta, side: &Meta) {
         ($($f:ident),*) => { $( if side.$f.is_some() { base.$f = side.$f.clone(); } )* };
     }
     take!(label, title, caption, creator, copyright, lat, lon, alt, place);
-    // A sidecar orientation (e.g. a RAW rotated in Lumio or Lightroom) wins.
+    // A sidecar orientation (e.g. a RAW rotated in Frameloft or Lightroom) wins.
     if let Some(o) = side.orientation.filter(|o| (1..=8).contains(o)) {
         if is_quarter_turn(base.orientation) != is_quarter_turn(Some(o)) {
             std::mem::swap(&mut base.width, &mut base.height);
@@ -322,7 +322,7 @@ pub fn merge_sidecar(base: &mut Meta, side: &Meta) {
 }
 
 /// Split a keyword path. Lightroom and Capture One store "Places|France|Paris"; people
-/// often type "Places > France > Paris", which Lumio accepts too.
+/// often type "Places > France > Paris", which Frameloft accepts too.
 pub fn split_path(k: &str) -> Vec<&str> {
     let parts: Vec<&str> = if k.contains('|') { k.split('|').collect() } else { k.split(" > ").collect() };
     parts.into_iter().map(str::trim).filter(|p| !p.is_empty()).collect()

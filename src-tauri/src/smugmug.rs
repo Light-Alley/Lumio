@@ -2,10 +2,10 @@
 //!
 //! SmugMug only offers OAuth 1.0a. Every app needs its own API key and secret, which
 //! anyone with a SmugMug account can get free at https://api.smugmug.com/api/developer/apply.
-//! Because Lumio is open source a key built into the app wouldn't stay secret, so each
+//! Because Frameloft is open source a key built into the app wouldn't stay secret, so each
 //! user pastes their own key once (see docs/smugmug.md). Sign-in then works like any
 //! other app: SmugMug opens in the browser, the user clicks "Authorize", and SmugMug
-//! shows a six-digit code to paste back into Lumio. The key, secret and the access token
+//! shows a six-digit code to paste back into Frameloft. The key, secret and the access token
 //! SmugMug hands back are kept in the system keychain; access tokens don't expire until
 //! the user revokes them on SmugMug.
 //!
@@ -97,7 +97,7 @@ fn may_open(url: &str) -> bool {
 
 /// An API address for `path`, which SmugMug's own replies supply ("/api/v2/…"). Only
 /// paths on api.smugmug.com are accepted, so a reply naming another host can never
-/// receive Lumio's signed request.
+/// receive Frameloft's signed request.
 fn api_url(path: &str) -> Result<reqwest::Url> {
     if !path.starts_with('/') || path.starts_with("//") || path.contains('\\') {
         bail!("SmugMug sent an unexpected address.");
@@ -212,7 +212,7 @@ fn auth(
 fn client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(30))
-        .user_agent(concat!("Lumio/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Frameloft/", env!("CARGO_PKG_VERSION")))
         .build()?)
 }
 
@@ -226,7 +226,7 @@ fn form_get(pairs: &[(String, String)], k: &str) -> Option<String> {
     pairs.iter().find(|(a, _)| a == k).map(|(_, b)| b.clone())
 }
 
-/// Step 1: get a request token and return the page where the user approves Lumio.
+/// Step 1: get a request token and return the page where the user approves Frameloft.
 pub async fn begin_sign_in() -> Result<String> {
     let c = load();
     if c.key.is_empty() {
@@ -325,7 +325,7 @@ async fn api(c: &Creds, method: &str, path: &str, query: &[(&str, &str)], body: 
             crate::secure::redact_url(url.as_str()),
             crate::secure::redact_body(&text)
         );
-        bail!("SmugMug no longer accepts Lumio's sign-in. Please sign out and sign in again.");
+        bail!("SmugMug no longer accepts Frameloft's sign-in. Please sign out and sign in again.");
     }
     let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if !code.is_success() {
@@ -641,7 +641,7 @@ async fn upload_one(
     let msg =
         v["message"].as_str().or(v["Message"].as_str()).unwrap_or(code.canonical_reason().unwrap_or("upload failed"));
     if code.as_u16() == 401 {
-        bail!("SmugMug no longer accepts Lumio's sign-in; please sign in again");
+        bail!("SmugMug no longer accepts Frameloft's sign-in; please sign in again");
     }
     Err(anyhow!("{msg}"))
 }
@@ -803,7 +803,7 @@ pub mod cmd {
     #[tauri::command]
     pub fn smugmug_open(url: String) -> R<()> {
         if !may_open(&url) {
-            return Err("Lumio only opens SmugMug pages it got from SmugMug.".into());
+            return Err("Frameloft only opens SmugMug pages it got from SmugMug.".into());
         }
         tauri_plugin_opener::open_url(&url, None::<&str>).map_err(|x| x.to_string())
     }

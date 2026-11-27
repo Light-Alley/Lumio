@@ -81,7 +81,7 @@ export const FIELDS: Field[] = [
     { op: "portrait", label: "is portrait", value: "none" },
     { op: "square", label: "is square", value: "none" },
   ] },
-  { field: "added", label: "Added to Lumio", ops: [{ op: "last_days", label: "in the last … days", value: "number", placeholder: "30" }] },
+  { field: "added", label: "Added to Frameloft", ops: [{ op: "last_days", label: "in the last … days", value: "number", placeholder: "30" }] },
   { field: "iso", label: "ISO", ops: minMax("800") },
   { field: "focal", label: "Focal length (mm)", ops: minMax("50") },
   { field: "fnumber", label: "Aperture (f/)", ops: minMax("2.8") },

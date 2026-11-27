@@ -77,7 +77,7 @@
         <p>Describe the photos you're looking for in your own words. The assistant searches your catalogue's dates, places, keywords, ratings and cameras, and can glance at thumbnails for visual questions.</p>
         {#if settings && !ready}
           <div class="setup">
-            <p>To use Claude, add an Anthropic API key. Or point Lumio at a local model such as Ollama.</p>
+            <p>To use Claude, add an Anthropic API key. Or point Frameloft at a local model such as Ollama.</p>
             <button class="primary" onclick={() => (app.showSettings = true)}><Settings size={14} /> Open AI settings</button>
           </div>
         {:else}

@@ -3,14 +3,14 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "package-name": "lumio",
+      "package-name": "frameloft",
       "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": false,
       "draft": true,
       "force-tag-creation": true,
       "extra-files": [
         { "type": "toml", "path": "src-tauri/Cargo.toml", "jsonpath": "$.package.version" },
-        { "type": "toml", "path": "src-tauri/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'lumio')].version" },
+        { "type": "toml", "path": "src-tauri/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'frameloft')].version" },
         { "type": "json", "path": "src-tauri/tauri.conf.json", "jsonpath": "$.version" }
       ]
     }

@@ -1,7 +1,7 @@
 //! API keys and sign-in tokens, kept only in the operating system's keychain (macOS
 //! Keychain, Windows Credential Manager, the Secret Service on Linux).
 //!
-//! Lumio never writes them anywhere else. When the keychain can't be used, saving fails
+//! Frameloft never writes them anywhere else. When the keychain can't be used, saving fails
 //! with an explanation instead of quietly falling back to the catalogue.
 
 use anyhow::{bail, Result};
@@ -19,7 +19,7 @@ fn help() -> &'static str {
     } else if cfg!(target_os = "windows") {
         "Check that Windows Credential Manager is working for your account, then try again."
     } else {
-        "Lumio needs a Secret Service keyring (GNOME Keyring or KWallet), installed and unlocked. Start or unlock it, then try again."
+        "Frameloft needs a Secret Service keyring (GNOME Keyring or KWallet), installed and unlocked. Start or unlock it, then try again."
     }
 }
 
@@ -45,12 +45,12 @@ pub fn set(which: &str, value: &str) -> Result<()> {
     });
     if let Err(x) = res {
         log::warn!("keychain unavailable: {x}");
-        bail!("Lumio couldn't save this in your system keychain ({x}). Nothing was saved. {}", help());
+        bail!("Frameloft couldn't save this in your system keychain ({x}). Nothing was saved. {}", help());
     }
     Ok(())
 }
 
-/// Lumio 1.x kept keys in the catalogue when the keychain failed. Move any such key into
+/// Lumio (Frameloft's old name) 1.x kept keys in the catalogue when the keychain failed. Move any such key into
 /// the keychain, and remove it from the catalogue either way (overwriting the old bytes),
 /// so the person re-enters it if the keychain still can't take it.
 pub fn migrate_plaintext(conn: &Connection) -> Result<usize> {

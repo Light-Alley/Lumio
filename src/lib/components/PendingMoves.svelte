@@ -1,6 +1,6 @@
 <script lang="ts">
   // Moves made while a drive was away. Each one is already shown in its new folder; the
-  // file itself follows when both drives are connected. Lumio checks once a minute, and
+  // file itself follows when both drives are connected. Frameloft checks once a minute, and
   // whenever the window comes back to the front.
   import { X, TriangleAlert, Clock } from "@lucide/svelte";
   import { api, basename } from "../api";

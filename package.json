@@ -1,7 +1,7 @@
 {
-  "name": "lumio",
+  "name": "frameloft",
   "version": "2.0.0",
-  "description": "Lumio – a lightweight, open-source photo browser and digital asset manager",
+  "description": "Frameloft – a lightweight, open-source photo browser and digital asset manager",
   "type": "module",
   "scripts": {
     "dev": "vite dev",

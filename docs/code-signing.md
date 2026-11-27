@@ -2,11 +2,11 @@
 
 Unsigned apps work, but macOS and Windows warn people before they open them. For a public release that warning puts people off, so the **Build installers** workflow (`.github/workflows/release.yml`) can sign the installers. Signing switches on by itself when the secrets below exist in the repository, and is skipped (with a warning in the run log) when they don't, so nothing breaks while they're missing.
 
-Secrets go in **GitHub → the Lumio repository → Settings → Secrets and variables → Actions → New repository secret**. Only people with admin rights on the repository can see or change them, and they never appear in logs.
+Secrets go in **GitHub → the Frameloft repository → Settings → Secrets and variables → Actions → New repository secret**. Only people with admin rights on the repository can see or change them, and they never appear in logs.
 
 ## macOS: Developer ID signing and notarisation
 
-This removes the "Apple could not verify Lumio is free of malware" warning and the `xattr -cr` workaround.
+This removes the "Apple could not verify Frameloft is free of malware" warning and the `xattr -cr` workaround.
 
 ### What you need
 
@@ -18,18 +18,18 @@ This removes the "Apple could not verify Lumio is free of malware" warning and t
 1. On the Mac, open **Keychain Access → Certificate Assistant → Request a Certificate From a Certificate Authority…**. Enter your email, choose **Saved to disk**, and save the `.certSigningRequest` file.
 2. Go to <https://developer.apple.com/account/resources/certificates/add>, choose **Developer ID Application**, upload the request, and download the certificate.
 3. Double-click the downloaded `.cer` so it goes into your login keychain.
-4. In Keychain Access, under **My Certificates**, find "Developer ID Application: *Your Name* (*TEAMID*)", right-click it, **Export…**, and save it as `lumio-signing.p12` with a strong password.
+4. In Keychain Access, under **My Certificates**, find "Developer ID Application: *Your Name* (*TEAMID*)", right-click it, **Export…**, and save it as `frameloft-signing.p12` with a strong password.
 5. Turn the file into text for GitHub:
 
    ```bash
-   base64 -i lumio-signing.p12 | pbcopy
+   base64 -i frameloft-signing.p12 | pbcopy
    ```
 
    The certificate text is now on the clipboard.
 
 ### Step 2: make an app-specific password for notarisation
 
-1. Sign in at <https://account.apple.com>, go to **Sign-In and Security → App-Specific Passwords**, and create one called "Lumio notarisation".
+1. Sign in at <https://account.apple.com>, go to **Sign-In and Security → App-Specific Passwords**, and create one called "Frameloft notarisation".
 2. Find your **Team ID** (ten letters and digits) at <https://developer.apple.com/account> under **Membership details**.
 
 ### Step 3: add the secrets
@@ -43,14 +43,14 @@ This removes the "Apple could not verify Lumio is free of malware" warning and t
 | `APPLE_PASSWORD` | the app-specific password from step 2 (not your normal password) |
 | `APPLE_TEAM_ID` | your Team ID |
 
-Then delete `lumio-signing.p12` from your Downloads folder; the certificate stays safe in your keychain.
+Then delete `frameloft-signing.p12` from your Downloads folder; the certificate stays safe in your keychain.
 
 ### Checking it worked
 
 Run the workflow. In the log of each macOS job you should see "macOS: signing with the Developer ID certificate." and "macOS: notarising with Apple." Notarisation usually adds a few minutes. On a Mac, after downloading the new `.dmg`:
 
 ```bash
-spctl -a -vvv -t install /Applications/Lumio.app   # "accepted, source=Notarized Developer ID"
+spctl -a -vvv -t install /Applications/Frameloft.app   # "accepted, source=Notarized Developer ID"
 ```
 
 The certificate lasts five years. The membership must be renewed every year, or new builds can't be notarised (already-notarised builds keep working).
@@ -77,7 +77,7 @@ If you're eligible:
 | `AZURE_SIGNING_ACCOUNT` | the signing account name |
 | `AZURE_SIGNING_PROFILE` | the certificate profile name |
 
-The workflow then installs [`trusted-signing-cli`](https://github.com/Levminer/trusted-signing-cli) and Tauri signs `Lumio.exe`, the `.msi` and the setup `.exe` with it.
+The workflow then installs [`trusted-signing-cli`](https://github.com/Levminer/trusted-signing-cli) and Tauri signs `Frameloft.exe`, the `.msi` and the setup `.exe` with it.
 
 **If you aren't eligible:** once the repository is public, apply to the [SignPath Foundation](https://signpath.org), which signs open-source projects for free. It works differently (the built files are sent to SignPath to be signed after approval), so the workflow would need a small change at that point. Until then, the README explains how to get past SmartScreen.
 

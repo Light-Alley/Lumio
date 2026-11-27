@@ -135,7 +135,7 @@
   function onDrop(e: DragEvent) {
     e.preventDefault();
     dropHover = false;
-    const data = e.dataTransfer?.getData("application/x-lumio-photos");
+    const data = e.dataTransfer?.getData("application/x-frameloft-photos");
     if (!data || !map) return;
     const ll = map.mouseEventToLatLng(e as unknown as MouseEvent);
     placeAt(ll.lat, ll.lng, JSON.parse(data));
@@ -158,7 +158,7 @@
   function stripDrag(e: DragEvent, p: PhotoLite) {
     if (!selection.has(p.id)) clickSelect(p.id, e as unknown as MouseEvent);
     // Closed stacks are dragged whole, so every photo in them gets the place.
-    e.dataTransfer?.setData("application/x-lumio-photos", JSON.stringify(withStacks(selectedIds())));
+    e.dataTransfer?.setData("application/x-frameloft-photos", JSON.stringify(withStacks(selectedIds())));
   }
 </script>
 

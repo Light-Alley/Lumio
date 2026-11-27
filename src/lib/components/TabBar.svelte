@@ -61,7 +61,7 @@
       aria-selected={i === app.activeTab}
       title={tip(t)}
       draggable="true"
-      ondragstart={(e) => { tabDrag = i; e.dataTransfer?.setData("application/x-lumio-tab", String(i)); }}
+      ondragstart={(e) => { tabDrag = i; e.dataTransfer?.setData("application/x-frameloft-tab", String(i)); }}
       ondragend={() => (tabDrag = -1)}
       ondragenter={(e) => enter(e, i)}
       ondragover={(e) => enter(e, i)}

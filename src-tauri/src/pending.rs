@@ -282,7 +282,7 @@ fn move_one(conn: &Connection, id: i64, src: &Path, dest: &Path, filename: &str,
             return Ok(None);
         }
         anyhow::bail!(
-            "The original wasn't found in {}. It may have been moved or deleted outside Lumio.",
+            "The original wasn't found in {}. It may have been moved or deleted outside Frameloft.",
             src.parent().map(|p| p.display().to_string()).unwrap_or_default()
         );
     }
@@ -336,7 +336,7 @@ mod tests {
         }
     }
     fn tempdir() -> Tmp {
-        Tmp(tempfile::Builder::new().prefix("lumio-pending-").tempdir().unwrap().keep())
+        Tmp(tempfile::Builder::new().prefix("frameloft-pending-").tempdir().unwrap().keep())
     }
 
     fn setup(dir: &Path) -> Connection {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The undo history: every change Lumio made to files, newest first. Undoing an older
+  // The undo history: every change Frameloft made to files, newest first. Undoing an older
   // change first undoes everything after it, so each step finds the files where it left
   // them. ⌘Z / Ctrl+Z undoes the latest change from anywhere in the app.
   import { X, Undo2, Check, Trash2, TriangleAlert, FolderInput, FolderPlus, Copy, PencilLine, FolderPen } from "@lucide/svelte";

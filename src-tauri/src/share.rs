@@ -1,11 +1,11 @@
 //! Sharing photos: the system share sheet, email, WhatsApp, websites and the clipboard.
 //!
-//! Lumio never talks to a social network itself and stores no passwords for them. It hands
+//! Frameloft never talks to a social network itself and stores no passwords for them. It hands
 //! the photos to something already on the computer (the share sheet, the email program,
 //! WhatsApp) or opens the website in the browser with the photos ready to paste or drag in.
 //!
 //! Formats that websites and phones can't show (RAW, HEIC, TIFF…) are first turned into
-//! JPEG copies in Lumio's cache folder; the originals are never touched.
+//! JPEG copies in Frameloft's cache folder; the originals are never touched.
 
 use crate::db::Photo;
 use crate::state::AppState;
@@ -191,7 +191,7 @@ pub fn copy(files: &[PathBuf]) -> Result<Copied> {
     let mut guard = CLIPBOARD.lock();
     if guard.is_none() {
         // On Linux the clipboard only holds what we copied while this object lives,
-        // so it is kept for as long as Lumio runs.
+        // so it is kept for as long as Frameloft runs.
         *guard = Some(arboard::Clipboard::new().map_err(|e| anyhow!("Could not use the clipboard: {e}"))?);
     }
     let cb = guard.as_mut().unwrap();
@@ -562,8 +562,11 @@ mod imp {
                 dtm.DataRequested(&TypedEventHandler::new(move |_, args: &Option<DataRequestedEventArgs>| {
                     let Some(args) = args else { return Ok(()) };
                     let data = args.Request()?.Data()?;
-                    let title =
-                        if count == 1 { "Photo from Lumio".to_string() } else { format!("{count} photos from Lumio") };
+                    let title = if count == 1 {
+                        "Photo from Frameloft".to_string()
+                    } else {
+                        format!("{count} photos from Frameloft")
+                    };
                     data.Properties()?.SetTitle(&HSTRING::from(title))?;
                     let list: IIterable<IStorageItem> = {
                         let s = &storage; // the whole wrapper, so the closure stays Send
@@ -727,7 +730,7 @@ mod tests {
 
     #[test]
     fn unique_names() {
-        let d = tempfile::Builder::new().prefix("lumio-share-test-").tempdir().unwrap().keep();
+        let d = tempfile::Builder::new().prefix("frameloft-share-test-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("a.jpg"), b"x").unwrap();
         assert_eq!(unique(&d, "a", "jpg"), d.join("a (2).jpg"));

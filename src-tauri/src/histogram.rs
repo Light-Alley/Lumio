@@ -1,6 +1,6 @@
 //! Colour histogram for the info panel.
 //!
-//! Counted from the picture Lumio already keeps for each photo (the sharper offline
+//! Counted from the picture Frameloft already keeps for each photo (the sharper offline
 //! preview when there is one, otherwise the thumbnail), so it is quick, works with the
 //! drive unplugged and never decodes a large RAW file. A few hundred thousand pixels is
 //! plenty for the shape of a histogram.
@@ -43,7 +43,7 @@ pub fn from_rgb(pixels: &[u8]) -> Histogram {
     Histogram { r, g, b, l, shadows_clipped: share(lo), highlights_clipped: share(hi) }
 }
 
-/// Reads an image file (JPEG from Lumio's own folders) and counts its levels.
+/// Reads an image file (JPEG from Frameloft's own folders) and counts its levels.
 pub fn from_file(path: &Path) -> anyhow::Result<Histogram> {
     let img = image::ImageReader::open(path)?.with_guessed_format()?.decode()?;
     Ok(from_rgb(img.to_rgb8().as_raw()))
@@ -81,7 +81,7 @@ mod tests {
 
     #[test]
     fn reads_a_jpeg() {
-        let dir = tempfile::Builder::new().prefix("lumio-hist-").tempdir().unwrap().keep();
+        let dir = tempfile::Builder::new().prefix("frameloft-hist-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("t.jpg");
         image::RgbImage::from_pixel(8, 8, image::Rgb([255, 255, 255])).save(&p).unwrap();

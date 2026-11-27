@@ -1,10 +1,10 @@
-# Working on Lumio
+# Working on Frameloft
 
-Lumio is a Tauri 2 desktop app: a Rust back end in `src-tauri/` and a Svelte 5 + TypeScript front end in `src/`. Start with [README.md](README.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+Frameloft is a Tauri 2 desktop app: a Rust back end in `src-tauri/` and a Svelte 5 + TypeScript front end in `src/`. Start with [README.md](README.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Before you finish
 
-- Run `npm run verify` (repository rules, svelte-check, Vitest, build, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`). Fetch ExifTool first (`npm run fetch-exiftool`) so its tests run; CI sets `LUMIO_REQUIRE_EXIFTOOL=1` and fails if they would skip.
+- Run `npm run verify` (repository rules, svelte-check, Vitest, build, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`). Fetch ExifTool first (`npm run fetch-exiftool`) so its tests run; CI sets `FRAMELOFT_REQUIRE_EXIFTOOL=1` and fails if they would skip.
 - After a failure, re-run only what failed while fixing it.
 
 ## Rules
@@ -17,4 +17,4 @@ Lumio is a Tauri 2 desktop app: a Rust back end in `src-tauri/` and a Svelte 5 +
 - Paths from the window are untrusted: check them against the library folders (`commands::in_library`) before touching the disk. Secrets live only in the OS keychain (`keys.rs`).
 - ExifTool arguments go through `exiftool::path_arg` / `fmt_path_arg` / `encode_arg`, never raw strings.
 - GitHub Actions are pinned to full commit SHAs, with `permissions:` kept minimal and `persist-credentials: false`. Release builds use no caches.
-- The project address is `https://github.com/Light-Alley/Lumio`. The copyright line is "Light and Alley and Lumio contributors".
+- The project address is `https://github.com/frameloft/Frameloft`. The copyright line is "Light and Alley and Frameloft contributors".

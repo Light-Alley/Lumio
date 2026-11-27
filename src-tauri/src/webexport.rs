@@ -76,7 +76,7 @@ pub fn render_jpeg(state: &AppState, p: &Photo, opts: &ExportOptions, dest: &Pat
         {
             args.push(a.into());
         }
-        // Titles, captions and keywords edited in Lumio may only be in an XMP sidecar.
+        // Titles, captions and keywords edited in Frameloft may only be in an XMP sidecar.
         let sidecar = indexer::find_sidecar(src).map(|x| state.et.plain(&x)).transpose()?;
         if let Some(xmp) = &sidecar {
             args.push("-TagsFromFile".into());

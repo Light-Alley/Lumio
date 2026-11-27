@@ -62,7 +62,7 @@ pub fn set_key(which: &str, key: &str) -> Result<()> {
     crate::keys::set(which, key.trim())
 }
 
-const SYSTEM_PROMPT: &str = "You are the photo-finding assistant inside Lumio, a desktop photo manager. \
+const SYSTEM_PROMPT: &str = "You are the photo-finding assistant inside Frameloft, a desktop photo manager. \
 The user asks in plain language for photos in their own catalogue. Use the tools to find them:\n\
 - `library_overview` tells you what exists (folders, keywords, cameras, dates, places).\n\
 - `search_photos` filters the catalogue by text, keywords, dates, ratings, colour labels, camera, lens, folder and location. \

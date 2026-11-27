@@ -9,7 +9,7 @@
 //!   file on disk (for example through a link) are never offered as copies of each other.
 //! - **Look-alikes**: the same picture saved again, resized, re-compressed or lightly
 //!   edited, or near-identical burst shots. Compared by a 64-bit "difference hash" made
-//!   from the thumbnail Lumio already keeps, so this works with the drive unplugged.
+//!   from the thumbnail Frameloft already keeps, so this works with the drive unplugged.
 //!   RAW + JPEG pairs (same name, same folder) are expected and never offered.
 //!
 //! Fingerprints are kept in `fingerprints` and reused until the file changes.
@@ -59,7 +59,7 @@ pub struct Options {
 #[derive(Debug, Clone, Serialize)]
 pub struct Member {
     pub photo: Photo,
-    /// The photo Lumio suggests keeping (one per group).
+    /// The photo Frameloft suggests keeping (one per group).
     pub keep: bool,
     /// Look-alikes: how far its fingerprint is from the first photo's (0 = same).
     pub distance: u32,
@@ -603,7 +603,7 @@ pub mod cmd {
     #[tauri::command]
     pub async fn find_duplicates(state: State<'_, Arc<AppState>>, opts: Options) -> Result<Report, String> {
         if RUNNING.swap(true, Ordering::SeqCst) {
-            return Err("Lumio is already looking for duplicates.".into());
+            return Err("Frameloft is already looking for duplicates.".into());
         }
         CANCEL.store(false, Ordering::SeqCst);
         let st = state.inner().clone();
@@ -718,7 +718,7 @@ mod tests {
 
     #[test]
     fn exact_hashes() {
-        let dir = tempfile::Builder::new().prefix("lumio-dupes-").tempdir().unwrap().keep();
+        let dir = tempfile::Builder::new().prefix("frameloft-dupes-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let big: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
         let mut changed_middle = big.clone();
@@ -771,7 +771,7 @@ mod tests {
 
     #[test]
     fn same_file_through_two_paths_is_not_a_copy() {
-        let dir = tempfile::Builder::new().prefix("lumio-links-").tempdir().unwrap().keep();
+        let dir = tempfile::Builder::new().prefix("frameloft-links-").tempdir().unwrap().keep();
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         std::fs::write(dir.join("real.jpg"), vec![7u8; 1000]).unwrap();
         std::fs::write(dir.join("copy.jpg"), vec![7u8; 1000]).unwrap();
@@ -783,7 +783,7 @@ mod tests {
 
     #[test]
     fn exact_search_end_to_end() {
-        let dir = tempfile::Builder::new().prefix("lumio-exact-").tempdir().unwrap().keep();
+        let dir = tempfile::Builder::new().prefix("frameloft-exact-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let data: Vec<u8> = (0..200_000u32).map(|i| (i % 253) as u8).collect();
         let mut middle = data.clone();

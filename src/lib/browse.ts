@@ -60,7 +60,7 @@ export function photoDragStart(e: DragEvent, p: PhotoLite) {
   const ids = withStacks(selectedIds());
   app.dragIds = ids;
   app.dragPhotos = app.photos.filter((x) => selection.has(x.id));
-  e.dataTransfer?.setData("application/x-lumio-photos", JSON.stringify(ids));
+  e.dataTransfer?.setData("application/x-frameloft-photos", JSON.stringify(ids));
   if (e.dataTransfer) {
     e.dataTransfer.effectAllowed = "copyMove";
     const ghost = document.createElement("div");
@@ -84,9 +84,9 @@ export function dragGhosts(): PhotoLite[] {
   return app.dragPhotos.filter((p) => !here.has(p.id));
 }
 
-/** True while photos from Lumio are being dragged. */
+/** True while photos from Frameloft are being dragged. */
 export function isPhotoDrag(e: DragEvent) {
-  return !!e.dataTransfer?.types.includes("application/x-lumio-photos");
+  return !!e.dataTransfer?.types.includes("application/x-frameloft-photos");
 }
 
 /** Can the photos being dragged be dropped onto the photo area of this tab? */

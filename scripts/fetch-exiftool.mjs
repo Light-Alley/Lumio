@@ -43,7 +43,7 @@ export function checkEntries(names) {
 async function get(urls, expected) {
   for (const u of urls) {
     try {
-      const r = await fetch(u, { redirect: "follow", headers: { "User-Agent": "lumio-build" } });
+      const r = await fetch(u, { redirect: "follow", headers: { "User-Agent": "frameloft-build" } });
       if (!r.ok) {
         console.warn(`  ${u}: HTTP ${r.status}`);
         continue;
@@ -86,7 +86,7 @@ async function main() {
   }
 
   console.log(`Fetching ExifTool ${VERSION} for ${windows ? "Windows" : "macOS/Linux"}…`);
-  const work = mkdtempSync(join(tmpdir(), "lumio-exiftool-"));
+  const work = mkdtempSync(join(tmpdir(), "frameloft-exiftool-"));
   try {
     rmSync(dest, { recursive: true, force: true });
     mkdirSync(dest, { recursive: true });

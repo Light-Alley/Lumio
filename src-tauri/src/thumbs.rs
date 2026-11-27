@@ -17,7 +17,7 @@ pub fn thumb_path(dir: &Path, id: i64) -> PathBuf {
     dir.join(format!("{:02x}", id % 256)).join(format!("{id}.jpg"))
 }
 
-/// The sharper preview Lumio keeps for offline viewing (same layout as thumbnails,
+/// The sharper preview Frameloft keeps for offline viewing (same layout as thumbnails,
 /// in its own folder). See `offline.rs` for which photos get one.
 pub fn offline_preview_path(dir: &Path, id: i64) -> PathBuf {
     thumb_path(dir, id)
@@ -228,7 +228,7 @@ pub fn make_offline_preview(
 }
 
 /// Save a downscaled JPEG. Written to a temporary name first, so a preview is never
-/// left half-written if Lumio quits or the disk fills up.
+/// left half-written if Frameloft quits or the disk fills up.
 fn write_preview(img: &DynamicImage, dest: &Path, size: u32) -> Result<()> {
     let img = if img.width() > size || img.height() > size {
         img.resize(size, size, image::imageops::FilterType::CatmullRom)
@@ -247,7 +247,7 @@ fn write_thumb(img: &DynamicImage, dest: &Path) -> Result<(u32, u32)> {
 }
 
 /// Save a video frame the app's own player captured (used where the system has no
-/// video thumbnailer Lumio can call: Windows, Linux, and files macOS can't preview).
+/// video thumbnailer Frameloft can call: Windows, Linux, and files macOS can't preview).
 pub fn save_frame(bytes: &[u8], dest: &Path) -> Result<(u32, u32)> {
     let img = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?.decode()?;
     write_thumb(&img, dest)

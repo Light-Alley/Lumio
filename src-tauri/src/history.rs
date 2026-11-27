@@ -1,4 +1,4 @@
-//! The undo history: every change Lumio makes to files (moves, copies, renames, new
+//! The undo history: every change Frameloft makes to files (moves, copies, renames, new
 //! folders, things sent to the Trash), newest first, kept in the catalogue so it is still
 //! there after a restart.
 //!
@@ -6,7 +6,7 @@
 //! each step finds the files where it left them. A step checks each photo is still where
 //! that change put it and leaves alone anything that has been moved or renamed since.
 //! Undo never overwrites a file and never deletes an original; the only files it removes
-//! are copies Lumio made, and those go to the Trash.
+//! are copies Frameloft made, and those go to the Trash.
 
 use crate::db;
 use crate::fileops::{self, Host, Moved, OpReport};
@@ -507,7 +507,7 @@ mod tests {
         let id = h.file(r, &t.join("a/IMG_1.jpg"), None);
         let mut rr = rename::rename_in(&h.conn, &[(id, "One.jpg".into())]).unwrap();
         record_rename(&h.conn.lock(), &mut rr).unwrap();
-        // Renamed again without the history knowing (say an older version of Lumio).
+        // Renamed again without the history knowing (say an older version of Frameloft).
         rename::rename_in(&h.conn, &[(id, "Two.jpg".into())]).unwrap();
         let u = undo(&h, None).unwrap();
         assert_eq!((u.done, u.failed.len()), (0, 1));

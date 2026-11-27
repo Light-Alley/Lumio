@@ -27,10 +27,10 @@ pub struct Tmp(pub PathBuf);
 impl Tmp {
     pub fn new(tag: &str) -> Tmp {
         // A fresh folder with an unguessable name (removed by Drop below).
-        Tmp(tempfile::Builder::new().prefix(&format!("lumio-{tag}-")).tempdir().unwrap().keep())
+        Tmp(tempfile::Builder::new().prefix(&format!("frameloft-{tag}-")).tempdir().unwrap().keep())
     }
     /// `t.join("a/b.jpg")` with the platform's separator, so paths compare equal to
-    /// the ones Lumio builds (on Windows "a\\b.jpg", not "a/b.jpg").
+    /// the ones Frameloft builds (on Windows "a\\b.jpg", not "a/b.jpg").
     pub fn join(&self, s: &str) -> PathBuf {
         s.split('/').filter(|c| !c.is_empty()).fold(self.0.clone(), |p, c| p.join(c))
     }

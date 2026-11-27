@@ -1,11 +1,11 @@
-# Lumio 1.0 plan
+# Frameloft 1.0 plan
 
-Lumio grew quickly through the 0.3.x betas. Version 1.0 is the point where it's safe to trust with a whole library and ready for strangers to install. After 1.0, new features go into 1.x releases (1.1, 1.2…) and fixes into patch releases (1.0.1…), and anything that could break someone's catalogue or files waits for a 2.0.
+Frameloft grew quickly through the 0.3.x betas. Version 1.0 is the point where it's safe to trust with a whole library and ready for strangers to install. After 1.0, new features go into 1.x releases (1.1, 1.2…) and fixes into patch releases (1.0.1…), and anything that could break someone's catalogue or files waits for a 2.0.
 
 ## What 1.0 means
 
 1. **Safe for originals.** File operations (move, copy, rename, trash, metadata writes) have automated tests, including drives disappearing mid-operation, and there's a clear way to undo recent changes.
-2. **Edits travel with the files.** Ratings, colour labels and keywords are written to XMP so Lightroom, Capture One and others read them, and Lumio reads back what those apps wrote.
+2. **Edits travel with the files.** Ratings, colour labels and keywords are written to XMP so Lightroom, Capture One and others read them, and Frameloft reads back what those apps wrote.
 3. **Manageable at 50,000+ photos.** Duplicate finding and smart collections (for example "5 stars from 2024").
 4. **Installs cleanly.** macOS builds are signed and notarised; Windows builds are signed if possible.
 5. **Documented and open.** User guide, contributing guide, code of conduct, security policy, issue templates, public repository.
@@ -46,7 +46,7 @@ Build `1.0.0-rc.1` with the workflow and test on real machines, with a **copy** 
 
 ### Open-source readiness
 
-- [x] MIT `LICENSE` with copyright "Light and Alley and Lumio contributors"; same wording in the app bundle and `Cargo.toml`
+- [x] MIT `LICENSE` with copyright "Light and Alley and Frameloft contributors"; same wording in the app bundle and `Cargo.toml`
 - [x] Dependency licences checked: all 662 Rust crates and the npm runtime packages are MIT, Apache-2.0, BSD, ISC, Zlib, Unicode, CC0, CDLA-Permissive or MPL-2.0 (unmodified), all compatible with MIT. ExifTool is bundled unmodified under its own Perl licence, with its notice in `resources/exiftool/README.txt`
 - [x] `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue and pull request templates, user guide
 - [ ] Decide whether the "Light and Alley" name and logo are licensed with the code or reserved (common choice: code is MIT, name and logo are not, so forks must rename). If reserved, add a line to the README
@@ -58,10 +58,10 @@ Build `1.0.0-rc.1` with the workflow and test on real machines, with a **copy** 
 ### Release
 
 - [ ] Bump the version to `1.0.0` in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` (and `package-lock.json`, which has been stuck at 0.1.0)
-- [ ] Write release notes: what Lumio is, the headline features, what changed since 0.3.8, known limitations, and thanks
+- [ ] Write release notes: what Frameloft is, the headline features, what changed since 0.3.8, known limitations, and thanks
 - [ ] Run **Build installers**, check every asset is in the draft release (two macOS `.dmg`, Windows `.msi` and `-setup.exe`, Linux `.AppImage`, `.deb`, `.rpm`)
 - [ ] Download each installer once and open it
-- [ ] Publish the release (only Liju presses Publish), named "Lumio 1.0"
+- [ ] Publish the release (only Liju presses Publish), named "Frameloft 1.0"
 - [ ] Update the README screenshot and the promo video links; start promoting
 
 ## After 1.0

@@ -1,41 +1,41 @@
-# Lumio user guide
+# Frameloft user guide
 
-Lumio is a photo browser. It shows the photos that are already in your folders, on this computer, an external drive or a network drive, and helps you sort, rate, describe and move them. It never imports or copies your library, and it never edits pixels.
+Frameloft is a photo browser. It shows the photos that are already in your folders, on this computer, an external drive or a network drive, and helps you sort, rate, describe and move them. It never imports or copies your library, and it never edits pixels.
 
 This guide takes about ten minutes to read. Shortcuts are written for a Mac (`⌘`); on Windows and Linux use `Ctrl` instead.
 
 ## 1. Before you start: keep a backup
 
-Lumio moves, renames and deletes real files when you ask it to, and writes ratings and keywords into them. It is careful (moves between drives are copied and checked before the original is removed, nothing is ever overwritten, and deleted photos go to the Trash or Recycle Bin), but no software is perfect. Keep a backup of your photos, as you would with any program that manages them.
+Frameloft moves, renames and deletes real files when you ask it to, and writes ratings and keywords into them. It is careful (moves between drives are copied and checked before the original is removed, nothing is ever overwritten, and deleted photos go to the Trash or Recycle Bin), but no software is perfect. Keep a backup of your photos, as you would with any program that manages them.
 
 ## 2. Install
 
-Download the installer for your computer from the [Releases page](https://github.com/Light-Alley/Lumio/releases/latest):
+Download the installer for your computer from the [Releases page](https://github.com/frameloft/Frameloft/releases/latest):
 
 | System | File |
 |---|---|
-| Mac with Apple silicon (M1 and later) | `Lumio_x.y.z_aarch64.dmg` |
-| Mac with an Intel processor | `Lumio_x.y.z_x64.dmg` |
-| Windows 10 or 11 | `Lumio_x.y.z_x64-setup.exe` (or the `.msi`) |
+| Mac with Apple silicon (M1 and later) | `Frameloft_x.y.z_aarch64.dmg` |
+| Mac with an Intel processor | `Frameloft_x.y.z_x64.dmg` |
+| Windows 10 or 11 | `Frameloft_x.y.z_x64-setup.exe` (or the `.msi`) |
 | Linux | `.AppImage` (any distribution), `.deb` (Ubuntu, Debian, Mint) or `.rpm` (Fedora, openSUSE) |
 
-On a Mac, open the `.dmg` and drag Lumio into Applications. If you're not sure which Mac you have, choose  → About This Mac and look at "Chip" or "Processor".
+On a Mac, open the `.dmg` and drag Frameloft into Applications. If you're not sure which Mac you have, choose  → About This Mac and look at "Chip" or "Processor".
 
 If your system warns about an unknown developer, see [Installing](../README.md#installing) in the README.
 
 ## 3. Add your photos
 
 1. Click **Add a folder** (or the **+** next to *Library* in the sidebar).
-2. Choose a folder of photos. Lumio includes all the folders inside it.
-3. Lumio starts cataloguing straight away. The status bar at the bottom shows its progress; you can keep working while it runs.
+2. Choose a folder of photos. Frameloft includes all the folders inside it.
+3. Frameloft starts cataloguing straight away. The status bar at the bottom shows its progress; you can keep working while it runs.
 
-A big library on a network or cloud drive takes a while the first time (Lumio reads each photo once to make its thumbnail). After that, opening a folder is instant.
+A big library on a network or cloud drive takes a while the first time (Frameloft reads each photo once to make its thumbnail). After that, opening a folder is instant.
 
-You can add as many folders as you like, from different drives. To stop Lumio showing a folder, right-click it and choose **Remove from library…**. That only removes it from Lumio's catalogue; the photos stay where they are.
+You can add as many folders as you like, from different drives. To stop Frameloft showing a folder, right-click it and choose **Remove from library…**. That only removes it from Frameloft's catalogue; the photos stay where they are.
 
 ### Drives that come and go
 
-Lumio remembers external, network and cloud drives even when they're unplugged. Their folders stay in the sidebar, greyed out, and you can still browse, search, rate and view the photos, because Lumio keeps thumbnails and (for these drives) a sharp preview of every photo on your computer. Changes you make are written to the files when the drive comes back.
+Frameloft remembers external, network and cloud drives even when they're unplugged. Their folders stay in the sidebar, greyed out, and you can still browse, search, rate and view the photos, because Frameloft keeps thumbnails and (for these drives) a sharp preview of every photo on your computer. Changes you make are written to the files when the drive comes back.
 
 Choose how sharp those previews are in **Settings → General → Previews for offline viewing**: Normal (1600 px, about 0.3 MB a photo), High (2560 px, sharp full screen, about three times the space), or Off.
 
@@ -80,7 +80,7 @@ Select one photo, or several with `⌘`-click or `Shift`-click (`⌘A` selects a
 
 Ratings, labels, titles, captions, keywords, creator and copyright are written into the photo as standard metadata, so Lightroom, Bridge, Capture One, darktable and digiKam see them too. For RAW files they go into a small `.xmp` "sidecar" file next to the photo by default, so the RAW file itself is never changed (you can change this in **Settings → General → RAW files**).
 
-Groups are kept only in Lumio's catalogue.
+Groups are kept only in Frameloft's catalogue.
 
 ## 6. Organise files
 
@@ -93,7 +93,7 @@ Moving to or from a drive that isn't connected is allowed: the photos show in th
 
 ## 7. Location and the map
 
-Press `M` for the map. Drag photos from the filmstrip onto the map to give them a location, or select photos and click a spot. You can search for a place by name. Locations are written into the files. The map loads its background from OpenStreetMap; that's the only thing Lumio fetches from the internet unless you use the AI finder, sharing or SmugMug.
+Press `M` for the map. Drag photos from the filmstrip onto the map to give them a location, or select photos and click a spot. You can search for a place by name. Locations are written into the files. The map loads its background from OpenStreetMap; that's the only thing Frameloft fetches from the internet unless you use the AI finder, sharing or SmugMug.
 
 ## 8. Show and share
 
@@ -108,31 +108,33 @@ Videos appear next to your photos, with their length on the thumbnail. Open one 
 
 ## 10. Editing in another app
 
-Lumio doesn't edit pixels. Right-click a photo → **Open with** to open it in Photoshop, Affinity Photo, GIMP, Preview or any other app. When that app saves or exports into one of your library folders, Lumio notices and updates the thumbnail, or shows the new file.
+Frameloft doesn't edit pixels. Right-click a photo → **Open with** to open it in Photoshop, Affinity Photo, GIMP, Preview or any other app. When that app saves or exports into one of your library folders, Frameloft notices and updates the thumbnail, or shows the new file.
 
 ## 11. Where your data lives
 
-Lumio keeps a catalogue (`catalogue.sqlite`), thumbnails, previews and a log (`lumio.log`) in:
+Frameloft keeps a catalogue (`catalogue.sqlite`), thumbnails, previews and a log (`frameloft.log`) in:
 
 - macOS: `~/Library/Application Support/app.lumio.photos/`
 - Windows: `%APPDATA%\app.lumio.photos\`
 - Linux: `~/.local/share/app.lumio.photos/`
 
-Deleting that folder resets Lumio. Your photos, and everything written into them, stay. API keys and the SmugMug sign-in are kept in your system keychain, not in that folder.
+The folder keeps its name from when Frameloft was called Lumio, so existing libraries carry on after the update.
+
+Deleting that folder resets Frameloft. Your photos, and everything written into them, stay. API keys and the SmugMug sign-in are kept in your system keychain, not in that folder.
 
 ## 12. Updates
 
-Lumio tells you when a new version is out: a notice appears in the corner a few seconds after it opens. Click **See what's new** to read the release notes, then **Install and Restart** (or **Download**, which opens the release page so you can install the new version over the old one). Your library, settings and photos are kept. **Lumio → Check for Updates…** (on Windows and Linux, **Help → Check for Updates…**) checks straight away. To stop the automatic check, untick it in **Settings → General → Updates**.
+Frameloft tells you when a new version is out: a notice appears in the corner a few seconds after it opens. Click **See what's new** to read the release notes, then **Install and Restart** (or **Download**, which opens the release page so you can install the new version over the old one). Your library, settings and photos are kept. **Frameloft → Check for Updates…** (on Windows and Linux, **Help → Check for Updates…**) checks straight away. To stop the automatic check, untick it in **Settings → General → Updates**.
 
 ## 13. Troubleshooting
 
 | Problem | Try this |
 |---|---|
-| A folder is greyed out | The drive isn't connected or isn't answering. Connect it, or wait: Lumio checks again every minute and when the window comes to the front. |
-| Indexing stopped part-way | Usually the computer slept or the network drive dropped out. Lumio pauses and carries on when the drive answers again. If it seems stuck, quit and reopen Lumio. |
+| A folder is greyed out | The drive isn't connected or isn't answering. Connect it, or wait: Frameloft checks again every minute and when the window comes to the front. |
+| Indexing stopped part-way | Usually the computer slept or the network drive dropped out. Frameloft pauses and carries on when the drive answers again. If it seems stuck, quit and reopen Frameloft. |
 | A thumbnail looks wrong or old | Right-click → **Re-read metadata & thumbnail**. For a whole folder, right-click it → **Rescan folder**. |
-| A RAW file shows "file not readable" | Some older or unusual RAW files have no preview Lumio can read. Open it in your editor, or [open an issue](https://github.com/Light-Alley/Lumio/issues) with the camera model. |
-| Something else | Open an [issue](https://github.com/Light-Alley/Lumio/issues) and attach `lumio.log` from the folder above. Remove anything in it you'd rather not share. |
+| A RAW file shows "file not readable" | Some older or unusual RAW files have no preview Frameloft can read. Open it in your editor, or [open an issue](https://github.com/frameloft/Frameloft/issues) with the camera model. |
+| Something else | Open an [issue](https://github.com/frameloft/Frameloft/issues) and attach `frameloft.log` from the folder above. Remove anything in it you'd rather not share. |
 
 ## Keyboard shortcuts
 

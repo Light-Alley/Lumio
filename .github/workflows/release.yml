@@ -117,7 +117,7 @@ jobs:
           }
           echo "SIGNING_ARGS=" >> "$GITHUB_ENV"
           cfgs=()
-          # In-app updates (Lumio > Check for Updates… > Install and Restart). This key is
+          # In-app updates (Frameloft > Check for Updates… > Install and Restart). This key is
           # Tauri's own update-signing key, not an Apple or Windows certificate. Without it
           # the app still tells people about new versions and links to the download page.
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$LUMIO_UPDATER_PUBKEY" ]; then
@@ -136,7 +136,7 @@ jobs:
             cfgs+=("src-tauri/tauri.updater.json")
             echo "In-app updates: on (update files are signed with the updater key)."
           else
-            echo "::warning::In-app updates are off (TAURI_SIGNING_PRIVATE_KEY secret or LUMIO_UPDATER_PUBKEY variable not set). Lumio will still announce new versions. See docs/updates.md."
+            echo "::warning::In-app updates are off (TAURI_SIGNING_PRIVATE_KEY secret or LUMIO_UPDATER_PUBKEY variable not set). Frameloft will still announce new versions. See docs/updates.md."
           fi
           if [ "$RUNNER_OS" = "macOS" ]; then
             if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ]; then
@@ -210,7 +210,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || 'v__VERSION__' }}
-          releaseName: Lumio v__VERSION__
+          releaseName: Frameloft v__VERSION__
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
@@ -236,7 +236,7 @@ jobs:
           subject-path: ${{ steps.built.outputs.paths }}
 
   # Adds SHA256SUMS.txt and copies of the installers under names that never change,
-  # so https://github.com/Light-Alley/Lumio/releases/latest/download/<name> always
+  # so https://github.com/frameloft/Frameloft/releases/latest/download/<name> always
   # points at the newest version once the release is published.
   stable-names:
     name: Checksums and fixed-name copies
@@ -264,17 +264,17 @@ jobs:
           gh release download "$tag" --pattern '*'
           copy() { # pattern fixed-name
             local f
-            f=$(find . -maxdepth 1 -name "$1" ! -name 'Lumio-*-latest*' | head -n 1)
+            f=$(find . -maxdepth 1 -name "$1" ! -name 'Frameloft-*-latest*' | head -n 1)
             if [ -n "$f" ]; then cp "$f" "$2"; echo "$2 <- $f"; fi
           }
-          copy '*_aarch64.dmg' Lumio-macOS-AppleSilicon.dmg
-          copy '*_x64.dmg' Lumio-macOS-Intel.dmg
-          copy '*_x64-setup.exe' Lumio-Windows-x64-setup.exe
-          copy '*_x64_en-US.msi' Lumio-Windows-x64.msi
-          copy '*_amd64.AppImage' Lumio-Linux-x86_64.AppImage
-          copy '*_amd64.deb' Lumio-Linux-amd64.deb
-          copy '*.x86_64.rpm' Lumio-Linux-x86_64.rpm
+          copy '*_aarch64.dmg' Frameloft-macOS-AppleSilicon.dmg
+          copy '*_x64.dmg' Frameloft-macOS-Intel.dmg
+          copy '*_x64-setup.exe' Frameloft-Windows-x64-setup.exe
+          copy '*_x64_en-US.msi' Frameloft-Windows-x64.msi
+          copy '*_amd64.AppImage' Frameloft-Linux-x86_64.AppImage
+          copy '*_amd64.deb' Frameloft-Linux-amd64.deb
+          copy '*.x86_64.rpm' Frameloft-Linux-x86_64.rpm
           rm -f SHA256SUMS.txt
           find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' ! -name '*.sig' ! -name 'latest.json' -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          gh release upload "$tag" --clobber SHA256SUMS.txt Lumio-*
+          gh release upload "$tag" --clobber SHA256SUMS.txt Frameloft-*

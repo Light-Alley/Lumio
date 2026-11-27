@@ -2,7 +2,7 @@
 //!
 //! Thumbnails (480 px) are fine for the grid but look soft in the large view and the
 //! filmstrip, and when a drive is unplugged or a network drive is away they are all
-//! Lumio had. So for photos on drives that can disconnect, Lumio also keeps a larger
+//! Frameloft had. So for photos on drives that can disconnect, Frameloft also keeps a larger
 //! JPEG preview in its data folder. It is made while indexing (from the same decoded
 //! image as the thumbnail), and for photos indexed before this existed, a background
 //! pass fills them in a few at a time whenever the drive is connected.
@@ -310,6 +310,6 @@ mod tests {
 
     #[test]
     fn missing_folder_counts_as_removable() {
-        assert!(can_disconnect(Path::new("/definitely/not/here/lumio")));
+        assert!(can_disconnect(Path::new("/definitely/not/here/frameloft")));
     }
 }

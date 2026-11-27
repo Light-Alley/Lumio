@@ -77,9 +77,9 @@
   {#if unsupported}
     {#if p.thumb}<img class="poster" src={thumbUrl(p)} alt="" draggable="false" />{/if}
     <div class="nope">
-      <strong>Lumio can't play this {ext} video on this computer.</strong>
+      <strong>Frameloft can't play this {ext} video on this computer.</strong>
       <span>Open it in your usual video player instead.</span>
-      {#if isLinux}<span class="hint">On Linux, installing the GStreamer plugins (gst-plugins-good, gst-plugins-bad and gst-libav) lets Lumio play many more formats.</span>{/if}
+      {#if isLinux}<span class="hint">On Linux, installing the GStreamer plugins (gst-plugins-good, gst-plugins-bad and gst-libav) lets Frameloft play many more formats.</span>{/if}
       <button onclick={() => api.openDefault([p.id])}><ExternalLink size={14} /> Open in video player</button>
     </div>
   {:else}

@@ -154,7 +154,7 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
         ("keyword", "any") => "ifnull(keywords,'') <> ''".into(),
         ("keyword", "none") => "ifnull(keywords,'') = ''".into(),
 
-        // Any text Lumio knows about the photo.
+        // Any text Frameloft knows about the photo.
         ("text", "contains") | ("text", "not_contains") => {
             let a = arg(args, like(v));
             let hit = format!(
@@ -202,7 +202,7 @@ pub fn rule_sql(r: &Rule, args: &mut Vec<Value>) -> Result<Option<String>> {
         }
         ("taken", "none") => "taken_at IS NULL".into(),
 
-        // When Lumio first saw it.
+        // When Frameloft first saw it.
         ("added", "last_days") => {
             let cutoff = crate::db::now_ms().saturating_sub(days(v)? * 24 * 3600 * 1000);
             format!("indexed_at >= {}", arg(args, cutoff.into()))
@@ -281,7 +281,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Collection>> {
     let mut out = vec![];
     for (id, name, json) in rows {
         let rules: RuleSet = serde_json::from_str(&json).unwrap_or_default();
-        // A rule Lumio can't read (say, from a newer version) shows as empty, not as an error.
+        // A rule Frameloft can't read (say, from a newer version) shows as empty, not as an error.
         let count = count(conn, &rules).unwrap_or(0);
         out.push(Collection { id, name, rules, count });
     }

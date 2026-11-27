@@ -28,7 +28,7 @@ A collection matches photos that meet **all** of its rules, or **any** of them.
 | File name | contains, starts with, doesn't contain |
 | Location | is on the map, is missing; Place name contains |
 | Shape | landscape, portrait, square (as the photo is shown, after rotation) |
-| Added to Lumio | in the last N days |
+| Added to Frameloft | in the last N days |
 | ISO, focal length, aperture | at least, at most |
 
 Rules that are still empty (no value typed yet) are left out, and a collection with no
@@ -47,7 +47,7 @@ Collections live in the catalogue's `collections` table as JSON:
 
 `src-tauri/src/collections.rs` turns each rule into an SQL condition (`rule_sql`) with
 its values passed as parameters, never pasted into the SQL. Unknown rules are refused
-when saving, and read as "no match" if a newer version of Lumio wrote one.
+when saving, and read as "no match" if a newer version of Frameloft wrote one.
 
 ### Adding a rule
 

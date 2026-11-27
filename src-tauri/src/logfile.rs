@@ -1,5 +1,5 @@
 //! A small file logger, so there is a record of why a file could not be indexed.
-//! Writes to `lumio.log` in the app's data folder and keeps one older copy.
+//! Writes to `frameloft.log` in the app's data folder and keeps one older copy.
 
 use parking_lot::Mutex;
 use std::fs::{File, OpenOptions};
@@ -26,7 +26,7 @@ impl FileLog {
 
 impl log::Log for FileLog {
     fn enabled(&self, m: &log::Metadata) -> bool {
-        m.level() <= log::Level::Info && m.target().starts_with("lumio")
+        m.level() <= log::Level::Info && m.target().starts_with("frameloft")
     }
 
     fn log(&self, r: &log::Record) {
@@ -75,11 +75,11 @@ mod tests {
     }
 
     #[test]
-    fn writes_only_lumios_lines_and_keeps_them_private() {
+    fn writes_only_framelofts_lines_and_keeps_them_private() {
         let d = tempfile::tempdir().unwrap();
-        let path = d.path().join("lumio.log");
+        let path = d.path().join("frameloft.log");
         let log = FileLog { path: path.clone(), file: Mutex::new(None) };
-        record(&log, "lumio_lib::indexer", "indexed 3 files");
+        record(&log, "frameloft_lib::indexer", "indexed 3 files");
         record(&log, "hyper::client", "noise from a library");
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("indexed 3 files"));
@@ -94,11 +94,11 @@ mod tests {
     #[test]
     fn a_full_log_starts_again_and_keeps_one_old_copy() {
         let d = tempfile::tempdir().unwrap();
-        let path = d.path().join("lumio.log");
+        let path = d.path().join("frameloft.log");
         std::fs::write(&path, vec![b'x'; (MAX_BYTES + 10) as usize]).unwrap();
         let log = FileLog { path: path.clone(), file: Mutex::new(None) };
-        record(&log, "lumio", "first");
-        record(&log, "lumio", "second");
+        record(&log, "frameloft", "first");
+        record(&log, "frameloft", "second");
         assert!(std::fs::metadata(&path).unwrap().len() < 1000);
         assert!(path.with_extension("log.1").exists());
     }
