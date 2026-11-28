@@ -4,6 +4,18 @@ New versions are listed here automatically from the commit messages (see
 [CONTRIBUTING.md](CONTRIBUTING.md)). Versions before 2.0.0 are described on the
 [Releases page](https://github.com/Light-Alley/Lumio/releases).
 
+## [2.1.0](https://github.com/frameloft/Frameloft/compare/v2.0.0...v2.1.0) (2026-11-27)
+
+
+### Features
+
+* rename Lumio to Frameloft ([82c3ef8](https://github.com/frameloft/Frameloft/commit/82c3ef8c29f6839bfaeb655a7d86d2577597b656))
+
+
+### Bug Fixes
+
+* **deps:** update cookie to 0.18.3 (RUSTSEC-2026-0594) ([9efc9f0](https://github.com/frameloft/Frameloft/commit/9efc9f0cfe10acff39e7612c95e18de1082997bd))
+
 ## [2.0.0](https://github.com/Light-Alley/Lumio/compare/v1.0.1...v2.0.0) (2026-11-22)
 
 A safety and reliability release, following a full review of Lumio's code.
